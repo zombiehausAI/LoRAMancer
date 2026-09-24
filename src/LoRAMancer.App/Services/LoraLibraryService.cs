@@ -14,6 +14,7 @@ public sealed class LoraLibraryService {
     private readonly List<LoraMetadata> _items = new();
     private readonly object _lock = new();
     private CancellationTokenSource? _scanCts;
+    private CancellationTokenSource? _enrichCts;
 
     public string RootFolder { get; private set; } = string.Empty;
     public string CurrentFolder { get; set; } = string.Empty;
@@ -21,6 +22,11 @@ public sealed class LoraLibraryService {
     public int ScannedCount { get; private set; }
     public int TotalFiles { get; private set; }
     public string CurrentScanningFile { get; private set; } = string.Empty;
+
+    public bool IsEnriching { get; private set; }
+    public int EnrichCompleted { get; private set; }
+    public int EnrichTotal { get; private set; }
+    public string CurrentEnrichingFile { get; private set; } = string.Empty;
 
     public IReadOnlyList<LoraMetadata> Items {
         get {
@@ -33,6 +39,8 @@ public sealed class LoraLibraryService {
     public event Action? OnLibraryUpdated;
     public event Action<string, int, int>? OnScanProgress;
     public event Action<bool>? OnScanStateChanged;
+    public event Action<bool>? OnEnrichStateChanged;
+    public event Action<string, int, int>? OnEnrichProgress;
     public event Action<LoraMetadata>? OnLoraEnriched;
 
     public LoraLibraryService(
@@ -49,7 +57,11 @@ public sealed class LoraLibraryService {
         _httpClient = httpClient ?? new HttpClient();
 
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        _cacheDirectory = Path.Combine(userProfile, ".loramancer", "lora_cache");
+        string primaryCacheDir = Path.Combine(userProfile, ".LoRAMancer", "lora_cache");
+        string legacyCacheDir = Path.Combine(userProfile, ".loramancer", "lora_cache");
+        _cacheDirectory = Directory.Exists(primaryCacheDir) || !Directory.Exists(legacyCacheDir)
+            ? primaryCacheDir
+            : legacyCacheDir;
         Directory.CreateDirectory(_cacheDirectory);
 
         // Restore previously selected folder paths across sessions
@@ -256,6 +268,77 @@ public sealed class LoraLibraryService {
 
     public void CancelScan() {
         _scanCts?.Cancel();
+    }
+
+    public void StartBackgroundEnrichment(IEnumerable<LoraMetadata>? targetItems = null, bool overwriteExisting = false) {
+        if (IsEnriching) {
+            return;
+        }
+
+        List<LoraMetadata> queue;
+        lock (_lock) {
+            var source = targetItems ?? _items;
+            queue = source
+                .Where(x => overwriteExisting || x.CivitaiInfo == null)
+                .ToList();
+        }
+
+        if (queue.Count == 0) {
+            return;
+        }
+
+        _enrichCts?.Cancel();
+        _enrichCts?.Dispose();
+        _enrichCts = new CancellationTokenSource();
+        CancellationToken token = _enrichCts.Token;
+
+        IsEnriching = true;
+        EnrichTotal = queue.Count;
+        EnrichCompleted = 0;
+        CurrentEnrichingFile = queue[0].FileName;
+        OnEnrichStateChanged?.Invoke(true);
+
+        _ = Task.Run(async () => {
+            try {
+                for (int i = 0; i < queue.Count; i++) {
+                    if (token.IsCancellationRequested) {
+                        break;
+                    }
+
+                    var lora = queue[i];
+                    CurrentEnrichingFile = lora.FileName;
+                    OnEnrichProgress?.Invoke(lora.FileName, EnrichCompleted, EnrichTotal);
+
+                    try {
+                        await EnrichFromCivitaiAsync(lora, token);
+                    } catch {
+                        // Suppress per-file Civitai lookup errors so the queue continues
+                    }
+
+                    EnrichCompleted = i + 1;
+                    OnEnrichProgress?.Invoke(lora.FileName, EnrichCompleted, EnrichTotal);
+
+                    // Respect rate limiting: short pause between requests
+                    try {
+                        await Task.Delay(200, token);
+                    } catch (OperationCanceledException) {
+                        break;
+                    }
+                }
+            } catch (OperationCanceledException) {
+                // Background enrichment stopped by user
+            } catch {
+                // Suppress background errors
+            } finally {
+                IsEnriching = false;
+                OnEnrichStateChanged?.Invoke(false);
+                OnLibraryUpdated?.Invoke();
+            }
+        }, token);
+    }
+
+    public void CancelEnrichment() {
+        _enrichCts?.Cancel();
     }
 
     public async Task<int> ScanDirectoryStreamAsync(
