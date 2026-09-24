@@ -1,6 +1,7 @@
 using LoRAMancer.App.Engines;
 using LoRAMancer.App.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.LifecycleEvents;
 using MudBlazor.Services;
 
 namespace LoRAMancer.App;
@@ -14,6 +15,17 @@ public static class MauiProgram {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
             });
 
+#if WINDOWS
+        builder.ConfigureLifecycleEvents(events => {
+            events.AddWindows(windows => {
+                windows.OnWindowCreated(window => {
+                    var trayService = IPlatformApplication.Current?.Services.GetService<SystemTrayService>();
+                    trayService?.Initialize(window);
+                });
+            });
+        });
+#endif
+
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddMudServices();
 
@@ -21,6 +33,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<ProcessRunner>();
         builder.Services.AddSingleton<ModelArchitectureRegistry>();
         builder.Services.AddSingleton<SettingsService>();
+        builder.Services.AddSingleton<AuthTokenManagerService>();
         builder.Services.AddSingleton<AiToolkitSetupService>();
         builder.Services.AddSingleton<CivitaiService>();
         builder.Services.AddSingleton<HuggingFaceService>();
@@ -39,6 +52,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<LoraHistoryService>();
         builder.Services.AddSingleton<LoraLibraryService>();
         builder.Services.AddSingleton<LoraUpdaterService>();
+        builder.Services.AddSingleton<SystemTrayService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

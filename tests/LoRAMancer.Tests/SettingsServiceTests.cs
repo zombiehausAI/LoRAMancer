@@ -143,5 +143,29 @@ public sealed class SettingsServiceTests {
             }
         }
     }
+
+    [Fact]
+    public async Task SaveAndLoadSettingsAsync_PersistsMinimizeToTrayOnClose() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"tray_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService service = new(null, tempFile);
+            Assert.True(service.Current.MinimizeToTrayOnClose);
+
+            AppSettings updated = new() {
+                MinimizeToTrayOnClose = false
+            };
+            await service.SaveSettingsAsync(updated);
+
+            SettingsService reloaded = new(null, tempFile);
+            AppSettings loaded = reloaded.LoadSettings();
+
+            Assert.False(loaded.MinimizeToTrayOnClose);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }
 

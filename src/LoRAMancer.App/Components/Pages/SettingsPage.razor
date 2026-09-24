@@ -1,4 +1,5 @@
 @page "/settings"
+@implements IDisposable
 @inject SettingsService Settings
 @inject HuggingFaceService HfService
 @inject AiToolkitSetupService ToolkitSetup
@@ -6,6 +7,7 @@
 @inject NetworkServerService NetworkServer
 @inject PublicTunnelService PublicTunnel
 @inject RemoteTrainingClientService RemoteClient
+@inject AuthTokenManagerService TokenManager
 @inject ISnackbar Snackbar
 
 <div class="d-flex align-center justify-space-between mb-4">
@@ -420,7 +422,200 @@
                 <MudItem xs="12">
                     <MudSwitch @bind-Value="_settings.AutoCheckUpdatesOnStartup" Label="Check for updates automatically on application startup" Color="Color.Primary" />
                 </MudItem>
+
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="_settings.MinimizeToTrayOnClose" Label="Run in system tray on close (keep application active in background notification area)" Color="Color.Primary" />
+                </MudItem>
             </MudGrid>
+        </div>
+    </MudTabPanel>
+
+    <!-- Auth Token Manager Tab -->
+    <MudTabPanel Text="Auth Tokens" Icon="@Icons.Material.Filled.VpnKey">
+        <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.08); border-color: #313244; color: #cdd6f4;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600; color: #cba6f7;">Core Authentication & API Token Manager</MudText>
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8;">
+                            Issue and manage access tokens for remote web clients, background workers, and automation scripts. Tokens are always visible in plain text to administrators.
+                        </MudText>
+                    </div>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreateTokenCard">
+                        Issue New Token
+                    </MudButton>
+                </div>
+            </MudAlert>
+
+            <!-- Stats Bar -->
+            <MudGrid Class="mb-4">
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Class="pa-3 text-center" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Total Tokens</MudText>
+                        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">@_tokenList.Count</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Class="pa-3 text-center" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Active Tokens</MudText>
+                        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #a6e3a1;">@_tokenList.Count(t => t.IsActive)</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Class="pa-3 text-center" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Blocked Tokens</MudText>
+                        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #f38ba8;">@_tokenList.Count(t => t.IsBlocked)</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudPaper Elevation="0" Class="pa-3 text-center" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Total Auth Events</MudText>
+                        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #89b4fa;">@_tokenList.Sum(t => t.UsageCount)</MudText>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            @if (_showCreateTokenCard) {
+                <MudCard Elevation="2" Class="mb-4 pa-4" Style="background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between mb-3">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #cba6f7;">
+                            <MudIcon Icon="@Icons.Material.Filled.Key" Size="Size.Small" Class="mr-1" />
+                            Create Authentication Token
+                        </MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Inherit" OnClick="@(() => _showCreateTokenCard = false)" />
+                    </div>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudTextField @bind-Value="_newTokenName" Label="Client / Assignee Name *" Variant="Variant.Outlined" Placeholder="e.g. Remote Laptop, Alice, Automated Pipeline" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudSelect @bind-Value="_newTokenRole" Label="Role / Permissions" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("Admin")">Admin (Full Control)</MudSelectItem>
+                                <MudSelectItem Value="@("Trainer")">Trainer (Jobs & Datasets)</MudSelectItem>
+                                <MudSelectItem Value="@("ReadOnly")">ReadOnly (Monitor Only)</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudSelect @bind-Value="_newTokenExpiryPreset" Label="Expiration" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("never")">Never Expires</MudSelectItem>
+                                <MudSelectItem Value="@("7days")">7 Days</MudSelectItem>
+                                <MudSelectItem Value="@("30days")">30 Days</MudSelectItem>
+                                <MudSelectItem Value="@("90days")">90 Days</MudSelectItem>
+                                <MudSelectItem Value="@("1year")">1 Year</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+
+                        <MudItem xs="12" md="8">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_newTokenSecret" Label="Token Secret (Leave empty to auto-generate secure lrm_...)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Style="font-family: 'JetBrains Mono', monospace;" />
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="GenerateTokenValue">
+                                    Generate
+                                </MudButton>
+                            </div>
+                        </MudItem>
+
+                        <MudItem xs="12" md="4">
+                            <MudTextField @bind-Value="_newTokenDescription" Label="Notes / Description" Variant="Variant.Outlined" Placeholder="Optional context or deployment notes" Margin="Margin.Dense" />
+                        </MudItem>
+
+                        <MudItem xs="12" Class="d-flex justify-end gap-2 mt-2">
+                            <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="@(() => _showCreateTokenCard = false)">Cancel</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Check" OnClick="ConfirmCreateToken">
+                                Create & Save Token
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
+                </MudCard>
+            }
+
+            <!-- Tokens Filter & Search -->
+            <div class="d-flex align-center justify-space-between gap-3 mb-3 flex-wrap">
+                <MudTextField @bind-Value="_tokenSearchQuery" Placeholder="Search tokens by name, secret, or role..." Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width: 400px;" />
+                <div class="d-flex gap-2">
+                    <MudChip T="string" Color="@(_statusFilter == "all" ? Color.Primary : Color.Dark)" Variant="@(_statusFilter == "all" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="@(() => _statusFilter = "all")">All</MudChip>
+                    <MudChip T="string" Color="@(_statusFilter == "active" ? Color.Success : Color.Dark)" Variant="@(_statusFilter == "active" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="@(() => _statusFilter = "active")">Active</MudChip>
+                    <MudChip T="string" Color="@(_statusFilter == "blocked" ? Color.Error : Color.Dark)" Variant="@(_statusFilter == "blocked" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" OnClick="@(() => _statusFilter = "blocked")">Blocked</MudChip>
+                </div>
+            </div>
+
+            <!-- Token History Table -->
+            <MudTable Items="@FilteredTokens" Dense="true" Hover="true" Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <HeaderContent>
+                    <MudTh>Auth Token (Plain Text)</MudTh>
+                    <MudTh>Client / Name</MudTh>
+                    <MudTh>Role</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Created</MudTh>
+                    <MudTh>Last Used</MudTh>
+                    <MudTh>Usage</MudTh>
+                    <MudTh Style="text-align: right;">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Auth Token">
+                        <div class="d-flex align-center gap-1">
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #89b4fa; background-color: #181825; padding: 3px 8px; border-radius: 4px; border: 1px solid #313244; word-break: break-all;">
+                                @context.Token
+                            </span>
+                            <MudTooltip Text="Copy auth token to clipboard">
+                                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Inherit" OnClick="@(() => CopyTokenAsync(context.Token))" />
+                            </MudTooltip>
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Name">
+                        <div style="font-weight: 600; color: #cdd6f4;">@context.Name</div>
+                        @if (!string.IsNullOrWhiteSpace(context.Description)) {
+                            <div style="font-size: 0.75rem; color: #a6adc8;">@context.Description</div>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Role">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(context.Role == "Admin" ? Color.Primary : context.Role == "Trainer" ? Color.Secondary : Color.Dark)">
+                            @context.Role
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Status">
+                        @if (context.IsBlocked) {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">Blocked</MudChip>
+                        } else if (context.IsExpired) {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">Expired</MudChip>
+                        } else {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Active</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Created">
+                        <div style="font-size: 0.8rem; color: #a6adc8;">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</div>
+                    </MudTd>
+                    <MudTd DataLabel="Last Used">
+                        <div style="font-size: 0.8rem; color: #a6adc8;">@(context.LastUsedAt?.ToString("yyyy-MM-dd HH:mm") ?? "Never")</div>
+                    </MudTd>
+                    <MudTd DataLabel="Usage">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info">
+                            @context.UsageCount hits
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Actions" Style="text-align: right;">
+                        <div class="d-flex justify-end gap-1">
+                            @if (context.IsBlocked) {
+                                <MudTooltip Text="Unblock Token (Allow Access)">
+                                    <MudIconButton Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" OnClick="@(() => UnblockToken(context))" />
+                                </MudTooltip>
+                            } else {
+                                <MudTooltip Text="Block Token (Revoke Access)">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Block" Color="Color.Warning" Size="Size.Small" OnClick="@(() => BlockToken(context))" />
+                                </MudTooltip>
+                            }
+                            <MudTooltip Text="Delete Token Permanently">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeleteToken(context))" />
+                            </MudTooltip>
+                        </div>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="pa-4 text-center text-secondary">
+                        No authentication tokens found. Click "Issue New Token" to create one.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
         </div>
     </MudTabPanel>
 </MudTabs>
@@ -439,11 +634,121 @@
     private bool _hfTokenValid;
     private string _hfValidationMessage = string.Empty;
 
+    // Auth Token Management State
+    private List<AuthToken> _tokenList = new();
+    private bool _showCreateTokenCard;
+    private string _newTokenName = string.Empty;
+    private string _newTokenRole = "Admin";
+    private string _newTokenExpiryPreset = "never";
+    private string _newTokenSecret = string.Empty;
+    private string _newTokenDescription = string.Empty;
+    private string _tokenSearchQuery = string.Empty;
+    private string _statusFilter = "all";
+
+    private IEnumerable<AuthToken> FilteredTokens => _tokenList.Where(t => {
+        if (_statusFilter == "active" && !t.IsActive) {
+            return false;
+        }
+        if (_statusFilter == "blocked" && !t.IsBlocked) {
+            return false;
+        }
+        if (!string.IsNullOrWhiteSpace(_tokenSearchQuery)) {
+            string q = _tokenSearchQuery.Trim();
+            return t.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                   t.Token.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                   t.Role.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                   t.Description.Contains(q, StringComparison.OrdinalIgnoreCase);
+        }
+        return true;
+    });
+
     protected override async Task OnInitializedAsync() {
         _settings = Settings.Current;
         if (ToolkitSetup.IsInstalled()) {
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
         }
+
+        LoadTokensFromService();
+        TokenManager.OnTokensChanged += OnTokensChangedHandler;
+    }
+
+    public void Dispose() {
+        TokenManager.OnTokensChanged -= OnTokensChangedHandler;
+    }
+
+    private void OnTokensChangedHandler() {
+        _ = InvokeAsync(() => {
+            LoadTokensFromService();
+            StateHasChanged();
+        });
+    }
+
+    private void LoadTokensFromService() {
+        _tokenList = TokenManager.GetAllTokens().ToList();
+    }
+
+    private void OpenCreateTokenCard() {
+        _showCreateTokenCard = true;
+        _newTokenSecret = AuthTokenManagerService.GenerateSecureToken();
+        _newTokenName = string.Empty;
+        _newTokenDescription = string.Empty;
+        _newTokenRole = "Admin";
+        _newTokenExpiryPreset = "never";
+    }
+
+    private void GenerateTokenValue() {
+        _newTokenSecret = AuthTokenManagerService.GenerateSecureToken();
+    }
+
+    private void ConfirmCreateToken() {
+        if (string.IsNullOrWhiteSpace(_newTokenName)) {
+            Snackbar.Add("Please enter a client or assignee name for this token.", Severity.Warning);
+            return;
+        }
+
+        DateTimeOffset? expiresAt = _newTokenExpiryPreset switch {
+            "7days" => DateTimeOffset.UtcNow.AddDays(7),
+            "30days" => DateTimeOffset.UtcNow.AddDays(30),
+            "90days" => DateTimeOffset.UtcNow.AddDays(90),
+            "1year" => DateTimeOffset.UtcNow.AddYears(1),
+            _ => null
+        };
+
+        try {
+            TokenManager.CreateToken(
+                _newTokenName,
+                string.IsNullOrWhiteSpace(_newTokenSecret) ? null : _newTokenSecret,
+                _newTokenRole,
+                _newTokenDescription,
+                expiresAt
+            );
+            _showCreateTokenCard = false;
+            Snackbar.Add($"Auth token '{_newTokenName}' created successfully!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to create token: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task CopyTokenAsync(string token) {
+        if (!string.IsNullOrWhiteSpace(token)) {
+            await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(token);
+            Snackbar.Add("Auth token copied to clipboard!", Severity.Success);
+        }
+    }
+
+    private void BlockToken(AuthToken token) {
+        TokenManager.BlockToken(token.Id);
+        Snackbar.Add($"Token '{token.Name}' has been blocked.", Severity.Warning);
+    }
+
+    private void UnblockToken(AuthToken token) {
+        TokenManager.UnblockToken(token.Id);
+        Snackbar.Add($"Token '{token.Name}' has been unblocked.", Severity.Success);
+    }
+
+    private void DeleteToken(AuthToken token) {
+        TokenManager.DeleteToken(token.Id);
+        Snackbar.Add($"Token '{token.Name}' has been removed.", Severity.Info);
     }
 
     private void AutoGenerateUrls() {

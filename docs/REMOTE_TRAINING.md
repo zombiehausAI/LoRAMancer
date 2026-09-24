@@ -120,3 +120,24 @@ The embedded Kestrel server exposes the following endpoints (all protected by Au
 | `/api/v1/training/start` | `POST` | Dispatches and initiates a training job with config YAML |
 | `/api/v1/training/stop` | `POST` | Sends a cancellation signal to the active training runner |
 | `/api/v1/training/stream` | `GET` | Server-Sent Events (SSE) streaming live step telemetry, loss metrics, and logs |
+| `/api/v1/tokens` | `GET` | List all auth tokens with status, role, usage, and plain-text secret |
+| `/api/v1/tokens` | `POST` | Create a new auth token with custom or auto-generated `lrm_...` secret |
+| `/api/v1/tokens/{id}/block` | `POST` | Immediately block an auth token, revoking server access |
+| `/api/v1/tokens/{id}/unblock` | `POST` | Unblock a previously revoked auth token |
+| `/api/v1/tokens/{id}` | `DELETE` | Permanently remove an auth token from the system |
+
+---
+
+## 7. Core Auth Token Manager
+
+LoRAMancer includes a built-in Core Auth Token Manager (`AuthTokenManagerService`) accessible under **Settings → Auth Tokens**:
+- **Plain-Text Visibility for Administrators**: Auth token secrets remain visible in plain text with one-click clipboard copying. No hiding with asterisks or irreversible redaction.
+- **Role-Based Access Control**:
+  - `Admin`: Full server control, token management, and configuration access.
+  - `Trainer`: Start/stop training runs, upload datasets, and stream logs.
+  - `ReadOnly`: Monitor live training loss and inspect telemetry without mutation permissions.
+- **Lifecycle & Auditing**:
+  - **Instant Revocation**: Block compromised or temporary tokens with 1 click without deleting their audit record.
+  - **Usage Telemetry**: Tracks creation timestamps, expiration dates, last used timestamp, and total authentication hits.
+  - **Cryptographic Generation**: Issues cryptographically secure `lrm_<48-hex>` tokens or accepts custom strings.
+

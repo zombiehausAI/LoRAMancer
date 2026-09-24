@@ -118,6 +118,7 @@ if ($CreateDesktopShortcut) {
     $shortcut = $wshShell.CreateShortcut($shortcutPath)
     $shortcut.TargetPath = $targetExe
     $shortcut.WorkingDirectory = $binPath
+    $shortcut.IconLocation = "$targetExe,0"
     $shortcut.Description = "LoRAMancer - LoRA Manager & Training Orchestrator"
     $shortcut.Save()
     Write-Host "  > Shortcut created at: $shortcutPath" -ForegroundColor Green

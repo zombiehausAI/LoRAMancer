@@ -19,6 +19,7 @@ public sealed class AppSettings {
     public string UpdateManifestUrl { get; set; } = "https://raw.githubusercontent.com/loramancer/loramancer/main/installer/version.json";
     public bool AutoCheckUpdatesOnStartup { get; set; } = true;
     public bool EnableDarkTheme { get; set; } = true;
+    public bool MinimizeToTrayOnClose { get; set; } = true;
 
     // AI-Toolkit & Training Environment
     public string AiToolkitRepoUrl { get; set; } = "https://github.com/ostris/ai-toolkit.git";

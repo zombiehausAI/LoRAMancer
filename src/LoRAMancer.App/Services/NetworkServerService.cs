@@ -14,12 +14,21 @@ public sealed class AuthLoginDto {
     public string? PinOrToken { get; set; }
 }
 
+public sealed class CreateTokenDto {
+    public string Name { get; set; } = string.Empty;
+    public string? CustomToken { get; set; }
+    public string? Role { get; set; }
+    public string? Description { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
 public sealed class NetworkServerService : IAsyncDisposable {
     private readonly SettingsService _settingsService;
     private readonly TrainingRunnerService _trainingRunner;
     private readonly DatasetInspectorService _datasetInspector;
     private readonly AmdVenvProvisioner _venvProvisioner;
     private readonly PublicTunnelService? _publicTunnelService;
+    private readonly AuthTokenManagerService? _authTokenManager;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -37,13 +46,15 @@ public sealed class NetworkServerService : IAsyncDisposable {
         TrainingRunnerService trainingRunner,
         DatasetInspectorService datasetInspector,
         AmdVenvProvisioner venvProvisioner,
-        PublicTunnelService? publicTunnelService = null
+        PublicTunnelService? publicTunnelService = null,
+        AuthTokenManagerService? authTokenManager = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
         _datasetInspector = datasetInspector;
         _venvProvisioner = venvProvisioner;
         _publicTunnelService = publicTunnelService;
+        _authTokenManager = authTokenManager;
 
         _trainingRunner.OnProgressUpdated += HandleProgressUpdated;
         _trainingRunner.OnLogReceived += HandleLogReceived;
@@ -165,14 +176,30 @@ public sealed class NetworkServerService : IAsyncDisposable {
             string expectedToken = !string.IsNullOrWhiteSpace(accessToken) ? accessToken : _settingsService.Current.ServerAccessToken;
             bool requireAuth = _settingsService.Current.RequireAuthForWebAccess || !string.IsNullOrWhiteSpace(expectedToken);
 
-            if (!requireAuth || string.Equals(loginDto.PinOrToken?.Trim(), expectedToken?.Trim(), StringComparison.Ordinal)) {
-                request.HttpContext.Response.Cookies.Append("loramancer_auth", expectedToken ?? "authorized", new CookieOptions {
+            string inputToken = loginDto.PinOrToken?.Trim() ?? string.Empty;
+            bool isAuthorized = false;
+            string effectiveToken = "authorized";
+
+            if (!requireAuth) {
+                isAuthorized = true;
+            } else if (!string.IsNullOrWhiteSpace(inputToken)) {
+                if (_authTokenManager != null && _authTokenManager.ValidateToken(inputToken, out var matched)) {
+                    isAuthorized = true;
+                    effectiveToken = matched!.Token;
+                } else if (!string.IsNullOrWhiteSpace(expectedToken) && string.Equals(inputToken, expectedToken.Trim(), StringComparison.Ordinal)) {
+                    isAuthorized = true;
+                    effectiveToken = expectedToken;
+                }
+            }
+
+            if (isAuthorized) {
+                request.HttpContext.Response.Cookies.Append("loramancer_auth", effectiveToken, new CookieOptions {
                     HttpOnly = true,
                     SameSite = SameSiteMode.Lax,
                     Secure = request.IsHttps,
                     Expires = DateTimeOffset.UtcNow.AddDays(30)
                 });
-                return Results.Ok(new { success = true, token = expectedToken ?? "authorized" });
+                return Results.Ok(new { success = true, token = effectiveToken });
             }
 
             return Results.Unauthorized();
@@ -317,6 +344,56 @@ public sealed class NetworkServerService : IAsyncDisposable {
             await context.Response.WriteAsync(GetEmbeddedWebInterfaceHtml());
         });
 
+        // Token Management API (Protected)
+        app.MapGet("/api/v1/tokens", (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+            if (_authTokenManager == null) {
+                return Results.Ok(Array.Empty<AuthToken>());
+            }
+            return Results.Json(_authTokenManager.GetAllTokens());
+        });
+
+        app.MapPost("/api/v1/tokens", (HttpContext context, CreateTokenDto dto) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+            if (_authTokenManager == null) {
+                return Results.BadRequest("AuthTokenManagerService is not available.");
+            }
+            try {
+                var created = _authTokenManager.CreateToken(dto.Name, dto.CustomToken, dto.Role ?? "Admin", dto.Description ?? string.Empty, dto.ExpiresAt);
+                return Results.Ok(created);
+            } catch (Exception ex) {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        app.MapPost("/api/v1/tokens/{id}/block", (HttpContext context, string id) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+            bool success = _authTokenManager?.BlockToken(id) ?? false;
+            return success ? Results.Ok(new { success = true }) : Results.NotFound();
+        });
+
+        app.MapPost("/api/v1/tokens/{id}/unblock", (HttpContext context, string id) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+            bool success = _authTokenManager?.UnblockToken(id) ?? false;
+            return success ? Results.Ok(new { success = true }) : Results.NotFound();
+        });
+
+        app.MapDelete("/api/v1/tokens/{id}", (HttpContext context, string id) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+            bool success = _authTokenManager?.DeleteToken(id) ?? false;
+            return success ? Results.Ok(new { success = true }) : Results.NotFound();
+        });
+
         _webApp = app;
         await _webApp.StartAsync(_serverCts.Token);
 
@@ -372,21 +449,18 @@ public sealed class NetworkServerService : IAsyncDisposable {
             return true;
         }
 
-        if (string.IsNullOrWhiteSpace(effectiveToken)) {
-            return false;
-        }
-
         string authHeader = context.Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) {
             string token = authHeader["Bearer ".Length..].Trim();
-            if (string.Equals(token, effectiveToken, StringComparison.Ordinal)) {
+            if (CheckTokenValid(token, effectiveToken)) {
                 return true;
             }
         }
 
         if (context.Request.Query.TryGetValue("token", out var queryToken)) {
-            if (string.Equals(queryToken.ToString(), effectiveToken, StringComparison.Ordinal)) {
-                context.Response.Cookies.Append("loramancer_auth", effectiveToken, new CookieOptions {
+            string token = queryToken.ToString().Trim();
+            if (CheckTokenValid(token, effectiveToken)) {
+                context.Response.Cookies.Append("loramancer_auth", token, new CookieOptions {
                     HttpOnly = true,
                     SameSite = SameSiteMode.Lax,
                     Secure = context.Request.IsHttps,
@@ -397,9 +471,26 @@ public sealed class NetworkServerService : IAsyncDisposable {
         }
 
         if (context.Request.Cookies.TryGetValue("loramancer_auth", out var cookieToken)) {
-            if (string.Equals(cookieToken, effectiveToken, StringComparison.Ordinal)) {
+            string token = cookieToken.Trim();
+            if (CheckTokenValid(token, effectiveToken)) {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    private bool CheckTokenValid(string token, string? expectedFallbackToken) {
+        if (string.IsNullOrWhiteSpace(token)) {
+            return false;
+        }
+
+        if (_authTokenManager != null && _authTokenManager.ValidateToken(token, out _)) {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(expectedFallbackToken) && string.Equals(token, expectedFallbackToken.Trim(), StringComparison.Ordinal)) {
+            return true;
         }
 
         return false;
