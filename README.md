@@ -53,3 +53,8 @@ pwsh -File .\Build-And-Package.ps1
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+*Assisted by AI, for AI.*
+
