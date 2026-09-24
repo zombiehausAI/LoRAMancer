@@ -4,6 +4,8 @@
 @inject AiToolkitSetupService ToolkitSetup
 @inject NavigationManager NavManager
 @inject IDialogService DialogService
+@inject SettingsService Settings
+@inject RemoteTrainingClientService RemoteClient
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -30,6 +32,19 @@
         </MudButton>
     </div>
 </div>
+
+@if (Settings.Current.ClientRemoteMode) {
+    <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(137, 180, 250, 0.15); color: #89b4fa;">
+        <div class="d-flex align-center justify-space-between w-100">
+            <div>
+                <b>Remote Engine Mode Active:</b> Training commands and telemetry stream directly to/from AI PC at <code>@Settings.Current.ClientRemoteHostUrl</code>.
+            </div>
+            <MudButton Variant="Variant.Outlined" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => NavManager.NavigateTo("/settings"))">
+                Settings
+            </MudButton>
+        </div>
+    </MudAlert>
+}
 
 @if (!ToolkitSetup.IsInstalled()) {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-4" Dense="false">
@@ -192,6 +207,44 @@
         }
 
         try {
+            if (Settings.Current.ClientRemoteMode) {
+                _logs.Add($"[REMOTE] Sending job to AI PC at: {Settings.Current.ClientRemoteHostUrl}");
+                string yamlContent = await File.ReadAllTextAsync(_configYamlPath);
+                string runName = Path.GetFileNameWithoutExtension(_configYamlPath);
+
+                StartRemoteTrainingRequest remoteReq = new() {
+                    RunName = runName,
+                    ConfigYaml = yamlContent,
+                    BaseArchitecture = "flux1"
+                };
+
+                bool started = await RemoteClient.StartRemoteTrainingAsync(remoteReq);
+                if (started) {
+                    Snackbar.Add("Training job launched successfully on remote AI PC!", Severity.Success);
+                    _ = Task.Run(async () => {
+                        try {
+                            await RemoteClient.StartTelemetryStreamAsync(telemetry => {
+                                InvokeAsync(() => {
+                                    if (telemetry.EventType == "log" && !string.IsNullOrWhiteSpace(telemetry.Message)) {
+                                        _logs.Add(telemetry.Message);
+                                    } else if (telemetry.EventType == "step") {
+                                        TrainingRunner.CurrentProgress.CurrentStep = telemetry.Step;
+                                        TrainingRunner.CurrentProgress.TotalSteps = telemetry.TotalSteps;
+                                        TrainingRunner.CurrentProgress.CurrentLoss = telemetry.Loss;
+                                        StateHasChanged();
+                                    }
+                                });
+                            }, CancellationToken.None);
+                        } catch {
+                            // Telemetry disconnected
+                        }
+                    });
+                } else {
+                    Snackbar.Add("Failed to start remote training job. Check connection.", Severity.Error);
+                }
+                return;
+            }
+
             string toolkitScript = ToolkitSetup.GetRunScriptPath();
             if (!File.Exists(toolkitScript)) {
                 toolkitScript = Path.Combine(_venvPath, "run.py");
@@ -208,8 +261,14 @@
     }
 
     private void CancelTraining() {
+        if (Settings.Current.ClientRemoteMode) {
+            _ = RemoteClient.StopRemoteTrainingAsync();
+            Snackbar.Add("Cancellation command sent to remote AI PC.", Severity.Info);
+            return;
+        }
+
         TrainingRunner.CancelTraining();
-        Snackbar.Add("Training cancelled by user.", Severity.Info);
+        Snackbar.Add("Training cancellation requested.", Severity.Info);
     }
 
     private void ClearLogs() {

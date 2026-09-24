@@ -10,6 +10,7 @@ public sealed class TrainingRunnerService {
     private readonly Stopwatch _stopwatch = new();
     private readonly SettingsService? _settingsService;
     private readonly AiToolkitSetupService? _toolkitSetupService;
+    private readonly LoraHistoryService? _historyService;
 
     public TrainingProgress CurrentProgress { get; } = new();
     public event Action<TrainingProgress>? OnProgressUpdated;
@@ -17,9 +18,14 @@ public sealed class TrainingRunnerService {
 
     public bool IsRunning => CurrentProgress.Status == TrainingStatus.Training || CurrentProgress.Status == TrainingStatus.Initializing;
 
-    public TrainingRunnerService(SettingsService? settingsService = null, AiToolkitSetupService? toolkitSetupService = null) {
+    public TrainingRunnerService(
+        SettingsService? settingsService = null,
+        AiToolkitSetupService? toolkitSetupService = null,
+        LoraHistoryService? historyService = null
+    ) {
         _settingsService = settingsService;
         _toolkitSetupService = toolkitSetupService;
+        _historyService = historyService;
     }
 
     public async Task StartTrainingAsync(
@@ -54,6 +60,7 @@ public sealed class TrainingRunnerService {
             pythonExe = "python.exe";
         }
 
+        DateTime startedAt = DateTime.UtcNow;
         _trainingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CurrentProgress.Status = TrainingStatus.Initializing;
         CurrentProgress.CurrentStep = 0;
@@ -137,6 +144,23 @@ public sealed class TrainingRunnerService {
             _stopwatch.Stop();
             CurrentProgress.Elapsed = _stopwatch.Elapsed;
             OnProgressUpdated?.Invoke(CurrentProgress);
+
+            if (_historyService != null) {
+                try {
+                    await _historyService.AddOrUpdateRecordAsync(new LoraHistoryRecord {
+                        Name = Path.GetFileNameWithoutExtension(configYamlPath),
+                        ConfigYamlPath = configYamlPath,
+                        Steps = CurrentProgress.CurrentStep > 0 ? CurrentProgress.CurrentStep : CurrentProgress.TotalSteps,
+                        FinalLoss = CurrentProgress.CurrentLoss,
+                        StartedAt = startedAt,
+                        CompletedAt = DateTime.UtcNow,
+                        Status = CurrentProgress.Status.ToString()
+                    });
+                } catch {
+                    // Suppress history logging errors
+                }
+            }
+
             _currentProcess?.Dispose();
             _currentProcess = null;
         }

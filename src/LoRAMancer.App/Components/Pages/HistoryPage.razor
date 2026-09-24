@@ -1,0 +1,307 @@
+@page "/history"
+@inject LoraHistoryService HistoryService
+@inject NavigationManager NavManager
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">LoRA Training History & Vault</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Persistent local ledger of all trained models, donor matrices, and hyperparameters. Records never expire.
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadHistoryAsync">
+            Refresh
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="@(() => NavManager.NavigateTo("/training"))">
+            Train New LoRA
+        </MudButton>
+    </div>
+</div>
+
+<!-- Stats Summary Ribbon -->
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Total Models in Vault</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cba6f7;">@_records.Count</MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Total Training Time</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: #89b4fa;">@GetTotalTrainingTime()</MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Average Final Loss</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: #a6e3a1;">@GetAverageLoss()</MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Starred Favorites</MudText>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: #f9e2af;">@_records.Count(r => r.IsFavorite)</MudText>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<!-- Search and Filter Bar -->
+<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+    <MudCardContent Class="py-3">
+        <MudGrid Class="align-center">
+            <MudItem xs="12" md="5">
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Search by name, trigger word, or notes..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Base Model" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                    <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
+                    <MudSelectItem Value="@("flux1")">FLUX.1</MudSelectItem>
+                    <MudSelectItem Value="@("sdxl")">SDXL 1.0 / Pony</MudSelectItem>
+                    <MudSelectItem Value="@("chroma")">Chroma</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" md="4" Class="d-flex align-center justify-end gap-2">
+                <MudCheckBox @bind-Value="_showFavoritesOnly" Label="Favorites Only" Color="Color.Warning" Dense="true" />
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
+
+<!-- Records Grid -->
+@if (_isLoading) {
+    <div class="d-flex justify-center my-8">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+    </div>
+} else if (FilteredRecords.Count == 0) {
+    <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+        <MudIcon Icon="@Icons.Material.Filled.HistoryToggleOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+        <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRA history records found</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            Completed training jobs will automatically appear here with their hyperparameters, loss curves, and trigger words.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => NavManager.NavigateTo("/training"))">
+            Start a Training Run
+        </MudButton>
+    </MudCard>
+} else {
+    <MudGrid>
+        @foreach (var lora in FilteredRecords) {
+            <MudItem xs="12" md="6" lg="4">
+                <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 10px; height: 100%; display: flex; flex-direction: column;">
+                    <MudCardHeader Class="pb-2">
+                        <CardHeaderAvatar>
+                            <MudIconButton Icon="@(lora.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)"
+                                           Color="@(lora.IsFavorite ? Color.Warning : Color.Default)"
+                                           Size="Size.Small"
+                                           OnClick="@(() => ToggleFavoriteAsync(lora.Id))" />
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #fff; line-height: 1.2;">
+                                @lora.Name
+                            </MudText>
+                            <div class="d-flex align-center gap-1 mt-1">
+                                <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(lora.BaseArchitecture)" Variant="Variant.Filled">
+                                    @lora.BaseArchitecture.ToUpperInvariant()
+                                </MudChip>
+                                <span style="font-size: 0.75rem; color: #a6adc8;">@lora.CompletedAt.ToLocalTime().ToString("MMM dd, yyyy")</span>
+                            </div>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(lora.Status)" Variant="Variant.Outlined">
+                                @lora.Status
+                            </MudChip>
+                        </CardHeaderActions>
+                    </MudCardHeader>
+
+                    <MudCardContent Class="py-2" Style="flex: 1;">
+                        @if (!string.IsNullOrWhiteSpace(lora.TriggerWord)) {
+                            <div class="d-flex align-center justify-space-between p-2 mb-3" style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                                <div>
+                                    <div style="font-size: 0.7rem; color: #a6adc8; text-transform: uppercase;">Trigger Word</div>
+                                    <div style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #cba6f7; font-size: 0.85rem;">
+                                        @lora.TriggerWord
+                                    </div>
+                                </div>
+                                <MudTooltip Text="Copy trigger word">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CopyToClipboardAsync(lora.TriggerWord))" />
+                                </MudTooltip>
+                            </div>
+                        }
+
+                        <!-- Hyperparameters Grid -->
+                        <div class="d-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;">
+                            <div style="background-color: #11111b; padding: 6px 8px; border-radius: 6px; text-align: center;">
+                                <div style="font-size: 0.65rem; color: #a6adc8;">RANK / ALPHA</div>
+                                <div style="font-weight: 700; color: #cdd6f4; font-size: 0.85rem;">@lora.Dim / @lora.Alpha</div>
+                            </div>
+                            <div style="background-color: #11111b; padding: 6px 8px; border-radius: 6px; text-align: center;">
+                                <div style="font-size: 0.65rem; color: #a6adc8;">STEPS</div>
+                                <div style="font-weight: 700; color: #cdd6f4; font-size: 0.85rem;">@lora.Steps</div>
+                            </div>
+                            <div style="background-color: #11111b; padding: 6px 8px; border-radius: 6px; text-align: center;">
+                                <div style="font-size: 0.65rem; color: #a6adc8;">FINAL LOSS</div>
+                                <div style="font-weight: 700; color: #a6e3a1; font-size: 0.85rem;">@lora.FinalLoss.ToString("F4")</div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-center justify-space-between" style="font-size: 0.8rem; color: #a6adc8;">
+                            <span>Duration: <b style="color: #cdd6f4;">@lora.FormattedDuration</b></span>
+                            <span>Size: <b style="color: #cdd6f4;">@lora.FormattedFileSize</b></span>
+                            <span>Images: <b style="color: #cdd6f4;">@lora.ImageCount</b></span>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(lora.Notes)) {
+                            <div class="mt-2" style="font-size: 0.8rem; color: #bac2de; font-style: italic;">
+                                "@lora.Notes"
+                            </div>
+                        }
+                    </MudCardContent>
+
+                    <MudCardActions Class="px-4 pb-3 pt-1 d-flex justify-space-between align-center" Style="border-top: 1px solid #313244;">
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CloneToWizard(lora))">
+                            Clone Config
+                        </MudButton>
+                        <div class="d-flex gap-1">
+                            <MudTooltip Text="Open containing folder">
+                                <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => OpenFolder(lora.OutputFilePath))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Remove record">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteRecordAsync(lora))" />
+                            </MudTooltip>
+                        </div>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private List<LoraHistoryRecord> _records = new();
+    private bool _isLoading = true;
+    private string _searchQuery = string.Empty;
+    private string _selectedArchitecture = "all";
+    private bool _showFavoritesOnly;
+
+    private List<LoraHistoryRecord> FilteredRecords => _records
+        .Where(r => string.IsNullOrWhiteSpace(_searchQuery)
+            || r.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+            || r.TriggerWord.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+            || r.Notes.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+        .Where(r => _selectedArchitecture == "all" || string.Equals(r.BaseArchitecture, _selectedArchitecture, StringComparison.OrdinalIgnoreCase))
+        .Where(r => !_showFavoritesOnly || r.IsFavorite)
+        .ToList();
+
+    protected override async Task OnInitializedAsync() {
+        HistoryService.OnHistoryChanged += HandleHistoryChanged;
+        await LoadHistoryAsync();
+    }
+
+    private async Task LoadHistoryAsync() {
+        _isLoading = true;
+        try {
+            var list = await HistoryService.GetHistoryAsync();
+            _records = list.ToList();
+        } finally {
+            _isLoading = false;
+        }
+    }
+
+    private void HandleHistoryChanged() {
+        InvokeAsync(async () => {
+            await LoadHistoryAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task ToggleFavoriteAsync(string id) {
+        await HistoryService.ToggleFavoriteAsync(id);
+    }
+
+    private async Task CopyToClipboardAsync(string text) {
+        if (!string.IsNullOrWhiteSpace(text)) {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add($"Copied '{text}' to clipboard!", Severity.Success);
+        }
+    }
+
+    private void CloneToWizard(LoraHistoryRecord record) {
+        if (!string.IsNullOrWhiteSpace(record.ConfigYamlPath) && File.Exists(record.ConfigYamlPath)) {
+            NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(record.ConfigYamlPath)}");
+        } else {
+            NavManager.NavigateTo("/training");
+        }
+    }
+
+    private void OpenFolder(string? path) {
+        if (!string.IsNullOrWhiteSpace(path)) {
+            string dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path) ?? string.Empty;
+            if (Directory.Exists(dir)) {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                    FileName = dir,
+                    UseShellExecute = true
+                });
+                return;
+            }
+        }
+        Snackbar.Add("Output file path is not set or directory does not exist.", Severity.Info);
+    }
+
+    private async Task DeleteRecordAsync(LoraHistoryRecord record) {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Delete History Record",
+            $"Are you sure you want to remove '{record.Name}' from your history log?",
+            yesText: "Delete",
+            cancelText: "Cancel"
+        );
+
+        if (confirmed == true) {
+            await HistoryService.DeleteRecordAsync(record.Id, deleteFilesFromDisk: false);
+            Snackbar.Add($"Removed '{record.Name}' from history log.", Severity.Info);
+        }
+    }
+
+    private string GetTotalTrainingTime() {
+        TimeSpan total = TimeSpan.Zero;
+        foreach (var r in _records) {
+            total += r.Duration;
+        }
+        if (total.TotalHours >= 1) {
+            return $"{(int)total.TotalHours}h {total.Minutes}m";
+        }
+        return $"{total.Minutes}m";
+    }
+
+    private string GetAverageLoss() {
+        var completed = _records.Where(r => r.FinalLoss > 0).ToList();
+        if (completed.Count == 0) {
+            return "-";
+        }
+        return (completed.Average(r => r.FinalLoss)).ToString("F4");
+    }
+
+    private static Color GetArchitectureColor(string arch) => arch.ToLowerInvariant() switch {
+        "flux1" => Color.Tertiary,
+        "sdxl" => Color.Info,
+        "chroma" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    private static Color GetStatusColor(string status) => status switch {
+        "Completed" => Color.Success,
+        "InProgress" => Color.Info,
+        "Failed" => Color.Error,
+        "Cancelled" => Color.Warning,
+        _ => Color.Default
+    };
+
+    public void Dispose() {
+        HistoryService.OnHistoryChanged -= HandleHistoryChanged;
+    }
+}

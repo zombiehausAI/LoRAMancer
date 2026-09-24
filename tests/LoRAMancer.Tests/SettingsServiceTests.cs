@@ -108,4 +108,40 @@ public sealed class SettingsServiceTests {
             }
         }
     }
+
+    [Fact]
+    public async Task SaveAndLoadSettingsAsync_PersistsNetworkServerAndRemoteClientConfig() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"network_server_settings_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService service = new(null, tempFile);
+            AppSettings settings = new() {
+                ServerEnabled = true,
+                ServerPort = 9000,
+                ServerBindAddress = "0.0.0.0",
+                ServerAccessToken = "secure_pin_1234",
+                ClientRemoteMode = true,
+                ClientRemoteHostUrl = "http://192.168.1.150:9000",
+                ClientRemoteAccessToken = "secure_pin_1234"
+            };
+
+            await service.SaveSettingsAsync(settings);
+
+            SettingsService reloaded = new(null, tempFile);
+            AppSettings loaded = reloaded.LoadSettings();
+
+            Assert.True(loaded.ServerEnabled);
+            Assert.Equal(9000, loaded.ServerPort);
+            Assert.Equal("0.0.0.0", loaded.ServerBindAddress);
+            Assert.Equal("secure_pin_1234", loaded.ServerAccessToken);
+            Assert.True(loaded.ClientRemoteMode);
+            Assert.Equal("http://192.168.1.150:9000", loaded.ClientRemoteHostUrl);
+            Assert.Equal("secure_pin_1234", loaded.ClientRemoteAccessToken);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }
+

@@ -36,6 +36,17 @@ public sealed class AppSettings {
     public string OllamaApiKey { get; set; } = string.Empty;
     public string OllamaDefaultModel { get; set; } = "llama3.2-vision";
 
+    // Network Server / Remote Engine
+    public bool ServerEnabled { get; set; }
+    public int ServerPort { get; set; } = 8420;
+    public string ServerBindAddress { get; set; } = "0.0.0.0";
+    public string ServerAccessToken { get; set; } = string.Empty;
+
+    // Remote Client Node Connection
+    public bool ClientRemoteMode { get; set; }
+    public string ClientRemoteHostUrl { get; set; } = "http://localhost:8420";
+    public string ClientRemoteAccessToken { get; set; } = string.Empty;
+
     public void UpdateFromBaseUrl(string newBaseUrl, string newTorchVersion, string pythonTag = "cp312-cp312") {
         if (string.IsNullOrWhiteSpace(newBaseUrl)) {
             return;

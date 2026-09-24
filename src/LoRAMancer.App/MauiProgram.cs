@@ -33,6 +33,9 @@ public static class MauiProgram {
         builder.Services.AddSingleton<NativeFileDialogService>();
         builder.Services.AddSingleton<PluginManagerService>();
         builder.Services.AddSingleton<AutoUpdateService>();
+        builder.Services.AddSingleton<NetworkServerService>();
+        builder.Services.AddSingleton<RemoteTrainingClientService>();
+        builder.Services.AddSingleton<LoraHistoryService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

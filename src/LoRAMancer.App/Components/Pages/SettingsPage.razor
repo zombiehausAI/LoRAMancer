@@ -3,6 +3,8 @@
 @inject HuggingFaceService HfService
 @inject AiToolkitSetupService ToolkitSetup
 @inject NativeFileDialogService FileDialogService
+@inject NetworkServerService NetworkServer
+@inject RemoteTrainingClientService RemoteClient
 @inject ISnackbar Snackbar
 
 <div class="d-flex align-center justify-space-between mb-4">
@@ -258,6 +260,95 @@
         </div>
     </MudTabPanel>
 
+    <!-- Remote Server & Worker Tab -->
+    <MudTabPanel Text="Remote Server & Worker" Icon="@Icons.Material.Filled.Dns">
+        <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+                Enable your AI PC as a Network Server so Linux PCs, Macs, and tablets can access the full LoRAMancer UI in their web browser with zero installation, or connect from another Windows PC in Remote Client mode.
+            </MudAlert>
+
+            <MudGrid>
+                <!-- Host Server Mode (AI PC) -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Router" Color="Color.Primary" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Host Engine & Web UI</MudText>
+                            </div>
+                            @if (NetworkServer.IsRunning) {
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">Active: Port @_settings.ServerPort</MudChip>
+                            } else {
+                                <MudChip T="string" Color="Color.Default" Size="Size.Small" Variant="Variant.Outlined">Stopped</MudChip>
+                            }
+                        </div>
+
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Hosts the training venv, hardware GPU runner, and embedded web server.
+                        </MudText>
+
+                        <MudSwitch @bind-Value="_settings.ServerEnabled" Label="Enable Network Server & Web View" Color="Color.Primary" Class="mb-2" />
+
+                        <div class="d-flex gap-3 mb-2">
+                            <MudTextField @bind-Value="_settings.ServerPort" Label="Port" Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 120px;" />
+                            <MudTextField @bind-Value="_settings.ServerBindAddress" Label="Bind IP" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="0.0.0.0 for LAN, 127.0.0.1 for local" Style="flex: 1;" />
+                        </div>
+
+                        <MudTextField @bind-Value="_settings.ServerAccessToken" Label="Access PIN / Auth Token (Optional)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Leave blank for open local LAN access" Class="mb-3" />
+
+                        <div class="d-flex align-center gap-2">
+                            @if (NetworkServer.IsRunning) {
+                                <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="StopServerAsync">
+                                    Stop Server
+                                </MudButton>
+                            } else {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartServerAsync">
+                                    Start Server Now
+                                </MudButton>
+                            }
+                        </div>
+                    </MudCard>
+                </MudItem>
+
+                <!-- Remote Client Mode (Second PC) -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Computer" Color="Color.Secondary" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Remote Client Mode</MudText>
+                            </div>
+                            @if (_settings.ClientRemoteMode) {
+                                <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled">Remote Mode Active</MudChip>
+                            } else {
+                                <MudChip T="string" Color="Color.Default" Size="Size.Small" Variant="Variant.Outlined">Local Hardware Mode</MudChip>
+                            }
+                        </div>
+
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Connect this Windows app to your AI PC over the network. Datasets and commands are dispatched remotely.
+                        </MudText>
+
+                        <MudSwitch @bind-Value="_settings.ClientRemoteMode" Label="Connect to Remote AI PC" Color="Color.Secondary" Class="mb-2" />
+                        <MudTextField @bind-Value="_settings.ClientRemoteHostUrl" Label="Remote AI PC URL" Placeholder="http://192.168.1.150:8420" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                        <MudTextField @bind-Value="_settings.ClientRemoteAccessToken" Label="Remote Access Token / PIN" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.NetworkCheck" Disabled="_isTestingRemoteHost" OnClick="TestRemoteHostAsync">
+                                @(_isTestingRemoteHost ? "Connecting..." : "Test Connection")
+                            </MudButton>
+                            @if (!string.IsNullOrEmpty(_remoteHostStatusMessage)) {
+                                <MudChip T="string" Size="Size.Small" Color="@(_remoteHostReachable ? Color.Success : Color.Error)">
+                                    @_remoteHostStatusMessage
+                                </MudChip>
+                            }
+                        </div>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+
     <!-- General Preferences Tab -->
     <MudTabPanel Text="General & Paths" Icon="@Icons.Material.Filled.Tune">
         <div class="px-4 pb-4">
@@ -421,5 +512,51 @@
         _urlStatuses.Clear();
         _hfValidationMessage = string.Empty;
         Snackbar.Add("Settings reset to factory defaults.", Severity.Warning);
+    }
+
+    private bool _isTestingRemoteHost;
+    private bool _remoteHostReachable;
+    private string _remoteHostStatusMessage = string.Empty;
+
+    private async Task StartServerAsync() {
+        try {
+            await NetworkServer.StartServerAsync(_settings.ServerPort, _settings.ServerBindAddress, _settings.ServerAccessToken);
+            Snackbar.Add($"LoRAMancer Server listening at {NetworkServer.ListeningUrl}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to start server: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task StopServerAsync() {
+        try {
+            await NetworkServer.StopServerAsync();
+            Snackbar.Add("LoRAMancer Server stopped.", Severity.Info);
+        } catch (Exception ex) {
+            Snackbar.Add($"Error stopping server: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task TestRemoteHostAsync() {
+        _isTestingRemoteHost = true;
+        _remoteHostStatusMessage = string.Empty;
+
+        try {
+            var health = await RemoteClient.CheckHealthAsync(_settings.ClientRemoteHostUrl, _settings.ClientRemoteAccessToken);
+            if (health != null) {
+                _remoteHostReachable = true;
+                _remoteHostStatusMessage = $"Connected to {health.MachineName} ({health.Status})";
+                Snackbar.Add($"Connected to AI PC: {health.MachineName} ({health.GpuInfo})", Severity.Success);
+            } else {
+                _remoteHostReachable = false;
+                _remoteHostStatusMessage = "Connection failed";
+                Snackbar.Add("Failed to reach remote LoRAMancer server. Check URL, port, and firewall.", Severity.Error);
+            }
+        } catch (Exception ex) {
+            _remoteHostReachable = false;
+            _remoteHostStatusMessage = ex.Message;
+            Snackbar.Add($"Connection error: {ex.Message}", Severity.Error);
+        } finally {
+            _isTestingRemoteHost = false;
+        }
     }
 }
