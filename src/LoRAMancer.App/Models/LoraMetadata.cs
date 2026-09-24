@@ -26,6 +26,7 @@ public sealed class LoraMetadata {
     public List<string> TrainedWords { get; set; } = new();
 
     // User Customization & Persistence
+    public string? LibraryId { get; set; }
     public bool IsFavorite { get; set; }
     public string? UserBaseModel { get; set; }
     public DateTime? LastModifiedUtc { get; set; }
