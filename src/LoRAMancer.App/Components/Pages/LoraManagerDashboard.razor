@@ -9,6 +9,8 @@
 @inject IJSRuntime JSRuntime
 @inject LoraUpdaterService UpdaterService
 @using LoRAMancer.App.Components.Dialogs
+@using System.Collections.Concurrent
+@using System.Threading
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
@@ -40,10 +42,10 @@
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="_searchQuery" Placeholder="Search by file name, model title, trigger word, or path..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+                <MudTextField @bind-Value="SearchQuery" Placeholder="Search by file name, model title, trigger word, or path..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Filter Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
                     <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
                     <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
                     <MudSelectItem Value="@("SDXL")">SDXL / Pony / Illustrious</MudSelectItem>
@@ -91,13 +93,13 @@
                 @if (_showAllFlat) {
                     <span>Showing all @LibraryService.Items.Count LoRAs (Flat View)</span>
                 } else if (!string.IsNullOrWhiteSpace(_searchQuery)) {
-                    <span>Searching across all subfolders (@FilteredLoras.Count results)</span>
+                    <span>Searching across all subfolders (@_filteredLoras.Count results)</span>
                 } else {
-                    <span>@FilteredLoras.Count LoRA@((FilteredLoras.Count == 1 ? "" : "s")) in this folder (@LibraryService.Items.Count total indexed)</span>
+                    <span>@_filteredLoras.Count LoRA@((_filteredLoras.Count == 1 ? "" : "s")) in this folder (@LibraryService.Items.Count total indexed)</span>
                 }
             </MudText>
 
-            <MudButton Variant="@(_showAllFlat ? Variant.Filled : Variant.Outlined)" Color="Color.Tertiary" Size="Size.Small" StartIcon="@(_showAllFlat ? Icons.Material.Filled.AccountTree : Icons.Material.Filled.Folder)" OnClick="@(() => _showAllFlat = !_showAllFlat)">
+            <MudButton Variant="@(_showAllFlat ? Variant.Filled : Variant.Outlined)" Color="Color.Tertiary" Size="Size.Small" StartIcon="@(_showAllFlat ? Icons.Material.Filled.AccountTree : Icons.Material.Filled.Folder)" OnClick="ToggleShowAllFlat">
                 @(_showAllFlat ? "Flat (All)" : "Subfolder View")
             </MudButton>
         </div>
@@ -145,7 +147,7 @@
     </MudCard>
 }
 
-@if (FilteredLoras.Count == 0 && CurrentSubfolders.Count == 0) {
+@if (_filteredLoras.Count == 0 && _currentSubfolders.Count == 0) {
     @if (LibraryService.IsScanning) {
         <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudProgressCircular Size="Size.Large" Color="Color.Tertiary" Indeterminate="true" Class="mb-3" />
@@ -172,8 +174,8 @@
     <!-- Visual Card Grid -->
     <MudGrid>
         <!-- Subfolder Cards -->
-        @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
-            @foreach (var sub in CurrentSubfolders) {
+        @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && _currentSubfolders.Count > 0) {
+            @foreach (var sub in _currentSubfolders) {
                 <MudItem xs="12" sm="6" md="4" lg="3">
                     <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
                         <div class="d-flex align-center justify-space-between mb-2">
@@ -197,14 +199,17 @@
             }
         }
 
-        <!-- LoRA Model Cards -->
-        @foreach (var lora in FilteredLoras) {
+        <!-- LoRA Model Cards (Paged) -->
+        @foreach (var lora in PagedLoras) {
             <MudItem xs="12" sm="6" md="4" lg="3">
                 <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
                     <!-- Thumbnail Container -->
                     <div style="position: relative; width: 100%; height: 220px; background-color: var(--bg-dark-base); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                        @if (!string.IsNullOrWhiteSpace(lora.ThumbnailPath) && File.Exists(lora.ThumbnailPath)) {
-                            <img src="@GetImageSrc(lora.ThumbnailPath)" alt="@lora.FileName" style="width: 100%; height: 100%; object-fit: cover;" />
+                        @{
+                            string thumbSrc = GetImageSrc(lora.ThumbnailPath);
+                        }
+                        @if (!string.IsNullOrEmpty(thumbSrc)) {
+                            <img src="@thumbSrc" alt="@lora.FileName" style="width: 100%; height: 100%; object-fit: cover;" />
                         } else {
                             <div class="d-flex flex-column align-center justify-center p-4 text-center" style="width: 100%; height: 100%; background: linear-gradient(135deg, rgba(203,166,247,0.1), rgba(137,180,250,0.05));">
                                 <MudIcon Icon="@Icons.Material.Filled.Layers" Size="Size.Large" Color="Color.Secondary" Style="opacity: 0.4;" Class="mb-1" />
@@ -292,7 +297,16 @@
         }
     </MudGrid>
 
-    @if (FilteredLoras.Count == 0 && CurrentSubfolders.Count > 0) {
+    @if (TotalPages > 1) {
+        <div class="d-flex justify-center align-center gap-4 my-4">
+            <MudPagination Count="@TotalPages" SelectedChanged="OnPageChanged" Selected="_currentPage" Color="Color.Primary" Size="Size.Medium" ShowFirstButton="true" ShowLastButton="true" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Page @_currentPage of @TotalPages (@_filteredLoras.Count items)
+            </MudText>
+        </div>
+    }
+
+    @if (_filteredLoras.Count == 0 && _currentSubfolders.Count > 0) {
         <div class="pa-4 text-center mt-4" style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudText Typo="Typo.body2" Color="Color.Secondary">
                 No direct LoRA files in this folder. Click any subfolder card above to view contained models.
@@ -301,10 +315,10 @@
     }
 } else {
     <!-- Table View -->
-    @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
+    @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && _currentSubfolders.Count > 0) {
         <div class="d-flex flex-wrap gap-2 mb-3 align-center">
             <MudText Typo="Typo.body2" Style="color: var(--text-secondary); font-weight: 600;">Subfolders:</MudText>
-            @foreach (var sub in CurrentSubfolders) {
+            @foreach (var sub in _currentSubfolders) {
                 <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
                     @sub.Name (@sub.LoraCount)
                 </MudChip>
@@ -312,7 +326,7 @@
         </div>
     }
 
-    <MudTable Items="FilteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+    <MudTable Items="_filteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" RowsPerPage="25" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <HeaderContent>
             <MudTh>File Name</MudTh>
             <MudTh>Base Model</MudTh>
@@ -350,6 +364,9 @@
                 </MudTooltip>
             </MudTd>
         </RowTemplate>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 25, 50, 100 }" />
+        </PagerContent>
     </MudTable>
 }
 
@@ -368,63 +385,138 @@
     private bool _isEnrichingAll;
     private int _enrichProgress;
 
+    private int _currentPage = 1;
+    private const int _pageSize = 24;
+
+    private CancellationTokenSource? _searchCts;
+    private static readonly ConcurrentDictionary<string, string> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+
     private sealed record SubfolderItem(string Name, string FullPath, string RelativePath, int LoraCount);
     private sealed record CrumbItem(string Name, string FullPath);
 
-    private List<SubfolderItem> CurrentSubfolders {
-        get {
-            string current = LibraryService.CurrentFolder;
-            string root = LibraryService.RootFolder;
-            if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || _showAllFlat) {
-                return new List<SubfolderItem>();
-            }
+    private List<SubfolderItem> _currentSubfolders = new();
+    private List<LoraMetadata> _filteredLoras = new();
 
-            try {
-                string[] subDirs = Directory.GetDirectories(current);
-                List<SubfolderItem> result = new();
-                var items = LibraryService.Items;
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
+    private IEnumerable<LoraMetadata> PagedLoras => _filteredLoras.Skip((_currentPage - 1) * _pageSize).Take(_pageSize);
 
-                foreach (string dir in subDirs) {
-                    string dirName = Path.GetFileName(dir);
-                    if (dirName.StartsWith('.')) {
-                        continue;
+    private string SearchQuery {
+        get => _searchQuery;
+        set {
+            if (_searchQuery != value) {
+                _searchQuery = value;
+                _searchCts?.Cancel();
+                _searchCts?.Dispose();
+                _searchCts = new CancellationTokenSource();
+                var token = _searchCts.Token;
+                Task.Delay(180, token).ContinueWith(t => {
+                    if (!t.IsCanceled) {
+                        InvokeAsync(() => {
+                            _currentPage = 1;
+                            UpdateFilteredList();
+                            StateHasChanged();
+                        });
                     }
-
-                    string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                    int count = items.Count(l => l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-                    string rel = string.IsNullOrWhiteSpace(root) ? dirName : Path.GetRelativePath(root, dir);
-
-                    result.Add(new SubfolderItem(dirName, dir, rel, count));
-                }
-
-                return result.OrderBy(s => s.Name).ToList();
-            } catch {
-                return new List<SubfolderItem>();
+                }, TaskScheduler.Default);
             }
         }
     }
 
-    private List<LoraMetadata> FilteredLoras {
-        get {
+    private void UpdateFilteredList() {
+        try {
             string current = LibraryService.CurrentFolder;
-            return LibraryService.Items
-                .Where(l => {
-                    if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery) || string.IsNullOrWhiteSpace(current)) {
-                        return true;
+            string root = LibraryService.RootFolder;
+            var items = LibraryService.Items;
+
+            // Update subfolders
+            if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || _showAllFlat) {
+                _currentSubfolders = new List<SubfolderItem>();
+            } else {
+                try {
+                    string[] subDirs = Directory.GetDirectories(current);
+                    List<SubfolderItem> subList = new();
+                    foreach (string dir in subDirs) {
+                        string dirName = Path.GetFileName(dir);
+                        if (dirName.StartsWith('.')) {
+                            continue;
+                        }
+
+                        string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                        int count = items.Count(l => l.FilePath != null && l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                        string rel = string.IsNullOrWhiteSpace(root) ? dirName : Path.GetRelativePath(root, dir);
+                        subList.Add(new SubfolderItem(dirName, dir, rel, count));
                     }
-                    string dir = Path.GetDirectoryName(l.FilePath) ?? string.Empty;
-                    return string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                         current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                         StringComparison.OrdinalIgnoreCase);
-                })
-                .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
-                    || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
-                    || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                    || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                    || l.FilePath.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                    _currentSubfolders = subList.OrderBy(s => s.Name).ToList();
+                } catch {
+                    _currentSubfolders = new List<SubfolderItem>();
+                }
+            }
+
+            // Update filtered LoRAs
+            string query = _searchQuery?.Trim() ?? string.Empty;
+            string arch = _selectedArchitecture ?? "all";
+
+            _filteredLoras = items.Where(l => {
+                if (l == null) {
+                    return false;
+                }
+
+                // Folder matching
+                if (!_showAllFlat && string.IsNullOrWhiteSpace(query) && !string.IsNullOrWhiteSpace(current)) {
+                    string dir = Path.GetDirectoryName(l.FilePath ?? string.Empty) ?? string.Empty;
+                    if (!string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                      current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                      StringComparison.OrdinalIgnoreCase)) {
+                        return false;
+                    }
+                }
+
+                // Architecture matching
+                if (!string.Equals(arch, "all", StringComparison.OrdinalIgnoreCase)) {
+                    if (string.IsNullOrWhiteSpace(l.BaseModel) || !l.BaseModel.Contains(arch, StringComparison.OrdinalIgnoreCase)) {
+                        return false;
+                    }
+                }
+
+                // Search query matching
+                if (!string.IsNullOrWhiteSpace(query)) {
+                    bool matchName = l.FileName != null && l.FileName.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    bool matchModel = l.CivitaiInfo?.ModelName != null && l.CivitaiInfo.ModelName.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    bool matchPath = l.FilePath != null && l.FilePath.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    bool matchTriggers = l.TrainedWords != null && l.TrainedWords.Any(w => w != null && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+                    if (!matchName && !matchModel && !matchPath && !matchTriggers) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }).ToList();
+
+            if (_currentPage > TotalPages) {
+                _currentPage = Math.Max(1, TotalPages);
+            }
+        } catch {
+            _filteredLoras = new List<LoraMetadata>();
+            _currentSubfolders = new List<SubfolderItem>();
         }
+    }
+
+    private void OnArchitectureChanged(string arch) {
+        _selectedArchitecture = arch;
+        _currentPage = 1;
+        UpdateFilteredList();
+    }
+
+    private void ToggleShowAllFlat() {
+        _showAllFlat = !_showAllFlat;
+        _currentPage = 1;
+        UpdateFilteredList();
+    }
+
+    private void OnPageChanged(int page) {
+        _currentPage = page;
+        StateHasChanged();
     }
 
     private List<CrumbItem> GetBreadcrumbs() {
@@ -458,6 +550,8 @@
         if (Directory.Exists(folderPath)) {
             LibraryService.SetCurrentSubfolder(folderPath);
             _showAllFlat = false;
+            _currentPage = 1;
+            UpdateFilteredList();
             StateHasChanged();
         }
     }
@@ -480,6 +574,8 @@
         } else {
             LibraryService.SetCurrentSubfolder(root);
         }
+        _currentPage = 1;
+        UpdateFilteredList();
         StateHasChanged();
     }
 
@@ -511,7 +607,9 @@
         string? folder = await FileDialogService.PickFolderAsync("Select LoRA Storage Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _showAllFlat = false;
+            _currentPage = 1;
             LibraryService.StartScan(folder, forceClear: true);
+            UpdateFilteredList();
             Snackbar.Add($"Scanning {Path.GetFileName(folder)} in background...", Severity.Info);
         }
     }
@@ -528,6 +626,7 @@
                 LibraryService.SetFolders(dir, dir);
             }
 
+            UpdateFilteredList();
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
         } catch (Exception ex) {
             Snackbar.Add($"Failed to read {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
@@ -544,10 +643,14 @@
         LibraryService.OnScanProgress += HandleScanProgress;
         LibraryService.OnScanStateChanged += HandleScanStateChanged;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
+        UpdateFilteredList();
     }
 
     private async void HandleLibraryUpdated() {
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
     }
 
     private async void HandleScanProgress(string file, int current, int total) {
@@ -555,7 +658,10 @@
     }
 
     private async void HandleScanStateChanged(bool isScanning) {
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
     }
 
     private async void HandleUpdaterStateChanged() {
@@ -567,6 +673,8 @@
         LibraryService.OnScanProgress -= HandleScanProgress;
         LibraryService.OnScanStateChanged -= HandleScanStateChanged;
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
     }
 
     private async Task FetchSingleCivitaiAsync(LoraMetadata lora) {
@@ -577,6 +685,7 @@
         } else {
             Snackbar.Add("No matching model found on Civitai.", Severity.Normal);
         }
+        UpdateFilteredList();
         StateHasChanged();
     }
 
@@ -589,6 +698,7 @@
                 if (lora.CivitaiInfo == null) {
                     await LibraryService.EnrichFromCivitaiAsync(lora);
                     _enrichProgress++;
+                    UpdateFilteredList();
                     await InvokeAsync(StateHasChanged);
                 }
             }
@@ -643,15 +753,30 @@
         return null;
     }
 
-    private static string GetImageSrc(string path) {
-        byte[] bytes = File.ReadAllBytes(path);
-        string ext = Path.GetExtension(path).ToLowerInvariant();
-        string mime = ext switch {
-            ".png" => "image/png",
-            ".webp" => "image/webp",
-            _ => "image/jpeg"
-        };
-        return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+    private static string GetImageSrc(string? path) {
+        if (string.IsNullOrWhiteSpace(path)) {
+            return string.Empty;
+        }
+        if (_thumbnailCache.TryGetValue(path, out var cached)) {
+            return cached;
+        }
+        try {
+            if (File.Exists(path)) {
+                byte[] bytes = File.ReadAllBytes(path);
+                string ext = Path.GetExtension(path).ToLowerInvariant();
+                string mime = ext switch {
+                    ".png" => "image/png",
+                    ".webp" => "image/webp",
+                    _ => "image/jpeg"
+                };
+                string dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                _thumbnailCache[path] = dataUri;
+                return dataUri;
+            }
+        } catch {
+            // Graceful fallback to prevent unhandled exception if file is locked or unreadable
+        }
+        return string.Empty;
     }
 
     private static Color GetArchitectureColor(string arch) {
