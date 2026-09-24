@@ -62,6 +62,20 @@ public sealed class NativeFileDialogService {
         return result?.FullPath;
     }
 
+    public async Task<string?> PickZipFileAsync(string title = "Select Dataset ZIP Archive") {
+        FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+            { DevicePlatform.WinUI, new[] { ".zip" } }
+        });
+
+        PickOptions options = new() {
+            PickerTitle = title,
+            FileTypes = customFileType
+        };
+
+        FileResult? result = await FilePicker.Default.PickAsync(options);
+        return result?.FullPath;
+    }
+
     private static IntPtr GetActiveWindowHandle() {
         var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault();
         if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window winUIWindow) {

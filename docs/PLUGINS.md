@@ -98,3 +98,16 @@ LoRAMancer includes full Git integration in the UI for effortless plugin discove
 - **Delete Plugin**: Click the delete icon to remove the plugin directory and unregister it. Read-only Git attributes are automatically cleared to prevent file lock errors on Windows.
 - **Test Run**: Send a ping diagnostic command to verify that the C# assembly or Python script executes cleanly inside its environment.
 - **Live Output Log**: A streaming console card displays real-time `stdout`/`stderr` from Git operations and `pip` installations.
+
+## Default Included Plugins
+
+### Ollama Vision LoRA Tagger & Captioner (`plugins/ollama_lora_tagger/`)
+LoRAMancer ships with a built-in Python plugin for automated AI image tagging and caption generation powered by local Ollama vision models (`llama3.2-vision`, `llava`, `minicpm-v`, `qwen2-vl`):
+- **Flexible Inputs**: Accepts either a folder of images or a raw `.zip` archive.
+- **Auto-Extraction**: ZIP archives are automatically extracted into a managed cache directory (`~/.loramancer/extracted_datasets/`).
+- **Customizable Tagging Rules**:
+  - **Trigger Word Injection**: Prepends your training trigger word to every generated caption.
+  - **Inclusion Enforcement**: Guarantees specified mandatory terms/phrases are included.
+  - **Blacklist Filtering**: Strips unwanted words, watermarks, or quality artifacts from generated captions.
+  - **Caption Styles**: Supports comma-separated visual tags (ideal for SDXL, Pony, Illustrious) or natural language descriptive sentences (ideal for FLUX.1).
+- **Export Formats**: Outputs directly to a folder or generates a compressed `.zip` archive ready for training. The Training Wizard can auto-extract and verify the dataset with 1 click.

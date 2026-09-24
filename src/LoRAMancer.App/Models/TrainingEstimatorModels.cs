@@ -22,6 +22,8 @@ public sealed class SubjectPreset {
 
 public sealed class DatasetHealthReport {
     public string DatasetDirectory { get; set; } = string.Empty;
+    public bool ExtractedFromZip { get; set; }
+    public string OriginalZipPath { get; set; } = string.Empty;
     public int TotalImages { get; set; }
     public int TotalCaptions { get; set; }
     public int MissingCaptions { get; set; }

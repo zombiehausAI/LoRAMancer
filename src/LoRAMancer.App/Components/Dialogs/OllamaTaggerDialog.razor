@@ -1,0 +1,333 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@using System.Text.Json
+@inject PluginManagerService PluginManager
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">Ollama Vision LoRA Tagger & Captioner</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Auto-caption training images using local Ollama vision models into ready-to-train datasets or ZIPs</MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <!-- Ollama Connectivity Status Banner -->
+        @if (_isCheckingOllama) {
+            <div class="d-flex align-center gap-2 mb-3">
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Probing local Ollama instance on http://localhost:11434...</MudText>
+            </div>
+        } else if (_ollamaReachable) {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3" Style="font-size: 0.8rem;">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Class="mr-1" />
+                Ollama is active! Detected @(_visionModels.Count) vision model(s): <b>@(string.Join(", ", _visionModels.Take(3)))</b>
+            </MudAlert>
+        } else {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="font-size: 0.8rem;">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Class="mr-1" />
+                Ollama service not detected on localhost:11434. Please install Ollama from <code>ollama.com</code> and run a vision model (e.g. <code>ollama run llama3.2-vision</code>).
+            </MudAlert>
+        }
+
+        <MudGrid Spacing="2">
+            <!-- Input Source -->
+            <MudItem xs="12">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_inputPath" Label="Input Images Folder or ZIP Archive" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="C:\datasets\my_images or my_images.zip" FullWidth="true" Disabled="_isProcessing" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseInputFolderAsync" Disabled="_isProcessing">Folder</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseInputZipAsync" Disabled="_isProcessing">ZIP</MudButton>
+                </div>
+            </MudItem>
+
+            <!-- Output Destination & ZIP toggle -->
+            <MudItem xs="12">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_outputPath" Label="Output Destination (Folder or .zip)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Leave blank for auto-named output" FullWidth="true" Disabled="_isProcessing" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseOutputFolderAsync" Disabled="_isProcessing">Browse</MudButton>
+                </div>
+                <MudCheckBox @bind-Value="_createZip" Label="Create compressed ZIP file output for training" Color="Color.Primary" Dense="true" Class="mt-1" Disabled="_isProcessing" />
+            </MudItem>
+
+            <!-- Tagging Options -->
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_triggerWord" Label="Trigger Word / Phrase" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. sks character, ohwx style" HelperText="Prepended to every generated caption" Disabled="_isProcessing" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_selectedModel" Label="Ollama Vision Model" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_isProcessing">
+                    @if (_visionModels.Count > 0) {
+                        @foreach (var m in _visionModels) {
+                            <MudSelectItem Value="@m">@m</MudSelectItem>
+                        }
+                    } else {
+                        <MudSelectItem Value="@("llama3.2-vision")">llama3.2-vision</MudSelectItem>
+                        <MudSelectItem Value="@("llava")">llava</MudSelectItem>
+                        <MudSelectItem Value="@("minicpm-v")">minicpm-v</MudSelectItem>
+                        <MudSelectItem Value="@("qwen2-vl")">qwen2-vl</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_includedPhrases" Label="Included Words / Phrases (Comma-separated)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. detailed eyes, masterpiece" HelperText="Ensures these tags are present in every caption" Disabled="_isProcessing" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_blacklistWords" Label="Blacklist / Excluded Words (Comma-separated)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. watermark, signature, blurry" HelperText="Strips these terms from generated captions" Disabled="_isProcessing" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudSelect @bind-Value="_captionStyle" Label="Caption Style" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_isProcessing">
+                    <MudSelectItem Value="@("tags")">Visual Tags (Comma-separated descriptors for SDXL / Pony / Anime)</MudSelectItem>
+                    <MudSelectItem Value="@("natural")">Natural Language (1-2 descriptive sentences for FLUX.1)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+
+        <!-- Progress or Results -->
+        @if (_isProcessing) {
+            <div class="mt-4 p-3 text-center" style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Ollama Vision is analyzing and tagging your images...</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Please wait while the local neural network processes each picture.</MudText>
+            </div>
+        } else if (_lastResult != null) {
+            <MudCard Elevation="0" Class="mt-4 p-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #a6e3a1;">
+                            Tagging Complete! Processed @_lastResult.ProcessedCount image(s).
+                        </MudText>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_lastResult.OutputZip)) {
+                        <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Filled">ZIP Created</MudChip>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_lastResult.OutputZip)) {
+                    <div style="font-size: 0.8rem; color: #89b4fa; word-break: break-all;" class="mb-2">
+                        Output ZIP: <code>@_lastResult.OutputZip</code>
+                    </div>
+                } else if (!string.IsNullOrEmpty(_lastResult.OutputDirectory)) {
+                    <div style="font-size: 0.8rem; color: #89b4fa; word-break: break-all;" class="mb-2">
+                        Output Folder: <code>@_lastResult.OutputDirectory</code>
+                    </div>
+                }
+
+                @if (_lastResult.SampleCaptions.Count > 0) {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-weight: 600;">Sample Generated Captions:</MudText>
+                    @foreach (var sample in _lastResult.SampleCaptions) {
+                        <div style="font-size: 0.75rem; color: #cdd6f4; background-color: #181825; padding: 4px 8px; border-radius: 4px; margin-top: 4px;">
+                            <b>@sample.Image:</b> @sample.Caption
+                        </div>
+                    }
+                }
+            </MudCard>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="Cancel" Disabled="_isProcessing">Close</MudButton>
+        @if (_lastResult != null) {
+            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Done" OnClick="ApplyToWizard">
+                Use in Training Wizard
+            </MudButton>
+        } else {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartTaggingAsync" Disabled="@(_isProcessing || string.IsNullOrWhiteSpace(_inputPath))">
+                Start Auto-Tagging
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public string InitialInputPath { get; set; } = string.Empty;
+
+    [Parameter]
+    public string InitialTriggerWord { get; set; } = string.Empty;
+
+    private string _inputPath = string.Empty;
+    private string _outputPath = string.Empty;
+    private string _triggerWord = string.Empty;
+    private string _includedPhrases = string.Empty;
+    private string _blacklistWords = string.Empty;
+    private string _selectedModel = "llama3.2-vision";
+    private string _captionStyle = "tags";
+    private bool _createZip = true;
+
+    private bool _isCheckingOllama = true;
+    private bool _ollamaReachable = false;
+    private readonly List<string> _visionModels = new();
+
+    private bool _isProcessing = false;
+    private TaggerResultViewModel? _lastResult;
+
+    protected override async Task OnInitializedAsync() {
+        _inputPath = InitialInputPath;
+        _triggerWord = InitialTriggerWord;
+        await CheckOllamaStatusAsync();
+    }
+
+    private async Task CheckOllamaStatusAsync() {
+        _isCheckingOllama = true;
+        StateHasChanged();
+
+        try {
+            var result = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "check_ollama", new Dictionary<string, object?> {
+                ["ollama_url"] = "http://localhost:11434"
+            });
+
+            string dataStr = result.Data?.ToString() ?? string.Empty;
+            if (result.Success && !string.IsNullOrEmpty(dataStr)) {
+                using JsonDocument doc = JsonDocument.Parse(dataStr);
+                JsonElement root = doc.RootElement;
+                _ollamaReachable = root.TryGetProperty("reachable", out var reachElem) && reachElem.GetBoolean();
+
+                _visionModels.Clear();
+                if (root.TryGetProperty("vision_models", out var vElem) && vElem.ValueKind == JsonValueKind.Array) {
+                    foreach (var item in vElem.EnumerateArray()) {
+                        string m = item.GetString() ?? string.Empty;
+                        if (!string.IsNullOrEmpty(m)) {
+                            _visionModels.Add(m);
+                        }
+                    }
+                }
+
+                if (root.TryGetProperty("default_model", out var defElem)) {
+                    string def = defElem.GetString() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(def)) {
+                        _selectedModel = def;
+                    }
+                }
+            }
+        } catch {
+            _ollamaReachable = false;
+        } finally {
+            _isCheckingOllama = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task BrowseInputFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Images Dataset Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            _inputPath = folder;
+        }
+    }
+
+    private async Task BrowseInputZipAsync() {
+        string? file = await FileDialogService.PickZipFileAsync("Select Dataset ZIP Archive");
+        if (!string.IsNullOrEmpty(file)) {
+            _inputPath = file;
+        }
+    }
+
+    private async Task BrowseOutputFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Output Destination Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            _outputPath = folder;
+        }
+    }
+
+    private async Task StartTaggingAsync() {
+        if (string.IsNullOrWhiteSpace(_inputPath)) {
+            Snackbar.Add("Please specify an input folder or ZIP archive.", Severity.Warning);
+            return;
+        }
+
+        _isProcessing = true;
+        _lastResult = null;
+        StateHasChanged();
+
+        try {
+            var parameters = new Dictionary<string, object?> {
+                ["input_path"] = _inputPath,
+                ["output_path"] = _outputPath,
+                ["trigger_word"] = _triggerWord,
+                ["included_phrases"] = _includedPhrases,
+                ["blacklist_words"] = _blacklistWords,
+                ["model"] = _selectedModel,
+                ["caption_style"] = _captionStyle,
+                ["create_zip"] = _createZip,
+                ["ollama_url"] = "http://localhost:11434"
+            };
+
+            var pluginResult = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "tag_dataset", parameters);
+
+            string dataStr = pluginResult.Data?.ToString() ?? string.Empty;
+            if (!pluginResult.Success || string.IsNullOrEmpty(dataStr)) {
+                throw new InvalidOperationException(pluginResult.Message ?? "Failed to execute tagger plugin.");
+            }
+
+            using JsonDocument doc = JsonDocument.Parse(dataStr);
+            JsonElement root = doc.RootElement;
+
+            string status = root.TryGetProperty("status", out var sElem) ? (sElem.GetString() ?? "") : "";
+            if (status != "success") {
+                string msg = root.TryGetProperty("message", out var mElem) ? (mElem.GetString() ?? "") : "Tagging failed";
+                throw new InvalidOperationException(msg);
+            }
+
+            _lastResult = new TaggerResultViewModel {
+                ProcessedCount = root.TryGetProperty("processed_count", out var pElem) ? pElem.GetInt32() : 0,
+                OutputDirectory = root.TryGetProperty("output_directory", out var dElem) ? dElem.GetString() : null,
+                OutputZip = root.TryGetProperty("output_zip", out var zElem) ? zElem.GetString() : null
+            };
+
+            if (root.TryGetProperty("sample_captions", out var capArr) && capArr.ValueKind == JsonValueKind.Array) {
+                foreach (var item in capArr.EnumerateArray()) {
+                    string img = item.TryGetProperty("image", out var iE) ? (iE.GetString() ?? "") : "";
+                    string cap = item.TryGetProperty("caption", out var cE) ? (cE.GetString() ?? "") : "";
+                    _lastResult.SampleCaptions.Add(new SampleCaptionItem { Image = img, Caption = cap });
+                }
+            }
+
+            Snackbar.Add($"Tagging completed! {_lastResult.ProcessedCount} images tagged.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Tagger error: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ApplyToWizard() {
+        if (_lastResult != null) {
+            string finalTarget = !string.IsNullOrEmpty(_lastResult.OutputZip)
+                ? _lastResult.OutputZip
+                : (_lastResult.OutputDirectory ?? _inputPath);
+            MudDialog.Close(DialogResult.Ok(new TaggerDialogResult {
+                DatasetPath = finalTarget,
+                TriggerWord = _triggerWord
+            }));
+        } else {
+            MudDialog.Cancel();
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class TaggerResultViewModel {
+        public int ProcessedCount { get; set; }
+        public string? OutputDirectory { get; set; }
+        public string? OutputZip { get; set; }
+        public List<SampleCaptionItem> SampleCaptions { get; set; } = new();
+    }
+
+    public sealed class SampleCaptionItem {
+        public string Image { get; set; } = string.Empty;
+        public string Caption { get; set; } = string.Empty;
+    }
+
+    public sealed class TaggerDialogResult {
+        public string DatasetPath { get; set; } = string.Empty;
+        public string TriggerWord { get; set; } = string.Empty;
+    }
+}

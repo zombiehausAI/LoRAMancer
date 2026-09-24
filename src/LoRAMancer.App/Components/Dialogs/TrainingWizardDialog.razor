@@ -3,6 +3,7 @@
 @inject ModelArchitectureRegistry ArchitectureRegistry
 @inject TrainingEstimationService EstimationService
 @inject DatasetInspectorService DatasetInspector
+@inject IDialogService DialogService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 
@@ -61,12 +62,18 @@
         </MudGrid>
 
         <!-- Step 2: Dataset & Folder Inspection -->
-        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2 mt-4" Style="font-weight: 600;">2. Dataset & Output Folders</MudText>
+        <div class="d-flex align-center justify-space-between mb-2 mt-4">
+            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Style="font-weight: 600;">2. Dataset & Output Folders</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
+                Auto-Tag with Ollama
+            </MudButton>
+        </div>
         <MudGrid Class="mb-3">
             <MudItem xs="12" md="6">
                 <div class="d-flex align-center gap-2">
-                    <MudTextField @bind-Value="_datasetDirectory" Label="Dataset Directory" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select dataset folder..." FullWidth="true" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetDirectoryAsync">Browse</MudButton>
+                    <MudTextField @bind-Value="_datasetDirectory" Label="Dataset Folder or ZIP Archive" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select folder or .zip file..." FullWidth="true" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetDirectoryAsync">Folder</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetZipAsync">ZIP</MudButton>
                 </div>
             </MudItem>
             <MudItem xs="12" md="6">
@@ -86,6 +93,9 @@
                         <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Dataset Health Audit:</MudText>
                         <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_datasetReport.TotalImages Images</MudChip>
                         <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@_datasetReport.TotalCaptions Captions</MudChip>
+                        @if (_datasetReport.ExtractedFromZip) {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">Auto-Extracted from ZIP</MudChip>
+                        }
                         @if (_datasetReport.MissingCaptions > 0) {
                             <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">@_datasetReport.MissingCaptions Missing Captions</MudChip>
                         }
@@ -260,6 +270,41 @@
                 _outputDirectory = Path.Combine(folder, "output");
             }
             RecalculateEstimates();
+        }
+    }
+
+    private async Task PickDatasetZipAsync() {
+        string? zipPath = await FileDialogService.PickZipFileAsync("Select Training Dataset ZIP Archive");
+        if (!string.IsNullOrEmpty(zipPath)) {
+            _datasetReport = await DatasetInspector.InspectDatasetAsync(zipPath);
+            _datasetDirectory = _datasetReport.DatasetDirectory;
+            if (string.IsNullOrEmpty(_outputDirectory)) {
+                _outputDirectory = Path.Combine(Path.GetDirectoryName(zipPath) ?? _datasetDirectory, "output");
+            }
+            RecalculateEstimates();
+            Snackbar.Add("Dataset ZIP archive auto-extracted and verified!", Severity.Success);
+        }
+    }
+
+    private async Task OpenOllamaTaggerAsync() {
+        var parameters = new DialogParameters<OllamaTaggerDialog> {
+            { x => x.InitialInputPath, _datasetDirectory },
+            { x => x.InitialTriggerWord, _triggerWord }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<OllamaTaggerDialog>("Ollama Vision LoRA Tagger", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is OllamaTaggerDialog.TaggerDialogResult taggerResult) {
+            _datasetReport = await DatasetInspector.InspectDatasetAsync(taggerResult.DatasetPath);
+            _datasetDirectory = _datasetReport.DatasetDirectory;
+            if (!string.IsNullOrEmpty(taggerResult.TriggerWord)) {
+                _triggerWord = taggerResult.TriggerWord;
+            }
+            if (string.IsNullOrEmpty(_outputDirectory)) {
+                _outputDirectory = Path.Combine(_datasetDirectory, "output");
+            }
+            RecalculateEstimates();
+            Snackbar.Add("Tagged dataset loaded into Training Wizard!", Severity.Success);
         }
     }
 

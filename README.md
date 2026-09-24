@@ -13,10 +13,8 @@ LoRAMancer is a production-grade, highly responsive desktop LoRA Manager, Config
 - **ComfyUI Environment Ingestion & AMD Provisioning**: Automatically detects or parses your ComfyUI setup and ROCm wheel sources to provision a robust dedicated `.venv` (Python 3.12+) equipped with AMD ROCm-compatible PyTorch binaries.
 - **LoRA Library Manager & SafeTensors Inspector**: Ultra-fast header-only `.safetensors` binary parsing in C# without loading heavy model weights. Instant inspection of rank (dim), alpha, learning rates, optimizer, and base model architecture.
 - **Clone Configuration & AMD Hardware Sanitizer**: Clones hyperparameters from donor LoRAs into AI-Toolkit and Kohya-compatible training configs, automatically translating CUDA-only settings (such as 8-bit optimizers or Flash Attention) into AMD ROCm-safe counterparts (`bf16`, `sdpa`, disk latent caching).
-- **Interactive Training Orchestrator & Civitai-Style Wizard**: Streamlined setup with subject-type presets (Character, Style, Concept, Clothing), dataset health auditing (missing captions, low-res warnings), live hardware estimators (total steps, VRAM requirement vs detected AMD GPU, output file size, and training time), and zero-crash AMD ROCm pre-flight verification.
-- **Dual Plugin Architecture**: Extensible plugin system supporting:
-  - **C# Plugins**: Compiled `.dll` modules loaded dynamically from `plugins/<plugin_name>/<plugin_name>.dll`.
-  - **Python Plugins**: Independent Python plugins located in `plugins/<plugin_name>/`, each running inside its own isolated `.venv`.
+- **Interactive Training Orchestrator & Civitai-Style Wizard**: Streamlined setup with subject-type presets (Character, Style, Concept, Clothing), dataset health auditing (missing captions, low-res warnings), live hardware estimators (total steps, VRAM requirement vs detected AMD GPU, output file size, and training time), and zero-crash AMD ROCm pre-flight verification. Supports raw image folders and automatic ZIP archive unzipping.
+- **Dual Plugin Architecture & Built-in Ollama Vision Tagger**: Extensible plugin system supporting C# DLLs and Python plugins running in isolated environments. Includes a default **Ollama Vision LoRA Tagger** plugin to automatically caption datasets with local vision models (`llama3.2-vision`, `llava`) with trigger prefixing and blacklist filters.
 - **Installer & Auto-Update Engine**: Native Windows installer with built-in version checking and automated update pipelines.
 
 ## Project Structure

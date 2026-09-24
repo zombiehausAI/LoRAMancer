@@ -99,4 +99,44 @@ public sealed class TrainingEstimationTests {
         };
         Assert.False(unconfiguredInfo.IsReadyForTraining);
     }
+
+    [Fact]
+    public async Task DatasetInspector_ZipDataset_AutoExtractsAndInspects() {
+        DatasetInspectorService inspector = new();
+        string tempWorkDir = Path.Combine(Path.GetTempPath(), "loramancer_zip_test_" + Guid.NewGuid());
+        Directory.CreateDirectory(tempWorkDir);
+        string zipPath = Path.Combine(tempWorkDir, "test_dataset.zip");
+
+        try {
+            // Create a small zip file containing an image and caption
+            using (var zipStream = new FileStream(zipPath, FileMode.Create))
+            using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Create)) {
+                var imgEntry = archive.CreateEntry("sample01.png");
+                using (var entryStream = imgEntry.Open()) {
+                    byte[] dummyImg = new byte[25000];
+                    await entryStream.WriteAsync(dummyImg);
+                }
+
+                var txtEntry = archive.CreateEntry("sample01.txt");
+                using (var entryStream = txtEntry.Open())
+                using (var writer = new StreamWriter(entryStream)) {
+                    await writer.WriteAsync("sks person, looking at viewer");
+                }
+            }
+
+            var report = await inspector.InspectDatasetAsync(zipPath);
+
+            Assert.True(report.ExtractedFromZip);
+            Assert.Equal(zipPath, report.OriginalZipPath);
+            Assert.Equal(1, report.TotalImages);
+            Assert.Equal(1, report.TotalCaptions);
+            Assert.True(Directory.Exists(report.DatasetDirectory));
+            Assert.True(File.Exists(Path.Combine(report.DatasetDirectory, "sample01.png")));
+            Assert.True(File.Exists(Path.Combine(report.DatasetDirectory, "sample01.txt")));
+        } finally {
+            if (Directory.Exists(tempWorkDir)) {
+                Directory.Delete(tempWorkDir, true);
+            }
+        }
+    }
 }

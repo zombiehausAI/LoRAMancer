@@ -1,0 +1,9 @@
+{
+  "id": "ollama-lora-tagger",
+  "name": "Ollama Vision LoRA Tagger & Captioner",
+  "version": "1.0.0",
+  "description": "Auto-captions and tags LoRA training images using local Ollama vision models (e.g. llama3.2-vision, llava). Accepts folders or ZIP archives, applies trigger words, inclusions, and blacklists, and outputs ready-to-train datasets or ZIPs.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12"
+}
