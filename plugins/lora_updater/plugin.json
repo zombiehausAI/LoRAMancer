@@ -1,0 +1,9 @@
+{
+  "id": "lora-updater",
+  "name": "Lora Updater",
+  "version": "1.0.0",
+  "description": "Scans your LoRA directories, checks Civitai for newer model versions using file hashes, verifies base model compatibility, backs up old files, and downloads updates.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12"
+}

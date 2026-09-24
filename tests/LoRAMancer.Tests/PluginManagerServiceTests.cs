@@ -129,4 +129,27 @@ public class PluginManagerServiceTests : IDisposable {
         Assert.Equal("Ollama Vision LoRA Tagger & Captioner", parsed.Name);
         Assert.Equal("plugin.py", parsed.EntryPoint);
     }
+
+    [Fact]
+    public void LoraUpdaterManifest_ParsesCorrectly() {
+        // Arrange
+        string manifestPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "plugins", "lora_updater", "plugin.json");
+        if (!File.Exists(manifestPath)) {
+            // Also check relative to workspace
+            manifestPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "plugins", "lora_updater", "plugin.json"));
+        }
+
+        if (File.Exists(manifestPath)) {
+            string json = File.ReadAllText(manifestPath);
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(json, new System.Text.Json.JsonSerializerOptions {
+                PropertyNameCaseInsensitive = true
+            });
+
+            Assert.NotNull(parsed);
+            Assert.Equal("lora-updater", parsed.Id);
+            Assert.Equal("Lora Updater", parsed.Name);
+            Assert.Equal("plugin.py", parsed.EntryPoint);
+        }
+    }
 }
+

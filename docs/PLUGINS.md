@@ -118,3 +118,23 @@ LoRAMancer ships with a built-in Python plugin for automated AI image tagging an
   - **Blacklist Filtering**: Strips unwanted words, watermarks, or quality artifacts from generated captions.
   - **Caption Styles**: Supports comma-separated visual tags (ideal for SDXL, Pony, Illustrious) or natural language descriptive sentences (ideal for FLUX.1).
 - **Export Formats**: Outputs directly to a folder or generates a compressed `.zip` archive ready for training. The Training Wizard seamlessly accepts and auto-extracts `.zip` archives.
+
+### Lora Updater (`plugins/lora_updater/`)
+LoRAMancer ships with a built-in Python plugin for automated Civitai model version synchronization, update detection, and verified downloads:
+- **Hash-Based Identification**: Computes SHA256 hashes of local `.safetensors` files using fast 1MB block-streaming, guaranteeing exact matching on Civitai regardless of local filename changes.
+- **Model Type Verification**: Validates that matched models are legitimate `LORA` models (safely skipping Checkpoints, VAEs, or other asset types).
+- **Base Model Architecture Safeguards**:
+  - Compares local base model (e.g. SD 1.5, SDXL, FLUX.1) against the latest release.
+  - Automatically flags and skips cross-architecture updates (e.g., an SDXL successor released for an SD 1.5 original) to prevent breaking existing pipelines, unless the user explicitly enables "Allow Base Mismatch".
+- **Dry-Run Inspection (`check_updates`)**:
+  - Scans specified directories (with recursive subfolder toggle) and queries Civitai without downloading or modifying any files.
+  - Outputs a detailed matrix: model name, local version, latest version, download size, and status (`Up to Date`, `Update Available`, `Base Mismatch`, `Not on Civitai`).
+- **Safe Atomic Replacement & Backups (`scan_and_update`, `update_single`)**:
+  - Streams downloads directly to a `.tmp` file and performs SHA256 integrity verification against Civitai's checksum before replacing.
+  - **Organized Backups**: When a backup directory is configured, old versions are moved into a timestamped run folder categorized into subfolders by base model (e.g. `backups/LoraUpdater_2026-09-24_11-00-00/SDXL/<old_file>.safetensors`). If no backup folder is set, creates a companion `.bak` file.
+  - **Automatic Rollback**: If moving the downloaded file fails, the original backup is immediately restored.
+- **Civitai Authentication & Cloudflare Bypass**:
+  - Transmits Civitai API keys both via Bearer authorization headers and URL query parameters to unlock private, early-access, or member-only models.
+  - Employs desktop browser `User-Agent` headers to prevent Cloudflare HTTP 403 Forbidden responses.
+- **Interactive UI**: Launched directly from the LoRA Library Browser toolbar (**"Lora Updater"**) or via the Plugin Manager.
+

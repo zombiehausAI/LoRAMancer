@@ -28,6 +28,9 @@
                 @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{_loraLibrary.Count})..." : "Fetch Civitai Info")
             </MudButton>
         }
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.SystemUpdateAlt" OnClick="OpenLoraUpdaterAsync">
+            Lora Updater
+        </MudButton>
     </div>
 </div>
 
@@ -669,5 +672,22 @@
         if (arch.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return Color.Info;
         if (arch.Contains("pony", StringComparison.OrdinalIgnoreCase)) return Color.Secondary;
         return Color.Default;
+    }
+
+    private async Task OpenLoraUpdaterAsync() {
+        DialogParameters parameters = new() {
+            ["InitialFolder"] = !string.IsNullOrWhiteSpace(_rootFolder) ? _rootFolder : _currentFolder
+        };
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        };
+
+        var dialog = await DialogService.ShowAsync<LoraUpdaterDialog>("Lora Updater", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && !string.IsNullOrWhiteSpace(_rootFolder)) {
+            await LoadFolderAsync(_rootFolder);
+        }
     }
 }
