@@ -68,9 +68,33 @@ Each Python plugin lives in its own dedicated folder under `plugins/` and **must
 }
 ```
 
-### Virtual Environment Provisioning
-When a Python plugin is discovered or installed:
+### Virtual Environment Provisioning & PyTorch Hardware Matching
+When a Python plugin is discovered, installed, or updated:
 1. `PluginManagerService` checks for `plugins/<name>/.venv/`.
-2. If missing, it invokes Python 3.12 to provision `python -m venv plugins/<name>/.venv`.
-3. If `requirements.txt` is present, dependencies are installed into `plugins/<name>/.venv` using `pip install -r requirements.txt`.
-4. Communication with the host occurs via standard JSON-RPC / STDIO streaming.
+2. If missing, it invokes Python to create the isolated virtual environment: `python -m venv plugins/<name>/.venv`.
+3. Upgrades `pip`, `setuptools`, and `wheel` inside the plugin's `.venv`.
+4. **PyTorch Hardware Matching**: If `requirements.txt` requires `torch`, the plugin manager queries the host's hardware vendor (AMD ROCm, NVIDIA CUDA, Intel XPU, or CPU fallback) and automatically installs the appropriate hardware-accelerated PyTorch distribution before general packages:
+   - **AMD ROCm**: Installs the configured ROCm Windows wheels from Radeon repos (or local cache).
+   - **NVIDIA**: Installs CUDA wheels via `--index-url https://download.pytorch.org/whl/cu124`.
+   - **Intel**: Installs XPU wheels via `--index-url https://download.pytorch.org/whl/xpu`.
+   - **CPU**: Installs CPU-only wheels via `--index-url https://download.pytorch.org/whl/cpu`.
+5. Dependencies in `requirements.txt` are then installed with `pip install --no-cache-dir -r requirements.txt`.
+
+## Git Repository Integration & Plugin Manager
+
+LoRAMancer includes full Git integration in the UI for effortless plugin discovery, installation, and maintenance:
+
+### 1. Installing from a Git Repository
+- Users provide a Git URL (e.g., `https://github.com/user/loramancer-plugin.git`) directly in the Plugin Manager UI.
+- The manager executes `git clone --recurse-submodules <url> plugins/<plugin_name>`.
+- The plugin is automatically inspected, registered, and provisioned with an isolated `.venv` (including hardware-matched PyTorch if specified).
+
+### 2. Updating Git Plugins
+- **Single Plugin Update**: Click **Git Pull** on any Git-based plugin card to pull the latest commits and submodules (`git pull --recurse-submodules`), followed by updating `.venv` requirements.
+- **Batch Update**: Click **Update All (Git)** in the header toolbar to scan and update every installed Git plugin sequentially with live streaming logs.
+
+### 3. Plugin Lifecycle Management
+- **Enable / Disable**: Toggle the switch on any plugin card. Disabled plugins are flagged with a `.disabled` marker file in their directory, persisting state across application restarts and updates.
+- **Delete Plugin**: Click the delete icon to remove the plugin directory and unregister it. Read-only Git attributes are automatically cleared to prevent file lock errors on Windows.
+- **Test Run**: Send a ping diagnostic command to verify that the C# assembly or Python script executes cleanly inside its environment.
+- **Live Output Log**: A streaming console card displays real-time `stdout`/`stderr` from Git operations and `pip` installations.

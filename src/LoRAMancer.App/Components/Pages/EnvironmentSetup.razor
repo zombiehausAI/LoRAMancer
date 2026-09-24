@@ -24,43 +24,53 @@
                     <MudIcon Icon="@Icons.Material.Filled.Memory" Color="Color.Primary" />
                 </CardHeaderAvatar>
                 <CardHeaderContent>
-                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">AMD Hardware Detection</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Radeon GPU & ROCm driver status</MudText>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Hardware & Accelerator Detection</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Auto-detects AMD, NVIDIA, Intel, or CPU architectures</MudText>
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
                 <MudSimpleTable Dense="true" Style="background-color: #11111b; border-radius: 8px;">
                     <tbody>
                         <tr>
-                            <td><b>AMD GPU Present</b></td>
+                            <td><b>Detected Accelerator</b></td>
                             <td>
-                                @if (_envInfo.IsAmdGpuDetected) {
-                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Detected</MudChip>
-                                } else {
-                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">None / Fallback</MudChip>
-                                }
+                                <MudChip T="string" Color="@GetVendorColor(_envInfo.DetectedVendor)" Size="Size.Small">
+                                    @_envInfo.DetectedVendor.ToString().ToUpperInvariant()
+                                </MudChip>
                             </td>
                         </tr>
                         <tr>
-                            <td><b>GPU Model</b></td>
-                            <td style="color:#89b4fa;">@(_stringOrFallback(_envInfo.GpuName, "Generic AMD GPU"))</td>
+                            <td><b>Device Model</b></td>
+                            <td style="color:#89b4fa;">@(_stringOrFallback(_envInfo.GpuName, "Generic Device"))</td>
                         </tr>
                         <tr>
-                            <td><b>ROCm Driver</b></td>
-                            <td>
-                                @if (_envInfo.RocmDriverFound) {
-                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Installed (@_envInfo.RocmVersion)</MudChip>
-                                } else {
-                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">ROCm 7.x Driver Recommended</MudChip>
-                                }
-                            </td>
+                            <td><b>Target Wheels</b></td>
+                            <td style="color:#a6e3a1; font-weight: 600;">@GetTargetWheelsLabel(_selectedVendor ?? _envInfo.DetectedVendor)</td>
                         </tr>
-                        <tr>
-                            <td><b>Target PyTorch</b></td>
-                            <td style="color:#cba6f7;">@AmdVenvProvisioner.DefaultTorchVersion</td>
-                        </tr>
+                        @if (_envInfo.DetectedVendor == HardwareVendor.Amd) {
+                            <tr>
+                                <td><b>ROCm Driver</b></td>
+                                <td>
+                                    @if (_envInfo.RocmDriverFound) {
+                                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Installed (@_envInfo.RocmVersion)</MudChip>
+                                    } else {
+                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">ROCm 7.x Driver Recommended</MudChip>
+                                    }
+                                </td>
+                            </tr>
+                        }
                     </tbody>
                 </MudSimpleTable>
+
+                <div class="mt-3">
+                    <MudSelect T="HardwareVendor?" Label="Install Profile (Override or Auto)" @bind-Value="_selectedVendor" Dense="true" Variant="Variant.Outlined">
+                        <MudSelectItem Value="@((HardwareVendor?)null)">Auto-Detect (@_envInfo.DetectedVendor)</MudSelectItem>
+                        <MudSelectItem Value="@((HardwareVendor?)HardwareVendor.Amd)">AMD ROCm (Radeon Wheels)</MudSelectItem>
+                        <MudSelectItem Value="@((HardwareVendor?)HardwareVendor.Nvidia)">NVIDIA (CUDA 12.4 Wheels)</MudSelectItem>
+                        <MudSelectItem Value="@((HardwareVendor?)HardwareVendor.Intel)">Intel Arc (XPU Wheels)</MudSelectItem>
+                        <MudSelectItem Value="@((HardwareVendor?)HardwareVendor.Cpu)">CPU Fallback</MudSelectItem>
+                    </MudSelect>
+                </div>
             </MudCardContent>
         </MudCard>
     </MudItem>
@@ -100,18 +110,98 @@
     </MudItem>
 </MudGrid>
 
+<!-- Environment Maintenance & Package Manager -->
+<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+    <MudCardHeader>
+        <CardHeaderAvatar>
+            <MudIcon Icon="@Icons.Material.Filled.BuildCircle" Color="Color.Primary" />
+        </CardHeaderAvatar>
+        <CardHeaderContent>
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Environment Maintenance & Package Manager</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Upgrade pip, switch/downgrade PyTorch versions, or repair ROCm Windows driver patches</MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudGrid Class="align-center">
+            <!-- Pip Maintenance -->
+            <MudItem xs="12" md="4">
+                <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Pip Package Manager</MudText>
+                    <div class="d-flex align-center justify-space-between mt-1">
+                        <div style="font-size: 0.85rem; font-weight: 600; color: #89b4fa;">@_packageStatus.PipVersion</div>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" Disabled="_isMaintenanceBusy" OnClick="UpgradePipAsync">
+                            Upgrade Pip
+                        </MudButton>
+                    </div>
+                </MudCard>
+            </MudItem>
+
+            <!-- Installed PyTorch Status -->
+            <MudItem xs="12" md="4">
+                <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Current PyTorch Runtime</MudText>
+                    <div style="font-size: 0.85rem; font-weight: 600; color: #a6e3a1; margin-top: 4px;">
+                        @_packageStatus.TorchVersion
+                    </div>
+                </MudCard>
+            </MudItem>
+
+            <!-- ROCm Patch Re-apply -->
+            <MudItem xs="12" md="4">
+                <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">ROCm Windows Driver Stubs</MudText>
+                    <div class="d-flex align-center justify-space-between mt-1">
+                        <div style="font-size: 0.8rem; color: #cdd6f4;">rocm_sdk patch</div>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" Disabled="_isMaintenanceBusy" OnClick="ReapplyPatchAsync">
+                            Reapply Patch
+                        </MudButton>
+                    </div>
+                </MudCard>
+            </MudItem>
+
+            <!-- Switch / Downgrade PyTorch Controls -->
+            <MudItem xs="12" md="5">
+                <MudSelect T="string" Label="PyTorch Target Version / Distribution" @bind-Value="_selectedTorchPreset" Dense="true" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("AMD ROCm 7.2.1")">AMD ROCm 7.2.1 (Default)</MudSelectItem>
+                    <MudSelectItem Value="@("NVIDIA CUDA 12.4")">NVIDIA CUDA 12.4 (Latest Stable)</MudSelectItem>
+                    <MudSelectItem Value="@("NVIDIA CUDA 12.1")">NVIDIA CUDA 12.1 (Legacy Stable)</MudSelectItem>
+                    <MudSelectItem Value="@("Intel XPU")">Intel Arc / XPU</MudSelectItem>
+                    <MudSelectItem Value="@("CPU (No GPU)")">CPU-Only</MudSelectItem>
+                    <MudSelectItem Value="@("Custom")">Custom Wheel URL or Package Spec</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" md="5">
+                @if (_selectedTorchPreset == "Custom") {
+                    <MudTextField @bind-Value="_customTorchInput" Label="Custom Wheel URL or spec (e.g. torch==2.5.1)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                } else {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="display: block; margin-top: 8px;">
+                        Will force-reinstall matching torch, torchvision, and torchaudio packages from the official index.
+                    </MudText>
+                }
+            </MudItem>
+
+            <MudItem xs="12" md="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_isMaintenanceBusy" OnClick="SwitchPyTorchAsync">
+                    Switch PyTorch
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
+
 <!-- Provisioning Progress & Console -->
 <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244;">
     <MudCardHeader>
         <CardHeaderContent>
-            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Provisioning Log Console</MudText>
-            <MudText Typo="Typo.caption" Color="Color.Secondary">Step-by-step AMD virtual environment setup</MudText>
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Provisioning & Maintenance Console</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Real-time log streaming for environment setups and package updates</MudText>
         </CardHeaderContent>
     </MudCardHeader>
     <MudCardContent>
         <div class="terminal-window p-3" style="height: 300px; overflow-y: auto;">
             @if (_provisioningLogs.Count == 0) {
-                <div class="text-secondary" style="font-style: italic;">No active provisioning operation. Click "Provision .venv" above to configure your environment.</div>
+                <div class="text-secondary" style="font-style: italic;">No active operations. Output will stream here.</div>
             } else {
                 @foreach (string line in _provisioningLogs) {
                     <div class="terminal-line">@line</div>
@@ -123,9 +213,15 @@
 
 @code {
     private AmdEnvironmentInfo _envInfo = new();
+    private VenvPackageStatus _packageStatus = new();
     private string _scriptPath = string.Empty;
     private bool _isProvisioning;
+    private bool _isMaintenanceBusy;
     private readonly List<string> _provisioningLogs = new();
+
+    private HardwareVendor? _selectedVendor;
+    private string _selectedTorchPreset = "AMD ROCm 7.2.1";
+    private string _customTorchInput = string.Empty;
 
     protected override async Task OnInitializedAsync() {
         _envInfo = await Provisioner.DetectEnvironmentAsync();
@@ -134,6 +230,12 @@
             _scriptPath = defaultRefScript;
             await Provisioner.IngestComfyUiScriptAsync(_scriptPath, _envInfo);
         }
+        await RefreshPackageStatusAsync();
+    }
+
+    private async Task RefreshPackageStatusAsync() {
+        _packageStatus = await Provisioner.GetVenvPackageInfoAsync(Directory.GetCurrentDirectory());
+        StateHasChanged();
     }
 
     private async Task BrowseScriptAsync() {
@@ -157,7 +259,8 @@
     private async Task StartProvisioningAsync() {
         _isProvisioning = true;
         _provisioningLogs.Clear();
-        _provisioningLogs.Add("[LoRAMancer] Starting AMD ROCm virtual environment provisioning...");
+        HardwareVendor effectiveVendor = _selectedVendor ?? _envInfo.DetectedVendor;
+        _provisioningLogs.Add($"[LoRAMancer] Starting {effectiveVendor} virtual environment provisioning...");
 
         try {
             string targetDir = Directory.GetCurrentDirectory();
@@ -166,8 +269,9 @@
                     _provisioningLogs.Add(line);
                     StateHasChanged();
                 });
-            });
-            Snackbar.Add(".venv provisioned successfully!", Severity.Success);
+            }, _selectedVendor);
+            Snackbar.Add($".venv provisioned successfully for {effectiveVendor}!", Severity.Success);
+            await RefreshPackageStatusAsync();
         } catch (Exception ex) {
             _provisioningLogs.Add($"[ERROR] {ex.Message}");
             Snackbar.Add($"Provisioning failed: {ex.Message}", Severity.Error);
@@ -175,6 +279,83 @@
             _isProvisioning = false;
         }
     }
+
+    private async Task UpgradePipAsync() {
+        _isMaintenanceBusy = true;
+        _provisioningLogs.Add("[Maintenance] Initiating pip upgrade...");
+        try {
+            await Provisioner.UpgradePipAsync(Directory.GetCurrentDirectory(), line => {
+                InvokeAsync(() => {
+                    _provisioningLogs.Add(line);
+                    StateHasChanged();
+                });
+            });
+            Snackbar.Add("Pip upgraded successfully!", Severity.Success);
+            await RefreshPackageStatusAsync();
+        } catch (Exception ex) {
+            _provisioningLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Pip upgrade failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isMaintenanceBusy = false;
+        }
+    }
+
+    private async Task SwitchPyTorchAsync() {
+        _isMaintenanceBusy = true;
+        string targetDir = Directory.GetCurrentDirectory();
+
+        (string pkgSpec, string? indexUrl) = _selectedTorchPreset switch {
+            "AMD ROCm 7.2.1" => (string.Join(" ", Provisioner.CurrentPyTorchWheels.Select(w => $"\"{w}\"")), null),
+            "NVIDIA CUDA 12.4" => ("torch torchvision torchaudio", "https://download.pytorch.org/whl/cu124"),
+            "NVIDIA CUDA 12.1" => ("torch torchvision torchaudio", "https://download.pytorch.org/whl/cu121"),
+            "Intel XPU" => ("torch torchvision torchaudio", "https://download.pytorch.org/whl/xpu"),
+            "CPU (No GPU)" => ("torch torchvision torchaudio", "https://download.pytorch.org/whl/cpu"),
+            _ => (string.IsNullOrWhiteSpace(_customTorchInput) ? "torch torchvision" : _customTorchInput, null)
+        };
+
+        _provisioningLogs.Add($"[Maintenance] Switching PyTorch to: {_selectedTorchPreset}...");
+
+        try {
+            await Provisioner.SwitchPyTorchVersionAsync(targetDir, pkgSpec, indexUrl, line => {
+                InvokeAsync(() => {
+                    _provisioningLogs.Add(line);
+                    StateHasChanged();
+                });
+            });
+            Snackbar.Add($"PyTorch switched to {_selectedTorchPreset}!", Severity.Success);
+            await RefreshPackageStatusAsync();
+        } catch (Exception ex) {
+            _provisioningLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"PyTorch switch failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isMaintenanceBusy = false;
+        }
+    }
+
+    private async Task ReapplyPatchAsync() {
+        string targetDir = Directory.GetCurrentDirectory();
+        string venvPath = Path.Combine(targetDir, ".venv");
+        _provisioningLogs.Add("[Maintenance] Re-evaluating ROCm SDK Windows driver stubs...");
+        AmdVenvProvisioner.PatchRocmSdkDistInfo(venvPath, line => {
+            _provisioningLogs.Add(line);
+        });
+        Snackbar.Add("ROCm SDK patch checked!", Severity.Info);
+        await Task.CompletedTask;
+    }
+
+    private static Color GetVendorColor(HardwareVendor vendor) => vendor switch {
+        HardwareVendor.Amd => Color.Success,
+        HardwareVendor.Nvidia => Color.Success,
+        HardwareVendor.Intel => Color.Info,
+        _ => Color.Warning
+    };
+
+    private static string GetTargetWheelsLabel(HardwareVendor vendor) => vendor switch {
+        HardwareVendor.Amd => "AMD ROCm 7.2.1 Wheels (repo.radeon.com)",
+        HardwareVendor.Nvidia => "NVIDIA CUDA 12.4 Wheels (PyTorch cu124)",
+        HardwareVendor.Intel => "Intel Arc XPU Wheels (PyTorch xpu)",
+        _ => "CPU-Optimized Wheels (PyTorch cpu)"
+    };
 
     private static string _stringOrFallback(string? val, string fallback) {
         return string.IsNullOrWhiteSpace(val) ? fallback : val;

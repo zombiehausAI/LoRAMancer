@@ -172,24 +172,42 @@ public sealed class TrainingEstimationService {
     }
 
     private static (string GpuName, double VramGb) DetectAmdGpu() {
+        string? nonAmdFallback = null;
+        double nonAmdVram = 16.0;
+
         try {
             using ManagementObjectSearcher searcher = new("SELECT Name, AdapterRAM FROM Win32_VideoController");
             foreach (ManagementObject mo in searcher.Get()) {
                 string name = mo["Name"]?.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(name)) {
+                    continue;
+                }
+
+                double vramGb = 16.0;
+                if (mo["AdapterRAM"] != null && double.TryParse(mo["AdapterRAM"].ToString(), out double ramBytes) && ramBytes > 0) {
+                    vramGb = ramBytes / (1024.0 * 1024.0 * 1024.0);
+                }
+                if (vramGb < 4.0) {
+                    vramGb = 16.0; // WMI 32-bit integer overflow fallback for modern high-VRAM GPUs
+                }
+
                 if (name.Contains("AMD", StringComparison.OrdinalIgnoreCase) || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase)) {
-                    double vramGb = 16.0;
-                    if (mo["AdapterRAM"] != null && double.TryParse(mo["AdapterRAM"].ToString(), out double ramBytes) && ramBytes > 0) {
-                        vramGb = ramBytes / (1024.0 * 1024.0 * 1024.0);
-                    }
-                    if (vramGb < 4.0) {
-                        vramGb = 16.0; // WMI 32-bit integer overflow fallback for modern 16/24GB GPUs
-                    }
                     return (name, vramGb);
+                }
+
+                if (nonAmdFallback == null && !name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) && !name.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
+                    nonAmdFallback = name;
+                    nonAmdVram = vramGb;
                 }
             }
         } catch {
             // Fallback for non-WMI environments
         }
-        return ("AMD Radeon Graphics", 16.0);
+
+        if (nonAmdFallback != null) {
+            return ($"{nonAmdFallback} (Test Mode)", nonAmdVram);
+        }
+
+        return ("AMD Radeon Graphics (Simulated)", 16.0);
     }
 }

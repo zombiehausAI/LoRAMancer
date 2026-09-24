@@ -58,24 +58,52 @@ public sealed class AmdVenvProvisioner {
     }
 
     public void DetectGpuHardware(AmdEnvironmentInfo info) {
+        string? nvidiaName = null;
+        string? intelName = null;
+
         try {
             using ManagementObjectSearcher searcher = new("SELECT Name FROM Win32_VideoController");
             foreach (ManagementObject mo in searcher.Get()) {
                 string name = mo["Name"]?.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(name) || name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
+                    continue;
+                }
+
                 if (Regex.IsMatch(name, "AMD|Radeon|ROCm", RegexOptions.IgnoreCase)) {
+                    info.DetectedVendor = HardwareVendor.Amd;
                     info.IsAmdGpuDetected = true;
                     info.GpuName = name;
                     break;
                 }
+
+                if (Regex.IsMatch(name, "NVIDIA|GeForce|RTX|Quadro|Tesla", RegexOptions.IgnoreCase) && nvidiaName == null) {
+                    nvidiaName = name;
+                } else if (Regex.IsMatch(name, "Intel|Arc|Iris|Xe", RegexOptions.IgnoreCase) && intelName == null) {
+                    intelName = name;
+                }
+            }
+
+            if (!info.IsAmdGpuDetected) {
+                if (nvidiaName != null) {
+                    info.DetectedVendor = HardwareVendor.Nvidia;
+                    info.GpuName = nvidiaName;
+                } else if (intelName != null) {
+                    info.DetectedVendor = HardwareVendor.Intel;
+                    info.GpuName = intelName;
+                } else {
+                    info.DetectedVendor = HardwareVendor.Cpu;
+                    info.GpuName = "CPU / Generic (No dedicated accelerator)";
+                }
             }
         } catch {
+            info.DetectedVendor = HardwareVendor.Amd;
             info.IsAmdGpuDetected = true;
-            info.GpuName = "AMD Radeon Graphics (Generic)";
+            info.GpuName = "AMD Radeon Graphics (Fallback)";
         }
 
         string rocmDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "AMD", "ROCm");
         info.RocmDriverFound = Directory.Exists(rocmDir);
-        info.RocmVersion = info.RocmDriverFound ? "7.2.1" : "Not Found (Driver)";
+        info.RocmVersion = info.RocmDriverFound ? "7.2.1" : (info.DetectedVendor == HardwareVendor.Amd ? "Not Found (Driver)" : "N/A (Non-AMD)");
     }
 
     public async Task DetectSystemPythonAsync(AmdEnvironmentInfo info, CancellationToken cancellationToken = default) {
@@ -139,13 +167,19 @@ public sealed class AmdVenvProvisioner {
     public async Task ProvisionVenvAsync(
         string targetDirectory,
         Action<string>? onProgress,
+        HardwareVendor? overrideVendor = null,
         CancellationToken cancellationToken = default
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
         string venvPath = Path.Combine(targetDirectory, ".venv");
         string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
 
+        AmdEnvironmentInfo envInfo = new();
+        DetectGpuHardware(envInfo);
+        HardwareVendor vendor = overrideVendor ?? envInfo.DetectedVendor;
+
         onProgress?.Invoke($"[Provisioner] Target .venv path: {venvPath}");
+        onProgress?.Invoke($"[Provisioner] Hardware accelerator target: {vendor} ({envInfo.GpuName})");
 
         if (!File.Exists(pythonExe)) {
             onProgress?.Invoke("[Provisioner] Creating dedicated Python 3.12 virtual environment (.venv)...");
@@ -177,39 +211,92 @@ public sealed class AmdVenvProvisioner {
             cancellationToken
         );
 
-        onProgress?.Invoke($"[Provisioner] Installing AMD ROCm PyTorch wheels ({CurrentTorchVersion})...");
-        string wheelsArg = string.Join(" ", CurrentPyTorchWheels.Select(w => $"\"{w}\""));
-        int torchExit = await _processRunner.RunAsync(
-            pythonExe,
-            $"-m pip install --no-cache-dir --no-deps {wheelsArg}",
-            targetDirectory,
-            null,
-            line => onProgress?.Invoke($"[torch] {line}"),
-            line => onProgress?.Invoke($"[torch err] {line}"),
-            cancellationToken
-        );
+        switch (vendor) {
+            case HardwareVendor.Nvidia:
+                onProgress?.Invoke("[Provisioner] NVIDIA GPU detected. Installing PyTorch with CUDA 12.4 support from official index...");
+                int nvExit = await _processRunner.RunAsync(
+                    pythonExe,
+                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
+                    targetDirectory,
+                    null,
+                    line => onProgress?.Invoke($"[torch-cuda] {line}"),
+                    line => onProgress?.Invoke($"[torch-cuda err] {line}"),
+                    cancellationToken
+                );
+                if (nvExit != 0) {
+                    throw new InvalidOperationException("Failed to install PyTorch CUDA wheels into .venv");
+                }
+                break;
 
-        if (torchExit != 0) {
-            throw new InvalidOperationException("Failed to install PyTorch ROCm wheels into .venv");
+            case HardwareVendor.Intel:
+                onProgress?.Invoke("[Provisioner] Intel GPU detected. Installing PyTorch with Intel XPU acceleration from official index...");
+                int intelExit = await _processRunner.RunAsync(
+                    pythonExe,
+                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu",
+                    targetDirectory,
+                    null,
+                    line => onProgress?.Invoke($"[torch-xpu] {line}"),
+                    line => onProgress?.Invoke($"[torch-xpu err] {line}"),
+                    cancellationToken
+                );
+                if (intelExit != 0) {
+                    throw new InvalidOperationException("Failed to install PyTorch XPU wheels into .venv");
+                }
+                break;
+
+            case HardwareVendor.Cpu:
+                onProgress?.Invoke("[Provisioner] No dedicated GPU detected. Installing CPU-optimized PyTorch build from official index...");
+                int cpuExit = await _processRunner.RunAsync(
+                    pythonExe,
+                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu",
+                    targetDirectory,
+                    null,
+                    line => onProgress?.Invoke($"[torch-cpu] {line}"),
+                    line => onProgress?.Invoke($"[torch-cpu err] {line}"),
+                    cancellationToken
+                );
+                if (cpuExit != 0) {
+                    throw new InvalidOperationException("Failed to install PyTorch CPU wheels into .venv");
+                }
+                break;
+
+            case HardwareVendor.Amd:
+            default:
+                onProgress?.Invoke($"[Provisioner] AMD GPU detected. Installing AMD ROCm PyTorch wheels ({CurrentTorchVersion})...");
+                string wheelsArg = string.Join(" ", CurrentPyTorchWheels.Select(w => $"\"{w}\""));
+                int torchExit = await _processRunner.RunAsync(
+                    pythonExe,
+                    $"-m pip install --no-cache-dir --no-deps {wheelsArg}",
+                    targetDirectory,
+                    null,
+                    line => onProgress?.Invoke($"[torch] {line}"),
+                    line => onProgress?.Invoke($"[torch err] {line}"),
+                    cancellationToken
+                );
+
+                if (torchExit != 0) {
+                    throw new InvalidOperationException("Failed to install PyTorch ROCm wheels into .venv");
+                }
+
+                onProgress?.Invoke("[Provisioner] Installing AMD ROCm SDK wheels...");
+                string sdkArg = string.Join(" ", CurrentRocmSdkWheels.Select(w => $"\"{w}\""));
+                int sdkExit = await _processRunner.RunAsync(
+                    pythonExe,
+                    $"-m pip install --no-cache-dir {sdkArg}",
+                    targetDirectory,
+                    null,
+                    line => onProgress?.Invoke($"[rocm_sdk] {line}"),
+                    line => onProgress?.Invoke($"[rocm_sdk err] {line}"),
+                    cancellationToken
+                );
+
+                if (sdkExit == 0) {
+                    PatchRocmSdkDistInfo(venvPath, onProgress);
+                }
+                break;
         }
 
-        onProgress?.Invoke("[Provisioner] Installing AMD ROCm SDK wheels...");
-        string sdkArg = string.Join(" ", CurrentRocmSdkWheels.Select(w => $"\"{w}\""));
-        int sdkExit = await _processRunner.RunAsync(
-            pythonExe,
-            $"-m pip install --no-cache-dir {sdkArg}",
-            targetDirectory,
-            null,
-            line => onProgress?.Invoke($"[rocm_sdk] {line}"),
-            line => onProgress?.Invoke($"[rocm_sdk err] {line}"),
-            cancellationToken
-        );
-
-        if (sdkExit == 0) {
-            PatchRocmSdkDistInfo(venvPath, onProgress);
-        }
-
-        onProgress?.Invoke("[Provisioner] .venv successfully provisioned and verified for AMD ROCm training!");
+        onProgress?.Invoke($"[Provisioner] .venv successfully provisioned and verified for {vendor} training!");
     }
 
     public static void PatchRocmSdkDistInfo(string venvPath, Action<string>? onProgress) {
@@ -240,5 +327,114 @@ public sealed class AmdVenvProvisioner {
             File.AppendAllText(distInfoPath, patch);
             onProgress?.Invoke($"[Patch] Applied {missing.Count} Windows library stubs to rocm_sdk _dist_info.py");
         }
+    }
+
+    public async Task<VenvPackageStatus> GetVenvPackageInfoAsync(string targetDirectory, CancellationToken cancellationToken = default) {
+        VenvPackageStatus status = new();
+        string venvPath = Path.Combine(targetDirectory, ".venv");
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+
+        if (!File.Exists(pythonExe)) {
+            status.IsVenvCreated = false;
+            return status;
+        }
+
+        status.IsVenvCreated = true;
+
+        await _processRunner.RunAsync(
+            pythonExe,
+            "-m pip --version",
+            targetDirectory,
+            null,
+            line => {
+                if (line.Contains("pip ")) {
+                    status.PipVersion = line.Trim();
+                }
+            },
+            _ => { },
+            cancellationToken
+        );
+
+        await _processRunner.RunAsync(
+            pythonExe,
+            "-c \"import sys;\ntry:\n import torch\n print(f'TORCH:{torch.__version__} (CUDA/HIP: {torch.cuda.is_available()})')\nexcept Exception as e:\n print('TORCH:Not Installed')\"",
+            targetDirectory,
+            null,
+            line => {
+                if (line.StartsWith("TORCH:")) {
+                    status.TorchVersion = line.Substring(6).Trim();
+                }
+            },
+            _ => { },
+            cancellationToken
+        );
+
+        return status;
+    }
+
+    public async Task UpgradePipAsync(string targetDirectory, Action<string>? onProgress, CancellationToken cancellationToken = default) {
+        string venvPath = Path.Combine(targetDirectory, ".venv");
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        if (!File.Exists(pythonExe)) {
+            throw new FileNotFoundException("Cannot upgrade pip: .venv does not exist.", pythonExe);
+        }
+
+        onProgress?.Invoke("[Pip] Upgrading pip to latest version...");
+        int exitCode = await _processRunner.RunAsync(
+            pythonExe,
+            "-m pip install --upgrade pip",
+            targetDirectory,
+            null,
+            line => onProgress?.Invoke($"[pip] {line}"),
+            line => onProgress?.Invoke($"[pip err] {line}"),
+            cancellationToken
+        );
+
+        if (exitCode != 0) {
+            throw new InvalidOperationException("Failed to upgrade pip in .venv");
+        }
+        onProgress?.Invoke("[Pip] Pip successfully upgraded to latest version!");
+    }
+
+    public async Task SwitchPyTorchVersionAsync(
+        string targetDirectory,
+        string packageSpecOrWheelUrl,
+        string? indexUrl,
+        Action<string>? onProgress,
+        CancellationToken cancellationToken = default
+    ) {
+        string venvPath = Path.Combine(targetDirectory, ".venv");
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        if (!File.Exists(pythonExe)) {
+            throw new FileNotFoundException("Cannot switch PyTorch: .venv does not exist.", pythonExe);
+        }
+
+        string cmd;
+        if (packageSpecOrWheelUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            packageSpecOrWheelUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            packageSpecOrWheelUrl.EndsWith(".whl", StringComparison.OrdinalIgnoreCase)) {
+            onProgress?.Invoke($"[PyTorch Switch] Installing custom wheel from: {packageSpecOrWheelUrl}");
+            cmd = $"-m pip install --no-cache-dir --force-reinstall \"{packageSpecOrWheelUrl}\"";
+        } else {
+            string indexArg = !string.IsNullOrWhiteSpace(indexUrl) ? $"--index-url \"{indexUrl}\"" : string.Empty;
+            onProgress?.Invoke($"[PyTorch Switch] Installing package spec: {packageSpecOrWheelUrl} {indexArg}");
+            cmd = $"-m pip install --no-cache-dir --force-reinstall {packageSpecOrWheelUrl} {indexArg}";
+        }
+
+        int exitCode = await _processRunner.RunAsync(
+            pythonExe,
+            cmd,
+            targetDirectory,
+            null,
+            line => onProgress?.Invoke($"[pip] {line}"),
+            line => onProgress?.Invoke($"[pip err] {line}"),
+            cancellationToken
+        );
+
+        if (exitCode != 0) {
+            throw new InvalidOperationException($"Failed to switch PyTorch version to: {packageSpecOrWheelUrl}");
+        }
+
+        onProgress?.Invoke("[PyTorch Switch] PyTorch switch/upgrade completed successfully!");
     }
 }

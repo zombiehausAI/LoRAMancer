@@ -4,6 +4,19 @@
 
 LoRAMancer targets AMD Radeon GPUs on Windows utilizing official AMD ROCm wheels. The application requires **Python 3.12+ (prefer 3.12)** and establishes a dedicated `.venv` in the application environment without modifying any existing external tools (such as ComfyUI).
 
+## Multi-Vendor Accelerator Auto-Detection
+
+While LoRAMancer specializes in solving the AMD ROCm tooling gap on Windows, `AmdVenvProvisioner` automatically detects the host hardware accelerator and installs the appropriate PyTorch distribution:
+
+| Detected Hardware | Target Accelerator | Provisioned Wheels & Source |
+| :--- | :--- | :--- |
+| **AMD Radeon** | ROCm 7.2.1 | Official AMD Wheels (`repo.radeon.com`) + `rocm_sdk` + Windows stubs |
+| **NVIDIA GeForce / RTX** | CUDA 12.4 | Official PyTorch CUDA index (`download.pytorch.org/whl/cu124`) |
+| **Intel Arc / Xe** | Intel XPU | Official PyTorch Intel XPU index (`download.pytorch.org/whl/xpu`) |
+| **CPU / Generic** | CPU Optimized | Official PyTorch CPU index (`download.pytorch.org/whl/cpu`) |
+
+Users can allow the system to auto-detect their GPU or manually override the target architecture profile via the dropdown in **Environment Setup** (`/environment`).
+
 ## Wheel Sourcing & Admin Configuration
 
 LoRAMancer supports dynamic, script-free wheel updates via the **Admin & Settings Page** (`/settings`):

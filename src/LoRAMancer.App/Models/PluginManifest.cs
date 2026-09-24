@@ -12,4 +12,8 @@ public sealed class PluginManifest {
     public string DirectoryPath { get; set; } = string.Empty;
     public bool IsEnabled { get; set; } = true;
     public bool HasDedicatedVenv { get; set; }
+    public bool IsGitRepo { get; set; }
+    public string GitRemoteUrl { get; set; } = string.Empty;
+    public bool RequiresPyTorch { get; set; }
+    public DateTime? LastUpdated { get; set; }
 }

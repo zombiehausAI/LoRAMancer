@@ -50,14 +50,21 @@ if (-not $SkipPrereqCheck) {
         Write-Warning "Python 3.12+ was not detected on PATH. Python features will require configuring the Python path in LoRAMancer."
     }
 
-    # Detect AMD GPU & ROCm
+    # Detect GPU & Accelerator Architecture
     try {
         $videoControllers = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue
         $amdGpu = $videoControllers | Where-Object { $_.Name -match "AMD|Radeon|ROCm" } | Select-Object -First 1
+        $nvidiaGpu = $videoControllers | Where-Object { $_.Name -match "NVIDIA|GeForce|RTX|Quadro" } | Select-Object -First 1
+        $intelGpu = $videoControllers | Where-Object { $_.Name -match "Intel|Arc|Iris|Xe" } | Select-Object -First 1
+
         if ($amdGpu) {
-            Write-Host "  > AMD GPU detected: $($amdGpu.Name)" -ForegroundColor Green
+            Write-Host "  > AMD GPU detected: $($amdGpu.Name) (Target: ROCm 7.x Wheels)" -ForegroundColor Green
+        } elseif ($nvidiaGpu) {
+            Write-Host "  > NVIDIA GPU detected: $($nvidiaGpu.Name) (Target: CUDA 12.x Wheels)" -ForegroundColor Green
+        } elseif ($intelGpu) {
+            Write-Host "  > Intel GPU detected: $($intelGpu.Name) (Target: Intel XPU Wheels)" -ForegroundColor Cyan
         } else {
-            Write-Host "  > Note: No AMD GPU detected. Application will operate in CPU/Fallback mode." -ForegroundColor Yellow
+            Write-Host "  > No dedicated accelerator detected. Application will use CPU-optimized PyTorch wheels." -ForegroundColor Yellow
         }
     } catch {
         Write-Host "  > Could not query GPU information." -ForegroundColor Yellow
@@ -89,10 +96,15 @@ if (Test-Path $appCsproj) {
     Write-Host "  > Source project not found, deploying packaged binaries..."
 }
 
-# Copy plugins if present
+# Deploy default plugins without overwriting existing user plugins or their isolated .venvs
 $srcPlugins = Join-Path $sourceRoot "plugins"
 if (Test-Path $srcPlugins) {
-    Copy-Item "$srcPlugins\*" $pluginsPath -Recurse -Force
+    Get-ChildItem -Path $srcPlugins | ForEach-Object {
+        $dest = Join-Path $pluginsPath $_.Name
+        if (-not (Test-Path $dest)) {
+            Copy-Item $_.FullName $dest -Recurse
+        }
+    }
 }
 
 # 4. Shortcut Creation

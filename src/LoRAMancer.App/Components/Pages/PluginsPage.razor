@@ -5,17 +5,84 @@
 <div class="d-flex align-center justify-space-between mb-4">
     <div>
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Plugin Manager</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Extend LoRAMancer with C# assemblies (.dll) or Python plugins with isolated .venv environments</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Extend LoRAMancer with C# assemblies or Python plugins with isolated environments</MudText>
     </div>
     <div class="d-flex gap-2">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshPluginsAsync">
-            Rescan Plugins
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _showInstallCard = !_showInstallCard)" Disabled="_isBusy">
+            Install from Git
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Sync" OnClick="UpdateAllGitPluginsAsync" Disabled="_isBusy">
+            Update All (Git)
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshPluginsAsync" Disabled="_isBusy">
+            Rescan
         </MudButton>
     </div>
 </div>
 
+@if (_showInstallCard) {
+    <MudCard Elevation="2" Class="mb-4" Style="background-color: #1e1e2e; border: 1px solid #45475a;">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cba6f7;">
+                    <MudIcon Icon="@Icons.Custom.Brands.GitHub" Class="mr-2" Size="Size.Small" />
+                    Install Plugin from Git Repository
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Clones repository with submodules into <code>@PluginManager.PluginsDirectory</code>, provisions an isolated .venv, and matches your GPU (AMD ROCm / NVIDIA CUDA / Intel XPU / CPU) for PyTorch.
+                </MudText>
+            </CardHeaderContent>
+            <CardHeaderActions>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showInstallCard = false)" />
+            </CardHeaderActions>
+        </MudCardHeader>
+        <MudCardContent>
+            <div class="d-flex gap-3 align-center">
+                <MudTextField @bind-Value="_gitRepoUrl" Label="Git Repository URL" Placeholder="https://github.com/user/loramancer-plugin.git" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" Disabled="_isBusy" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" OnClick="InstallGitPluginAsync" Disabled="@(string.IsNullOrWhiteSpace(_gitRepoUrl) || _isBusy)">
+                    @if (_isBusy) {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                        <span>Installing...</span>
+                    } else {
+                        <span>Clone & Install</span>
+                    }
+                </MudButton>
+            </div>
+        </MudCardContent>
+    </MudCard>
+}
+
+@if (_isBusy || _logLines.Count > 0) {
+    <MudCard Elevation="2" Class="mb-4" Style="background-color: #11111b; border: 1px solid #313244;">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <div class="d-flex align-center gap-2">
+                    @if (_isBusy) {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                    } else {
+                        <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Color="Color.Secondary" />
+                    }
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 600; color: #a6adc8;">
+                        @(_isBusy ? "Operation in Progress..." : "Task Execution Log")
+                    </MudText>
+                </div>
+            </CardHeaderContent>
+            <CardHeaderActions>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => _logLines.Clear())" Disabled="_isBusy">
+                    Clear Log
+                </MudButton>
+            </CardHeaderActions>
+        </MudCardHeader>
+        <MudCardContent Style="max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; background-color: #0b0b10; color: #a6adc8; padding: 12px; border-radius: 4px;">
+            @foreach (var line in _logLines) {
+                <div style="white-space: pre-wrap; word-break: break-all;">@line</div>
+            }
+        </MudCardContent>
+    </MudCard>
+}
+
 <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
-    Plugins live in <code>@PluginManager.PluginsDirectory</code>. C# plugins are <code>.dll</code> files in subfolders; Python plugins live in their own folder with their own dedicated <code>.venv</code>.
+    Plugins live in <code>@PluginManager.PluginsDirectory</code>. Python plugins use isolated <code>.venv</code> virtual environments with hardware-specific PyTorch wheels.
 </MudAlert>
 
 <MudGrid>
@@ -24,13 +91,13 @@
             <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
                 <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
                 <MudText Typo="Typo.h6">No Plugins Discovered</MudText>
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Add C# DLLs or Python packages to the plugins/ folder.</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Add C# DLLs or install a Git repository above to extend LoRAMancer.</MudText>
             </MudCard>
         </MudItem>
     } else {
         @foreach (var plugin in PluginManager.Plugins) {
             <MudItem xs="12" md="6">
-                <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; height: 100%;">
+                <MudCard Elevation="1" Style="@($"background-color: #181825; border: 1px solid {(plugin.IsEnabled ? "#313244" : "#45475a")}; opacity: {(plugin.IsEnabled ? "1.0" : "0.65")}; height: 100%;")">
                     <MudCardHeader>
                         <CardHeaderAvatar>
                             @if (plugin.PluginType == "CSharp") {
@@ -40,17 +107,26 @@
                             }
                         </CardHeaderAvatar>
                         <CardHeaderContent>
-                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@plugin.Name</MudText>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">v@plugin.Version • @plugin.PluginType Plugin</MudText>
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@plugin.Name</MudText>
+                                @if (plugin.IsGitRepo) {
+                                    <MudChip T="string" Color="Color.Dark" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Custom.Brands.GitHub" Style="font-size: 0.7rem; height: 22px;">Git</MudChip>
+                                }
+                                @if (plugin.RequiresPyTorch) {
+                                    <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">PyTorch</MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                v@plugin.Version • @plugin.PluginType Plugin
+                                @if (plugin.LastUpdated.HasValue) {
+                                    <span> • Updated @plugin.LastUpdated.Value.ToLocalTime().ToString("g")</span>
+                                }
+                            </MudText>
                         </CardHeaderContent>
                         <CardHeaderActions>
-                            @if (plugin.PluginType == "Python") {
-                                @if (plugin.HasDedicatedVenv) {
-                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Outlined">.venv Ready</MudChip>
-                                } else {
-                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined">Needs .venv</MudChip>
-                                }
-                            }
+                            <MudTooltip Text="@(plugin.IsEnabled ? "Plugin Enabled" : "Plugin Disabled")">
+                                <MudSwitch T="bool" Value="@plugin.IsEnabled" ValueChanged="@(val => OnTogglePlugin(plugin, val))" Color="Color.Success" Disabled="_isBusy" />
+                            </MudTooltip>
                         </CardHeaderActions>
                     </MudCardHeader>
                     <MudCardContent>
@@ -58,16 +134,29 @@
                         <div style="font-size: 0.75rem; color: #6c7086; word-break: break-all;">
                             Directory: @plugin.DirectoryPath
                         </div>
-                    </MudCardContent>
-                    <MudCardActions>
-                        @if (plugin.PluginType == "Python" && !plugin.HasDedicatedVenv) {
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))">
-                                Provision .venv
-                            </MudButton>
+                        @if (!string.IsNullOrEmpty(plugin.GitRemoteUrl)) {
+                            <div style="font-size: 0.75rem; color: #89b4fa; word-break: break-all;" class="mt-1">
+                                Repo: @plugin.GitRemoteUrl
+                            </div>
                         }
-                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => TestPluginAsync(plugin))">
-                            Test Run
-                        </MudButton>
+                    </MudCardContent>
+                    <MudCardActions Class="d-flex justify-space-between">
+                        <div class="d-flex gap-1">
+                            @if (plugin.PluginType == "Python" && !plugin.HasDedicatedVenv) {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))" Disabled="_isBusy">
+                                    Setup .venv
+                                </MudButton>
+                            }
+                            @if (plugin.IsGitRepo) {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="@(() => UpdateGitPluginAsync(plugin))" Disabled="_isBusy">
+                                    Git Pull
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => TestPluginAsync(plugin))" Disabled="@(!plugin.IsEnabled || _isBusy)">
+                                Test
+                            </MudButton>
+                        </div>
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeletePluginAsync(plugin))" Disabled="_isBusy" />
                     </MudCardActions>
                 </MudCard>
             </MudItem>
@@ -76,6 +165,11 @@
 </MudGrid>
 
 @code {
+    private bool _showInstallCard = false;
+    private string _gitRepoUrl = string.Empty;
+    private bool _isBusy = false;
+    private readonly List<string> _logLines = new();
+
     protected override async Task OnInitializedAsync() {
         await PluginManager.DiscoverAndInitializePluginsAsync();
     }
@@ -85,15 +179,95 @@
         Snackbar.Add("Plugin scan complete.", Severity.Success);
     }
 
-    private async Task ProvisionPluginVenvAsync(PluginManifest plugin) {
+    private void OnTogglePlugin(PluginManifest plugin, bool isEnabled) {
+        PluginManager.TogglePluginState(plugin.Id, isEnabled);
+        Snackbar.Add($"{plugin.Name} {(isEnabled ? "enabled" : "disabled")}.", isEnabled ? Severity.Success : Severity.Normal);
+    }
+
+    private async Task InstallGitPluginAsync() {
+        if (string.IsNullOrWhiteSpace(_gitRepoUrl)) {
+            return;
+        }
+
+        _isBusy = true;
+        _logLines.Clear();
+        AppendLog($"Initiating installation from: {_gitRepoUrl}...");
+        StateHasChanged();
+
         try {
-            Snackbar.Add($"Provisioning isolated .venv for {plugin.Name}...", Severity.Info);
-            await PluginManager.EnsurePythonPluginVenvAsync(plugin, msg => {
-                Console.WriteLine(msg);
-            });
-            Snackbar.Add($".venv created for {plugin.Name}!", Severity.Success);
+            await PluginManager.InstallPluginFromGitAsync(_gitRepoUrl.Trim(), AppendLog);
+            _gitRepoUrl = string.Empty;
+            _showInstallCard = false;
+            Snackbar.Add("Plugin installed successfully from Git repository!", Severity.Success);
         } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Installation failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateGitPluginAsync(PluginManifest plugin) {
+        _isBusy = true;
+        _logLines.Clear();
+        AppendLog($"Updating plugin: {plugin.Name}...");
+        StateHasChanged();
+
+        try {
+            await PluginManager.UpdatePluginAsync(plugin, AppendLog);
+            Snackbar.Add($"{plugin.Name} updated successfully!", Severity.Success);
+        } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Update failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateAllGitPluginsAsync() {
+        _isBusy = true;
+        _logLines.Clear();
+        AppendLog("Updating all Git-based plugins...");
+        StateHasChanged();
+
+        try {
+            await PluginManager.UpdateAllGitPluginsAsync(AppendLog);
+            Snackbar.Add("All Git plugins update check completed!", Severity.Success);
+        } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Batch update error: {ex.Message}", Severity.Error);
+        } finally {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProvisionPluginVenvAsync(PluginManifest plugin) {
+        _isBusy = true;
+        _logLines.Clear();
+        AppendLog($"Provisioning isolated .venv for {plugin.Name}...");
+        StateHasChanged();
+
+        try {
+            await PluginManager.EnsurePythonPluginVenvAsync(plugin, AppendLog);
+            Snackbar.Add($".venv created and dependencies installed for {plugin.Name}!", Severity.Success);
+        } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
             Snackbar.Add($"Failed to provision plugin venv: {ex.Message}", Severity.Error);
+        } finally {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeletePluginAsync(PluginManifest plugin) {
+        try {
+            PluginManager.DeletePlugin(plugin);
+            Snackbar.Add($"Plugin '{plugin.Name}' was deleted.", Severity.Info);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to delete plugin: {ex.Message}", Severity.Error);
         }
     }
 
@@ -108,5 +282,10 @@
         } catch (Exception ex) {
             Snackbar.Add($"Execution failed: {ex.Message}", Severity.Error);
         }
+    }
+
+    private void AppendLog(string message) {
+        _logLines.Add(message);
+        StateHasChanged();
     }
 }

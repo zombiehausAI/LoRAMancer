@@ -75,4 +75,28 @@ public sealed class TrainingEstimationTests {
             }
         }
     }
+
+    [Fact]
+    public void AmdEnvironmentInfo_ReadyForTraining_EvaluatesAccurately() {
+        AmdEnvironmentInfo amdInfo = new() {
+            DetectedVendor = HardwareVendor.Amd,
+            VenvPath = "C:\\test\\.venv",
+            HasRocmSupport = true
+        };
+        Assert.True(amdInfo.IsReadyForTraining);
+
+        AmdEnvironmentInfo nvidiaInfo = new() {
+            DetectedVendor = HardwareVendor.Nvidia,
+            VenvPath = "C:\\test\\.venv",
+            HasRocmSupport = false
+        };
+        Assert.True(nvidiaInfo.IsReadyForTraining);
+
+        AmdEnvironmentInfo unconfiguredInfo = new() {
+            DetectedVendor = HardwareVendor.Amd,
+            VenvPath = string.Empty,
+            HasRocmSupport = false
+        };
+        Assert.False(unconfiguredInfo.IsReadyForTraining);
+    }
 }
