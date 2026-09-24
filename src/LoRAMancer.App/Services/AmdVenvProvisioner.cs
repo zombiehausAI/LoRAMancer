@@ -379,7 +379,53 @@ public sealed class AmdVenvProvisioner {
         }
     }
 
+    public static void PatchTorchDistributedInit(string venvPath, Action<string>? onProgress) {
+        string distInitPath = Path.Combine(venvPath, "Lib", "site-packages", "torch", "distributed", "__init__.py");
+        if (!File.Exists(distInitPath)) {
+            return;
+        }
+
+        string content = File.ReadAllText(distInitPath);
+        if (content.Contains("# [loramancer] windows-distributed-stubs")) {
+            return;
+        }
+
+        string normalized = content.Replace("\r\n", "\n");
+        string target = "sys.modules[\"torch.distributed\"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]";
+        string replacement = @"sys.modules[""torch.distributed""].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+
+    # [loramancer] windows-distributed-stubs
+    class _GroupStub:
+        WORLD = None
+
+    class _ReduceOpStub:
+        SUM = None
+        PRODUCT = None
+        MIN = None
+        MAX = None
+        BAND = None
+        BOR = None
+        BXOR = None
+
+    sys.modules[""torch.distributed""].group = _GroupStub
+    sys.modules[""torch.distributed""].ReduceOp = _ReduceOpStub
+    sys.modules[""torch.distributed""].is_initialized = lambda: False
+    sys.modules[""torch.distributed""].get_rank = lambda group=None: 0
+    sys.modules[""torch.distributed""].get_world_size = lambda group=None: 1";
+
+        string normalizedTarget = target.Replace("\r\n", "\n");
+        string normalizedReplacement = replacement.Replace("\r\n", "\n");
+
+        if (normalized.Contains(normalizedTarget)) {
+            normalized = normalized.Replace(normalizedTarget, normalizedReplacement);
+            File.WriteAllText(distInitPath, normalized);
+            onProgress?.Invoke("[Patch] Patched torch.distributed stubs for Windows ROCm.");
+        }
+    }
+
     public static void PatchTorchaoDistributedUtils(string venvPath, Action<string>? onProgress) {
+        PatchTorchDistributedInit(venvPath, onProgress);
+
         string aoInitPath = Path.Combine(venvPath, "Lib", "site-packages", "torchao", "__init__.py");
         if (File.Exists(aoInitPath)) {
             string initContent = File.ReadAllText(aoInitPath);

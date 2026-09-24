@@ -157,7 +157,52 @@ Run this command in PowerShell to confirm compatibility:
 
 ---
 
-## 5. Triton Kernel Warnings
+## 5. Missing `torch.distributed` Stubs (`group`, `ReduceOp`) in Extensions
+
+### The Problem
+When `ai-toolkit` initializes, its `ExtensionJob` imports all built-in extensions (`extensions_built_in/diffusion_models/hidream`), which imports `moe.py`, resulting in:
+```text
+ImportError: cannot import name 'group' from 'torch.distributed' (C:\AI\LoRAMancer\.venv\Lib\site-packages\torch\distributed\__init__.py)
+```
+
+### The Cause
+In `torch/distributed/__init__.py`, PyTorch evaluates `is_available()`. Because Windows ROCm wheels are compiled with `USE_DISTRIBUTED=0`, `is_available()` returns `False`. In the fallback branch, PyTorch only creates a stub for `ProcessGroup`:
+```python
+else:
+    # This stub is sufficient to get ... working even when USE_DISTRIBUTED=0.
+    # Feel free to add more stubs as necessary.
+    class _ProcessGroupStub:
+        pass
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub
+```
+It omits `group`, `ReduceOp`, and common distributed inquiries (`is_initialized`, `get_rank`, `get_world_size`), causing any package importing `from torch.distributed import group, ReduceOp` (like `torch.distributed.nn.functional`) to fail.
+
+### The Patch
+`AmdVenvProvisioner.PatchTorchDistributedInit` appends the missing stubs to `.venv/Lib/site-packages/torch/distributed/__init__.py`:
+```python
+    # [loramancer] windows-distributed-stubs
+    class _GroupStub:
+        WORLD = None
+
+    class _ReduceOpStub:
+        SUM = None
+        PRODUCT = None
+        MIN = None
+        MAX = None
+        BAND = None
+        BOR = None
+        BXOR = None
+
+    sys.modules["torch.distributed"].group = _GroupStub
+    sys.modules["torch.distributed"].ReduceOp = _ReduceOpStub
+    sys.modules["torch.distributed"].is_initialized = lambda: False
+    sys.modules["torch.distributed"].get_rank = lambda group=None: 0
+    sys.modules["torch.distributed"].get_world_size = lambda group=None: 1
+```
+
+---
+
+## 6. Triton Kernel Warnings
 
 ### The Warning
 ```text
@@ -168,7 +213,7 @@ Triton is a Linux-native compiler that has limited, experimental support on Wind
 
 ---
 
-## 6. Chroma1-HD Foundation Model Footprint
+## 7. Chroma1-HD Foundation Model Footprint
 
 ### Details
 - **Architecture**: Chroma (`lodestones/Chroma1-HD`)
