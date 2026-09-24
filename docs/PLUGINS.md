@@ -94,10 +94,14 @@ LoRAMancer includes full Git integration in the UI for effortless plugin discove
 - **Batch Update**: Click **Update All (Git)** in the header toolbar to scan and update every installed Git plugin sequentially with live streaming logs.
 
 ### 3. Plugin Lifecycle Management
+- **Status Indicators**: Card headers clearly show `.venv Ready` (green) when the virtual environment and entry point are provisioned, or `No .venv` (yellow) if provisioning is needed.
+- **Setup .venv**: For unconfigured Python plugins, creates an isolated virtual environment and installs all dependencies (with hardware-appropriate PyTorch distributions).
+- **Rebuild .venv**: Cleanly tears down the existing `.venv` directory (clearing any file attribute locks) and performs a fresh provisioning and dependency installation run.
+- **Remove .venv**: Safely deletes the `.venv` directory for a Python plugin, resetting its state without deleting the plugin code or Git repository.
 - **Enable / Disable**: Toggle the switch on any plugin card. Disabled plugins are flagged with a `.disabled` marker file in their directory, persisting state across application restarts and updates.
 - **Delete Plugin**: Click the delete icon to remove the plugin directory and unregister it. Read-only Git attributes are automatically cleared to prevent file lock errors on Windows.
 - **Test Run**: Send a ping diagnostic command to verify that the C# assembly or Python script executes cleanly inside its environment.
-- **Live Output Log**: A streaming console card displays real-time `stdout`/`stderr` from Git operations and `pip` installations.
+- **Live Output Log**: A streaming console card displays real-time `stdout`/`stderr` from Git operations, `pip` installations, and venv rebuilds with thread-safe UI updates.
 
 ## Default Included Plugins
 
