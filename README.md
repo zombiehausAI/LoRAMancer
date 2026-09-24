@@ -4,6 +4,7 @@ LoRAMancer is a production-grade, highly responsive desktop LoRA Manager, Config
 
 ## Key Features
 
+- **Extensible Model Architecture Support**: Native presets and automatic header inference for **FLUX.1** (dev/schnell), **PonyXL V6** (SDXL), **Illustrious-XL**, and standard SDXL/SD1.5, backed by an extensible registry (`ModelArchitectureRegistry`) for future architectures.
 - **ComfyUI Environment Ingestion & AMD Provisioning**: Automatically detects or parses your ComfyUI setup and ROCm wheel sources to provision a robust dedicated `.venv` (Python 3.12+) equipped with AMD ROCm-compatible PyTorch binaries.
 - **LoRA Library Manager & SafeTensors Inspector**: Ultra-fast header-only `.safetensors` binary parsing in C# without loading heavy model weights. Instant inspection of rank (dim), alpha, learning rates, optimizer, and base model architecture.
 - **Clone Configuration & AMD Hardware Sanitizer**: Clones hyperparameters from donor LoRAs into AI-Toolkit and Kohya-compatible training configs, automatically translating CUDA-only settings (such as 8-bit optimizers or Flash Attention) into AMD ROCm-safe counterparts (`bf16`, `sdpa`, disk latent caching).
@@ -20,7 +21,7 @@ LoRAMancer/
 ├── src/
 │   ├── LoRAMancer.App/         # .NET 10 MAUI Blazor Hybrid Application
 │   │   ├── Components/         # MudBlazor UI Components, Pages & Drawers
-│   │   ├── Engines/            # SafeTensors parser, config builder, runners
+│   │   ├── Engines/            # SafeTensors parser, config builder, runners, model registry
 │   │   ├── Models/             # Domain and configuration entities
 │   │   └── Services/           # Provisioner, training, plugin & update services
 │   ├── LoRAMancer.PluginSdk/   # C# Plugin contract & interface library

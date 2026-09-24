@@ -7,6 +7,11 @@ namespace LoRAMancer.App.Engines;
 
 public sealed class SafeTensorsMetadataReader {
     private const long MaxHeaderSizeBytes = 100 * 1024 * 1024; // 100 MB safeguard
+    private readonly ModelArchitectureRegistry _registry;
+
+    public SafeTensorsMetadataReader(ModelArchitectureRegistry? registry = null) {
+        _registry = registry ?? new ModelArchitectureRegistry();
+    }
 
     public async Task<LoraMetadata> ReadMetadataAsync(string filePath, CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
@@ -52,7 +57,7 @@ public sealed class SafeTensorsMetadataReader {
         return ParseHeaderJson(filePath, fileInfo.Name, fileSize, headerJson);
     }
 
-    private static LoraMetadata ParseHeaderJson(string filePath, string fileName, long fileSize, string json) {
+    private LoraMetadata ParseHeaderJson(string filePath, string fileName, long fileSize, string json) {
         Dictionary<string, string> metadataDict = new(StringComparer.OrdinalIgnoreCase);
 
         try {
@@ -88,8 +93,12 @@ public sealed class SafeTensorsMetadataReader {
         string precision = ExtractString(metadataDict, "ss_mixed_precision", "mixed_precision", "precision");
 
         string baseModel = ExtractString(metadataDict, "ss_sd_model_name", "ss_base_model_version", "modelspec.architecture", "base_model");
-        if (string.IsNullOrWhiteSpace(baseModel)) {
-            baseModel = InferBaseModelFromKeys(metadataDict);
+        if (string.IsNullOrWhiteSpace(baseModel) || baseModel.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) {
+            baseModel = _registry.InferFromMetadata(metadataDict).DisplayName;
+        } else {
+            // Check if baseModel matches any known architecture keyword
+            var inferred = _registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = baseModel });
+            baseModel = inferred.DisplayName;
         }
 
         return new LoraMetadata {
@@ -113,24 +122,6 @@ public sealed class SafeTensorsMetadataReader {
         };
     }
 
-    private static string InferBaseModelFromKeys(IReadOnlyDictionary<string, string> dict) {
-        foreach (KeyValuePair<string, string> kvp in dict) {
-            string val = kvp.Value.ToLowerInvariant();
-            if (val.Contains("flux")) {
-                return "FLUX.1";
-            }
-            if (val.Contains("sdxl")) {
-                return "SDXL";
-            }
-            if (val.Contains("pony") || val.Contains("chroma")) {
-                return "Pony/Chroma (SDXL)";
-            }
-            if (val.Contains("v1-5") || val.Contains("sd15") || val.Contains("sd1.5")) {
-                return "SD 1.5";
-            }
-        }
-        return "Unknown";
-    }
 
     private static string ExtractString(IReadOnlyDictionary<string, string> dict, params string[] candidateKeys) {
         foreach (string key in candidateKeys) {

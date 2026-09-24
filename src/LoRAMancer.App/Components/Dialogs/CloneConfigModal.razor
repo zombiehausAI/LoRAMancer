@@ -1,5 +1,6 @@
 @inject NativeFileDialogService FileDialogService
 @inject AiToolkitConfigBuilder ConfigBuilder
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject ISnackbar Snackbar
 
 <MudDialog Style="background-color: #181825; border: 1px solid #313244; max-width: 800px; width: 100%;">
@@ -19,12 +20,12 @@
                 <MudTextField @bind-Value="Config.RunName" Label="New Run Name" Variant="Variant.Outlined" Required="true" />
             </MudItem>
             <MudItem xs="12" md="6">
-                <MudSelect @bind-Value="Config.TargetBaseModel" Label="Target Base Model" Variant="Variant.Outlined">
-                    <MudSelectItem Value="@("FLUX.1-dev")">FLUX.1-dev</MudSelectItem>
-                    <MudSelectItem Value="@("FLUX.1-schnell")">FLUX.1-schnell</MudSelectItem>
-                    <MudSelectItem Value="@("stabilityai/stable-diffusion-xl-base-1.0")">SDXL 1.0</MudSelectItem>
-                    <MudSelectItem Value="@("PonyDiffusionV6XL")">Pony / Chroma (SDXL)</MudSelectItem>
-                    <MudSelectItem Value="@("runwayml/stable-diffusion-v1-5")">SD 1.5</MudSelectItem>
+                <MudSelect T="string" Value="Config.TargetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model Architecture" Variant="Variant.Outlined">
+                    @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                        <MudSelectItem Value="@arch.DisplayName">
+                            @arch.DisplayName (@arch.Family)
+                        </MudSelectItem>
+                    }
                 </MudSelect>
             </MudItem>
 
@@ -99,7 +100,21 @@
     protected override void OnInitialized() {
         if (DonorLora != null) {
             Config = ConfigBuilder.CloneFromDonor(DonorLora, $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_clone", string.Empty, string.Empty);
+        } else {
+            var defaultArch = ArchitectureRegistry.GetOrDefault("flux_1_dev");
+            Config.TargetBaseModel = defaultArch.DisplayName;
+            Config.NetworkDim = defaultArch.DefaultDim;
+            Config.NetworkAlpha = defaultArch.DefaultAlpha;
+            Config.LearningRate = defaultArch.DefaultLearningRate;
         }
+    }
+
+    private void OnArchitectureChanged(string selectedDisplayName) {
+        Config.TargetBaseModel = selectedDisplayName;
+        var arch = ConfigBuilder.ResolveArchitecture(selectedDisplayName);
+        Config.NetworkDim = arch.DefaultDim;
+        Config.NetworkAlpha = arch.DefaultAlpha;
+        Config.LearningRate = arch.DefaultLearningRate;
     }
 
     private async Task PickDatasetDirectoryAsync() {
