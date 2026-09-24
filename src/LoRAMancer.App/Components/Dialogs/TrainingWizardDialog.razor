@@ -164,7 +164,7 @@
 
         <!-- Pro Mode Hyperparameter Accordion -->
         <MudExpansionPanels Class="mb-3">
-            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" MaxHeight="400">
+            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" @bind-Expanded="_isProMode" MaxHeight="400">
                 <MudGrid>
                     <MudItem xs="6" sm="3">
                         <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" />
@@ -237,6 +237,7 @@
 
         if (DonorLora != null) {
             _selectedSubject = TrainingSubjectType.Custom;
+            _isProMode = true;
             if (!string.IsNullOrWhiteSpace(DonorLora.BaseModel) && DonorLora.BaseModel != "Unknown") {
                 _targetBaseModel = DonorLora.BaseModel;
             }
