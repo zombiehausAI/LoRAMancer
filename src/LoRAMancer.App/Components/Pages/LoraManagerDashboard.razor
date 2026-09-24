@@ -40,8 +40,11 @@
         </MudMenu>
 
         @if (LibraryService.Items.Count > 0) {
-            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="_isEnrichingAll" OnClick="EnrichAllCivitaiAsync">
-                @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{LibraryService.Items.Count})..." : "Fetch Civitai Info")
+            <MudButton Variant="Variant.Outlined" 
+                       Color="@(LibraryService.IsEnriching ? Color.Warning : Color.Tertiary)" 
+                       StartIcon="@(LibraryService.IsEnriching ? Icons.Material.Filled.Sync : Icons.Material.Filled.CloudDownload)" 
+                       OnClick="ToggleEnrichAllCivitai">
+                @(LibraryService.IsEnriching ? $"Stop Civitai ({LibraryService.EnrichCompleted}/{LibraryService.EnrichTotal})" : "Fetch Civitai Info")
             </MudButton>
         }
         <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.SystemUpdateAlt" OnClick="OpenLoraUpdaterAsync">
@@ -134,6 +137,25 @@
             </MudButton>
         </div>
         <MudProgressLinear Color="Color.Tertiary" Value="@(LibraryService.TotalFiles > 0 ? (double)LibraryService.ScannedCount / LibraryService.TotalFiles * 100 : 0)" Class="my-1" />
+    </MudCard>
+}
+
+@if (LibraryService.IsEnriching) {
+    <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid #cba6f7; border-radius: 8px;">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div class="d-flex align-center gap-2">
+                <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="@(LibraryService.EnrichTotal == 0)" />
+                <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
+                    Fetching Civitai metadata in background: @LibraryService.CurrentEnrichingFile (@LibraryService.EnrichCompleted / @LibraryService.EnrichTotal)
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelEnrichment">
+                Stop
+            </MudButton>
+        </div>
+        @if (LibraryService.EnrichTotal > 0) {
+            <MudProgressLinear Color="Color.Tertiary" Value="@((double)LibraryService.EnrichCompleted / LibraryService.EnrichTotal * 100)" Class="my-1" />
+        }
     </MudCard>
 }
 
@@ -333,6 +355,9 @@
                             Use Settings
                         </MudButton>
                         <div class="d-flex gap-1">
+                            <MudTooltip Text="Fetch Civitai Info">
+                                <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => FetchSingleCivitaiAsync(lora))" />
+                            </MudTooltip>
                             <MudTooltip Text="Refresh from Disk">
                                 <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Color="Color.Info" OnClick="@(() => RefreshLoraAsync(lora))" />
                             </MudTooltip>
@@ -434,6 +459,9 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
                     Use Settings
                 </MudButton>
+                <MudTooltip Text="Fetch Civitai Info">
+                    <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Tertiary" Size="Size.Small" OnClick="@(() => FetchSingleCivitaiAsync(context))" />
+                </MudTooltip>
                 <MudTooltip Text="Refresh from Disk">
                     <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Info" Size="Size.Small" OnClick="@(() => RefreshLoraAsync(context))" />
                 </MudTooltip>
@@ -459,9 +487,6 @@
     private string _viewMode = "grid";
     private string _searchQuery = string.Empty;
     private string _selectedArchitecture = "all";
-
-    private bool _isEnrichingAll;
-    private int _enrichProgress;
 
     private int _currentPage = 1;
     private const int _pageSize = 24;
@@ -774,6 +799,9 @@
         LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
         LibraryService.OnScanProgress += HandleScanProgress;
         LibraryService.OnScanStateChanged += HandleScanStateChanged;
+        LibraryService.OnEnrichStateChanged += HandleEnrichStateChanged;
+        LibraryService.OnEnrichProgress += HandleEnrichProgress;
+        LibraryService.OnLoraEnriched += HandleLoraEnriched;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
         UpdateFilteredList();
     }
@@ -796,6 +824,24 @@
         });
     }
 
+    private async void HandleEnrichProgress(string file, int current, int total) {
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async void HandleEnrichStateChanged(bool isEnriching) {
+        await InvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
+    }
+
+    private async void HandleLoraEnriched(LoraMetadata meta) {
+        await InvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
+    }
+
     private async void HandleUpdaterStateChanged() {
         await InvokeAsync(StateHasChanged);
     }
@@ -804,40 +850,52 @@
         LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
         LibraryService.OnScanProgress -= HandleScanProgress;
         LibraryService.OnScanStateChanged -= HandleScanStateChanged;
+        LibraryService.OnEnrichStateChanged -= HandleEnrichStateChanged;
+        LibraryService.OnEnrichProgress -= HandleEnrichProgress;
+        LibraryService.OnLoraEnriched -= HandleLoraEnriched;
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
         _searchCts?.Cancel();
         _searchCts?.Dispose();
     }
 
-    private async Task FetchSingleCivitaiAsync(LoraMetadata lora) {
-        Snackbar.Add($"Searching Civitai for {lora.FileName}...", Severity.Info);
-        var info = await LibraryService.EnrichFromCivitaiAsync(lora);
-        if (info != null) {
-            Snackbar.Add($"Identified as '{info.ModelName}' from Civitai!", Severity.Success);
-        } else {
-            Snackbar.Add("No matching model found on Civitai.", Severity.Normal);
-        }
-        UpdateFilteredList();
-        StateHasChanged();
+    private void FetchSingleCivitaiAsync(LoraMetadata lora) {
+        Snackbar.Add($"Looking up Civitai info for {lora.FileName} in background...", Severity.Info);
+        _ = Task.Run(async () => {
+            try {
+                var info = await LibraryService.EnrichFromCivitaiAsync(lora);
+                await InvokeAsync(() => {
+                    if (info != null) {
+                        Snackbar.Add($"Identified as '{info.ModelName}' from Civitai!", Severity.Success);
+                    } else {
+                        Snackbar.Add($"No matching model found on Civitai for {lora.FileName}.", Severity.Normal);
+                    }
+                    UpdateFilteredList();
+                    StateHasChanged();
+                });
+            } catch {
+                // Suppress background lookup errors
+            }
+        });
     }
 
-    private async Task EnrichAllCivitaiAsync() {
-        _isEnrichingAll = true;
-        _enrichProgress = 0;
-        try {
-            var items = LibraryService.Items;
-            foreach (var lora in items) {
-                if (lora.CivitaiInfo == null) {
-                    await LibraryService.EnrichFromCivitaiAsync(lora);
-                    _enrichProgress++;
-                    UpdateFilteredList();
-                    await InvokeAsync(StateHasChanged);
-                }
+    private void ToggleEnrichAllCivitai() {
+        if (LibraryService.IsEnriching) {
+            LibraryService.CancelEnrichment();
+            Snackbar.Add("Civitai background lookup stopped.", Severity.Info);
+        } else {
+            var count = LibraryService.Items.Count(x => x.CivitaiInfo == null);
+            if (count == 0) {
+                Snackbar.Add("All LoRAs already have Civitai metadata.", Severity.Info);
+                return;
             }
-            Snackbar.Add("Civitai metadata lookup complete!", Severity.Success);
-        } finally {
-            _isEnrichingAll = false;
+            LibraryService.StartBackgroundEnrichment();
+            Snackbar.Add($"Fetching Civitai metadata for {count} models in the background...", Severity.Info);
         }
+    }
+
+    private void CancelEnrichment() {
+        LibraryService.CancelEnrichment();
+        Snackbar.Add("Civitai background lookup stopped.", Severity.Info);
     }
 
     private async Task UseLoraTrainingSettings(LoraMetadata lora) {
