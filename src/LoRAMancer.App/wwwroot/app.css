@@ -1,8 +1,14 @@
+/* ========================================================
+   LoRAMancer Studio Console - Modernized UI Theme
+   Infused with Hardware Console cues from Castium
+   ======================================================== */
+
 :root {
     --bg-dark-base: #11111b;
     --bg-dark-surface: #181825;
     --bg-dark-overlay: #1e1e2e;
-    --border-dark: #313244;
+    --border-dark: #2a2d36;
+    --border-dark-hover: #3e4452;
     --accent-purple: #cba6f7;
     --accent-blue: #89b4fa;
     --accent-green: #a6e3a1;
@@ -10,16 +16,18 @@
     --text-primary: #cdd6f4;
     --text-secondary: #a6adc8;
     --text-muted: #6c7086;
-    
-    /* Modern UI Tokens */
+
+    /* Castium-inspired Studio Tokens */
     --radius-sm: 6px;
     --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 18px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
     --radius-pill: 9999px;
-    --shadow-subtle: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 2px 8px rgba(0, 0, 0, 0.15);
-    --shadow-elevated: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 8px 24px rgba(0, 0, 0, 0.25);
-    --shadow-glow: 0 0 16px -2px rgba(203, 166, 247, 0.35);
+    --card-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+    --card-shadow-hover: 0 16px 44px rgba(0, 0, 0, 0.6);
+    --specular-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+    --specular-highlight-bright: inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+    --accent-glow: 0 0 20px rgba(203, 166, 247, 0.45);
 }
 
 html, body {
@@ -28,16 +36,20 @@ html, body {
     width: 100%;
     height: 100%;
     background-color: var(--bg-dark-base);
+    background-image: radial-gradient(ellipse at 50% 0%, rgba(203, 166, 247, 0.08) 0%, transparent 65%),
+                      linear-gradient(180deg, var(--bg-dark-base) 0%, #0c0d12 100%);
+    background-attachment: fixed;
     color: var(--text-primary);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Custom modern scrollbars */
+/* Castium-style Sleek Scrollbars */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -47,46 +59,56 @@ html, body {
 ::-webkit-scrollbar-thumb {
     background: var(--border-dark);
     border-radius: var(--radius-pill);
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     background-clip: padding-box;
+    transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
+    background: var(--border-dark-hover);
 }
 
 /* ========================================================
-   MODERN COMPONENT OVERRIDES & ROUNDED EDGES
+   CASTIUM HARDWARE CONSOLE CARDS & SURFACES
    ======================================================== */
 
-/* Cards & Surfaces: Rounded, Inset Top Specular Highlight & Soft Shadow */
+/* Modular Studio Cards: Vertical Console Gradient + Specular Bevel */
 .mud-card, .mud-paper {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.16) 100%), var(--bg-dark-surface) !important;
     border-radius: var(--radius-lg) !important;
-    border: 1px solid var(--border-dark);
-    box-shadow: var(--shadow-subtle) !important;
-    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), 
-                box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1), 
-                border-color 0.22s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    border: 1px solid var(--border-dark) !important;
+    box-shadow: var(--card-shadow), var(--specular-highlight) !important;
+    transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), 
+                box-shadow 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), 
+                border-color 0.22s ease !important;
+    position: relative;
 }
 
-/* Interactive Card Elevation & Glow on Hover */
+/* Card Hover Elevation & Radiant Accent Border Glow */
 .mud-card:hover {
-    border-color: rgba(203, 166, 247, 0.4);
-    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 
-                0 8px 26px rgba(0, 0, 0, 0.28), 
-                0 0 14px -3px rgba(203, 166, 247, 0.25) !important;
+    border-color: rgba(203, 166, 247, 0.45) !important;
+    transform: translateY(-2px);
+    box-shadow: var(--card-shadow-hover), 
+                var(--specular-highlight-bright), 
+                0 0 20px -3px rgba(203, 166, 247, 0.25) !important;
 }
 
-/* Modern Rounded Buttons with Tactile Hover & Bloom */
+/* ========================================================
+   TACTILE STUDIO BUTTONS (CASTIUM-STYLE)
+   ======================================================== */
+
 .mud-button {
     border-radius: var(--radius-md) !important;
     font-weight: 600 !important;
+    font-size: 13px !important;
     letter-spacing: 0.3px;
     text-transform: none !important;
-    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
-                box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
-                background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1), 
+                box-shadow 0.18s cubic-bezier(0.2, 0.9, 0.3, 1), 
+                background-color 0.18s ease, 
+                border-color 0.18s ease !important;
 }
 
 .mud-button:hover {
@@ -97,78 +119,105 @@ html, body {
     transform: translateY(0.5px) scale(0.985);
 }
 
-/* Filled Buttons Hover Bloom */
+/* Filled Action Buttons: Bold Ambient Bloom */
 .mud-button-filled {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .mud-button-filled:hover {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 14px -2px rgba(203, 166, 247, 0.4) !important;
-    filter: brightness(1.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px -2px rgba(203, 166, 247, 0.5) !important;
+    filter: brightness(1.1);
 }
 
 .mud-button-filled.mud-button-filled-primary:hover {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-purple) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px -2px var(--accent-purple) !important;
 }
 
 .mud-button-filled.mud-button-filled-secondary:hover {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-blue) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px -2px var(--accent-blue) !important;
 }
 
 .mud-button-filled.mud-button-filled-info:hover {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px #89b4fa !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px -2px #89b4fa !important;
 }
 
 .mud-button-filled.mud-button-filled-success:hover {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-green) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px -2px var(--accent-green) !important;
 }
 
-/* Outlined Buttons Soft Background Hover */
+.mud-button-filled.mud-button-filled-error:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px -2px var(--accent-red) !important;
+}
+
+/* Outlined Studio Buttons: Subtle Backlit Fill */
 .mud-button-outlined {
     border-width: 1.5px !important;
+    background: rgba(255, 255, 255, 0.02) !important;
 }
 
 .mud-button-outlined:hover {
-    background-color: rgba(203, 166, 247, 0.08) !important;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18), 0 0 10px -2px rgba(203, 166, 247, 0.25) !important;
+    background-color: rgba(203, 166, 247, 0.1) !important;
+    border-color: var(--accent-purple) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 0 12px -2px rgba(203, 166, 247, 0.3) !important;
 }
 
 /* Text Buttons */
 .mud-button-text:hover {
-    background-color: rgba(203, 166, 247, 0.1) !important;
+    background-color: rgba(203, 166, 247, 0.12) !important;
 }
 
-/* Icon Buttons: Smooth Squircle Hover */
+/* Icon Buttons: Tactile Squircle Hover */
 .mud-icon-button {
     border-radius: var(--radius-md) !important;
-    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
-                background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
-                box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1), 
+                background-color 0.18s ease, 
+                box-shadow 0.18s ease, 
+                color 0.18s ease !important;
 }
 
 .mud-icon-button:hover {
-    transform: translateY(-1.5px) scale(1.06);
+    transform: translateY(-1.5px) scale(1.08);
     background-color: rgba(255, 255, 255, 0.08) !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
 .mud-icon-button:active {
     transform: translateY(0) scale(0.96);
 }
 
-/* Chips: Sleek Modern Rounded Pills */
+/* ========================================================
+   CASTIUM HARDWARE CONSOLE PILLS & BADGES
+   ======================================================== */
+
 .mud-chip {
     border-radius: var(--radius-pill) !important;
-    font-weight: 600;
-    transition: transform 0.18s ease, box-shadow 0.18s ease !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    padding: 6px 14px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease !important;
 }
 
 .mud-chip:hover {
     transform: translateY(-1px);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
-/* Modern Input Controls & Selects */
+/* Castium "ON AIR" Live Pulse Glow Animation */
+@keyframes castiumLivePulse {
+    0% { transform: scale(0.95); opacity: 0.85; filter: drop-shadow(0 0 4px currentColor); }
+    50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 12px currentColor); }
+    100% { transform: scale(0.95); opacity: 0.85; filter: drop-shadow(0 0 4px currentColor); }
+}
+
+.mud-progress-circular {
+    animation: castiumLivePulse 2.4s ease-in-out infinite;
+}
+
+/* ========================================================
+   RECESSED STUDIO CONTROLS & INPUTS
+   ======================================================== */
+
 .mud-input-control {
     border-radius: var(--radius-md);
 }
@@ -176,19 +225,25 @@ html, body {
 .mud-input-outlined-border {
     border-radius: var(--radius-md) !important;
     border-color: var(--border-dark) !important;
+    background-color: rgba(0, 0, 0, 0.25);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
     transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
 }
 
-/* Input Focus Glow Highlight */
+/* Castium Focus Ring Highlight */
 .mud-input-control:focus-within .mud-input-outlined-border {
     border-color: var(--accent-purple) !important;
-    box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.22) !important;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(203, 166, 247, 0.24) !important;
 }
 
-/* Dialogs: Rounded Modern Glassmorphism Aesthetic */
+/* ========================================================
+   STUDIO DIALOGS & DRAWERS
+   ======================================================== */
+
 .mud-dialog {
     border-radius: var(--radius-xl) !important;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.2) 100%), var(--bg-dark-surface) !important;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), var(--specular-highlight-bright) !important;
     border: 1px solid var(--border-dark) !important;
     overflow: hidden;
 }
@@ -203,14 +258,14 @@ html, body {
     border-top: 1px solid var(--border-dark);
 }
 
-/* Popover & Menus: Rounded with Depth */
 .mud-popover, .mud-menu {
     border-radius: var(--radius-md) !important;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45) !important;
-    border: 1px solid var(--border-dark);
+    background: var(--bg-dark-surface) !important;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55), var(--specular-highlight) !important;
+    border: 1px solid var(--border-dark) !important;
 }
 
-/* Navigation Drawer Links */
+/* Navigation Drawer Links with Hardware Accent Indicator */
 .mud-nav-link {
     border-radius: var(--radius-md) !important;
     margin: 3px 8px !important;
@@ -218,22 +273,24 @@ html, body {
 }
 
 .mud-nav-link:hover {
-    background-color: rgba(203, 166, 247, 0.1) !important;
+    background-color: rgba(203, 166, 247, 0.12) !important;
     color: var(--accent-purple) !important;
-    transform: translateX(3px);
+    transform: translateX(4px);
 }
 
 .mud-nav-link.active {
-    background: linear-gradient(90deg, rgba(203, 166, 247, 0.2), rgba(137, 180, 250, 0.06)) !important;
+    background: linear-gradient(90deg, rgba(203, 166, 247, 0.22), rgba(137, 180, 250, 0.08)) !important;
     border-left: 3px solid var(--accent-purple) !important;
     color: var(--accent-purple) !important;
     font-weight: 600;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
-/* Modern Tables */
+/* Modernized Tables */
 .mud-table {
     border-radius: var(--radius-lg) !important;
     overflow: hidden;
+    border: 1px solid var(--border-dark);
 }
 
 .mud-table-row {
@@ -241,18 +298,18 @@ html, body {
 }
 
 .mud-table-row:hover {
-    background-color: rgba(203, 166, 247, 0.06) !important;
+    background-color: rgba(203, 166, 247, 0.08) !important;
 }
 
 /* ========================================================
-   CUSTOM UTILITIES & SPECIAL COMPONENTS
+   TERMINAL & CUSTOM UTILITIES
    ======================================================== */
 
-/* Terminal Console Log Styles */
 .terminal-window {
-    background-color: #0b0b10 !important;
+    background-color: #0b0c10 !important;
     border: 1px solid var(--border-dark);
     border-radius: var(--radius-md);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6);
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 0.85rem;
     line-height: 1.45;
@@ -287,30 +344,31 @@ html, body {
     border-radius: var(--radius-lg);
     padding: 2.5rem 1.5rem;
     text-align: center;
-    background-color: var(--bg-dark-surface);
-    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.15) 100%), var(--bg-dark-surface);
+    transition: all 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
     cursor: pointer;
+    box-shadow: var(--card-shadow);
 }
 
 .drop-zone:hover, .drop-zone.dragover {
     border-color: var(--accent-purple);
     background-color: var(--bg-dark-overlay);
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 0 12px rgba(203, 166, 247, 0.2);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 16px rgba(203, 166, 247, 0.25);
 }
 
 /* Glassmorphism Cards */
 .glass-panel {
-    background: var(--bg-dark-surface);
+    background: rgba(24, 24, 37, 0.85);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border-dark);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-subtle);
+    box-shadow: var(--card-shadow), var(--specular-highlight);
 }
 
 #blazor-error-ui {
-    background: #313244;
+    background: #2a2d36;
     color: #f38ba8;
     bottom: 0;
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.5);
