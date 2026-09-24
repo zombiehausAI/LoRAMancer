@@ -167,8 +167,23 @@ $checksumFile = Join-Path $artifactsPath "checksums.sha256"
 Write-Host "  > Checksum (SHA256): $zipHash" -ForegroundColor Gray
 
 # Check for Inno Setup compiler (ISCC.exe)
+$isccRegistryPath = $null
+try {
+    $innoReg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                                      "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                                      "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+               Where-Object { $_.DisplayName -match "Inno Setup" -and $_.InstallLocation } |
+               Select-Object -First 1
+    if ($innoReg -and $innoReg.InstallLocation) {
+        $isccRegistryPath = Join-Path $innoReg.InstallLocation "ISCC.exe"
+    }
+} catch { }
+
 $isccCandidates = @(
     (Get-Command iscc.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+    $isccRegistryPath,
+    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+    (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe"
 )
@@ -179,7 +194,7 @@ if ($isccPath) {
     Write-Host "  > Building Windows Setup Installer (EXE)..." -ForegroundColor Gray
     $issScript = Join-Path $repoRoot "installer\LoRAMancer.iss"
     if (Test-Path $issScript) {
-        & $isccPath "/DMyAppVersion=$appVersion" $issScript
+        & $isccPath "/DMyAppVersion=$appVersion" "/DMySourceDir=$packageAppDir" $issScript
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  > Inno Setup installer compiled successfully!" -ForegroundColor Green
         } else {

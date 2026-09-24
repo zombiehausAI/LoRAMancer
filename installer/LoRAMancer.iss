@@ -4,6 +4,9 @@
 #define MyAppPublisher "LoRAMancer Team"
 #define MyAppURL "https://github.com/loramancer/loramancer"
 #define MyAppExeName "LoRAMancer.App.exe"
+#ifndef MySourceDir
+#define MySourceDir "..\artifacts\staging\LoRAMancer"
+#endif
 
 [Setup]
 AppId={{D37E88F9-6E53-4872-8C84-B09257C95B32}
@@ -33,8 +36,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\src\LoRAMancer.App\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Resources\AppIcon\appicon.ico"
