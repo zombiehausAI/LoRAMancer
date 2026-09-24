@@ -364,6 +364,34 @@ public sealed class PluginManagerService {
         onProgress?.Invoke($"[Plugin: {plugin.Name}] Isolated .venv ready!");
     }
 
+    public void RemovePythonPluginVenv(PluginManifest plugin) {
+        ArgumentNullException.ThrowIfNull(plugin);
+        string venvPath = Path.Combine(plugin.DirectoryPath, ".venv");
+        if (Directory.Exists(venvPath)) {
+            try {
+                foreach (string file in Directory.GetFiles(venvPath, "*", SearchOption.AllDirectories)) {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+                Directory.Delete(venvPath, true);
+            } catch (Exception ex) {
+                throw new InvalidOperationException($"Failed to remove plugin virtual environment: {ex.Message}", ex);
+            }
+        }
+        plugin.HasDedicatedVenv = false;
+    }
+
+    public async Task RebuildPythonPluginVenvAsync(
+        PluginManifest plugin,
+        Action<string>? onProgress,
+        CancellationToken cancellationToken = default
+    ) {
+        ArgumentNullException.ThrowIfNull(plugin);
+        onProgress?.Invoke($"[Plugin: {plugin.Name}] Removing existing .venv...");
+        RemovePythonPluginVenv(plugin);
+        onProgress?.Invoke($"[Plugin: {plugin.Name}] Rebuilding clean .venv and installing dependencies...");
+        await EnsurePythonPluginVenvAsync(plugin, onProgress, cancellationToken);
+    }
+
     public void TogglePluginState(string pluginId, bool isEnabled) {
         if (!_registeredPlugins.TryGetValue(pluginId, out PluginManifest? manifest)) {
             return;
