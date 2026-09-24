@@ -19,6 +19,7 @@ On the computer with the training GPU (AMD ROCm, NVIDIA CUDA, Intel XPU):
 3. Configure the listening parameters:
    - **Port**: Default `8420` (or any custom internal port).
    - **Bind IP**: `0.0.0.0` (all network adapters) or `127.0.0.1` (local loopback only behind local reverse proxy).
+   - **Auto-Configure Windows Firewall**: Click the **Auto-Configure Windows Firewall** button directly below the port input. This automatically elevates with a UAC prompt and executes `netsh advfirewall` to add an inbound rule (`LoRAMancer Web Server`) allowing TCP traffic on your configured port across all network profiles.
    - **Auth Token**: Enter your private secret token/key.
    - **Strict Auth (Deny Missing Token)**: When enabled, any request without this token is immediately rejected with HTTP 401.
 

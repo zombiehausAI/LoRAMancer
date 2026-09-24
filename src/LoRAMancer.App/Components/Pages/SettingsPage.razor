@@ -428,6 +428,17 @@
                             <MudTextField @bind-Value="_settings.ServerBindAddress" Label="Bind IP" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="0.0.0.0 for LAN, 127.0.0.1 for local" Style="flex: 1;" />
                         </div>
 
+                        <div class="d-flex align-center gap-2 mb-3">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.Security" OnClick="ConfigureWindowsFirewallAsync" Disabled="_isConfiguringFirewall">
+                                @(_isConfiguringFirewall ? "Configuring Firewall..." : "Auto-Configure Windows Firewall")
+                            </MudButton>
+                            @if (!string.IsNullOrEmpty(_firewallStatusMessage)) {
+                                <MudChip T="string" Size="Size.Small" Color="@(_firewallSuccess ? Color.Success : Color.Warning)">
+                                    @_firewallStatusMessage
+                                </MudChip>
+                            }
+                        </div>
+
                         <div class="d-flex gap-3 mb-2">
                             <MudTextField @bind-Value="_settings.ServerAccessToken" Label="Auth Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Secret key required for all incoming connections" Style="flex: 1;" />
                             <MudSwitch @bind-Value="_settings.RequireAuthForWebAccess" Label="Strict Auth (Deny Missing Token)" Color="Color.Error" Class="mt-1" />
@@ -1228,6 +1239,66 @@
             Snackbar.Add($"Connection error: {ex.Message}", Severity.Error);
         } finally {
             _isTestingRemoteHost = false;
+        }
+    }
+
+    private bool _isConfiguringFirewall = false;
+    private bool _firewallSuccess = false;
+    private string _firewallStatusMessage = string.Empty;
+
+    private async Task ConfigureWindowsFirewallAsync() {
+        _isConfiguringFirewall = true;
+        _firewallStatusMessage = string.Empty;
+        await InvokeAsync(StateHasChanged);
+
+        try {
+            var port = _settings.ServerPort;
+            if (port <= 0 || port > 65535) {
+                _firewallSuccess = false;
+                _firewallStatusMessage = "Invalid port";
+                Snackbar.Add("Please enter a valid port between 1 and 65535.", Severity.Error);
+                return;
+            }
+
+            var ruleName = "LoRAMancer Web Server";
+            var arguments = $"/c \"netsh advfirewall firewall delete rule name=\\\"{ruleName}\\\" & netsh advfirewall firewall add rule name=\\\"{ruleName}\\\" dir=in action=allow protocol=TCP localport={port} profile=any\"";
+
+            var psi = new System.Diagnostics.ProcessStartInfo {
+                FileName = "cmd.exe",
+                Arguments = arguments,
+                Verb = "runas",
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
+
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process != null) {
+                await process.WaitForExitAsync();
+                if (process.ExitCode == 0) {
+                    _firewallSuccess = true;
+                    _firewallStatusMessage = $"Port {port} Allowed";
+                    Snackbar.Add($"Windows Firewall rule created for port {port} (TCP).", Severity.Success);
+                } else {
+                    _firewallSuccess = false;
+                    _firewallStatusMessage = $"Failed (code {process.ExitCode})";
+                    Snackbar.Add($"Firewall command exited with code {process.ExitCode}.", Severity.Warning);
+                }
+            } else {
+                _firewallSuccess = false;
+                _firewallStatusMessage = "Could not start process";
+            }
+        } catch (System.ComponentModel.Win32Exception winEx) when (winEx.NativeErrorCode == 1223) {
+            _firewallSuccess = false;
+            _firewallStatusMessage = "UAC prompt cancelled";
+            Snackbar.Add("Administrator elevation was cancelled. Firewall rule was not added.", Severity.Normal);
+        } catch (Exception ex) {
+            _firewallSuccess = false;
+            _firewallStatusMessage = "Error adding rule";
+            Snackbar.Add($"Failed to configure Windows Firewall: {ex.Message}", Severity.Error);
+        } finally {
+            _isConfiguringFirewall = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }
