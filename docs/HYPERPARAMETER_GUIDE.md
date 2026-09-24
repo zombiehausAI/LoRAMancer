@@ -12,6 +12,7 @@ This guide explains every setting, hyperparameter, and concept encountered when 
   - **FLUX.1 Dev / Schnell**: 12B parameter flow-matching multimodal DiT. Uses `double_blocks` and `single_blocks` attention layers. Requires higher VRAM (16GB+ recommended).
   - **SDXL 1.0**: 3.5B parameter latent diffusion model with dual text encoders (CLIP ViT-L + OpenCLIP ViT-G). Excellent balance of speed and fidelity.
   - **Pony Diffusion / Illustrious**: Specialized SDXL-derivative architectures optimized for stylized, anime, and character datasets.
+  - **ChromaHD-1**: Next-generation flow-matching transformer model (`lodestones/Chroma1-HD` via `arch: chroma`). Supported natively in AI-Toolkit at 1024x1024 resolution.
   - **Chroma / HunyuanVideo / Wan 2.1**: Video and specialized next-generation transformer models.
   - **SD 1.5**: Legacy 1B parameter model with low VRAM footprint.
 - **Rule of thumb**: A LoRA trained for FLUX.1 cannot be loaded into SDXL (and vice-versa). Always choose the base model family you plan to generate images with.

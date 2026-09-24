@@ -143,6 +143,9 @@ public sealed class TrainingEstimationService {
         if (family.Contains("Flux", StringComparison.OrdinalIgnoreCase)) {
             return 13.8 + ((batchSize - 1) * 2.2);
         }
+        if (family.Contains("Chroma", StringComparison.OrdinalIgnoreCase)) {
+            return 14.2 + ((batchSize - 1) * 2.2);
+        }
         if (family.Contains("SD15", StringComparison.OrdinalIgnoreCase) || family.Contains("SD 1.5", StringComparison.OrdinalIgnoreCase)) {
             return 5.2 + ((batchSize - 1) * 0.8);
         }
@@ -155,6 +158,9 @@ public sealed class TrainingEstimationService {
         if (family.Contains("Flux", StringComparison.OrdinalIgnoreCase)) {
             return dim * 13.8;
         }
+        if (family.Contains("Chroma", StringComparison.OrdinalIgnoreCase)) {
+            return dim * 13.5;
+        }
         if (family.Contains("SD15", StringComparison.OrdinalIgnoreCase) || family.Contains("SD 1.5", StringComparison.OrdinalIgnoreCase)) {
             return dim * 2.25;
         }
@@ -165,6 +171,8 @@ public sealed class TrainingEstimationService {
         double secondsPerStep = 0.48;
         if (family.Contains("Flux", StringComparison.OrdinalIgnoreCase)) {
             secondsPerStep = 1.45;
+        } else if (family.Contains("Chroma", StringComparison.OrdinalIgnoreCase)) {
+            secondsPerStep = 1.35;
         } else if (family.Contains("SD15", StringComparison.OrdinalIgnoreCase) || family.Contains("SD 1.5", StringComparison.OrdinalIgnoreCase)) {
             secondsPerStep = 0.22;
         }

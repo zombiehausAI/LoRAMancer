@@ -147,5 +147,21 @@ public sealed class ModelArchitectureRegistry {
             RecommendedSamplePrompt = "portrait of a subject, highly detailed, 4k",
             DetectionKeywords = new[] { "v1-5", "sd15", "sd1.5", "stable-diffusion-v1-5" }
         });
+
+        Register(new ModelArchitectureInfo {
+            Id = "chroma_hd_1",
+            DisplayName = "ChromaHD-1",
+            Family = "Chroma",
+            PretrainedModelPath = "lodestones/Chroma1-HD",
+            DefaultDim = 16,
+            DefaultAlpha = 16.0,
+            DefaultLearningRate = 0.0001,
+            DefaultResolution = 1024,
+            NoiseScheduler = "flowmatch",
+            IsFlux = false,
+            DefaultTriggerWord = string.Empty,
+            RecommendedSamplePrompt = "photo of a subject, highly detailed, sharp focus",
+            DetectionKeywords = new[] { "chroma", "chromahd", "chroma1", "chroma1-hd", "chromahd-1" }
+        });
     }
 }

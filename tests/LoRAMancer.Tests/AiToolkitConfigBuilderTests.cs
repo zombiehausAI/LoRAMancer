@@ -98,4 +98,17 @@ public sealed class AiToolkitConfigBuilderTests {
         var illArch = registry.InferFromMetadata(illMeta);
         Assert.Equal("illustrious_xl", illArch.Id);
     }
+
+    [Fact]
+    public void ModelArchitectureRegistry_InfersChroma() {
+        ModelArchitectureRegistry registry = new();
+
+        var chromaMeta = new Dictionary<string, string> {
+            ["ss_sd_model_name"] = "Kelsey_Kernstine_Chroma_V1"
+        };
+        var chromaArch = registry.InferFromMetadata(chromaMeta);
+        Assert.Equal("chroma_hd_1", chromaArch.Id);
+        Assert.Equal("ChromaHD-1", chromaArch.DisplayName);
+        Assert.Equal("Chroma", chromaArch.Family);
+    }
 }
