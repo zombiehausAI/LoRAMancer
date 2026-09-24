@@ -24,9 +24,9 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
             Add File...
         </MudButton>
-        @if (_loraLibrary.Count > 0) {
+        @if (LibraryService.Items.Count > 0) {
             <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="_isEnrichingAll" OnClick="EnrichAllCivitaiAsync">
-                @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{_loraLibrary.Count})..." : "Fetch Civitai Info")
+                @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{LibraryService.Items.Count})..." : "Fetch Civitai Info")
             </MudButton>
         }
         <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.SystemUpdateAlt" OnClick="OpenLoraUpdaterAsync">
@@ -65,21 +65,21 @@
 </MudCard>
 
 <!-- Subfolder Navigation & Breadcrumbs Bar -->
-@if (!string.IsNullOrWhiteSpace(_rootFolder)) {
+@if (!string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
     <MudCard Elevation="1" Class="pa-2 px-3 mb-3 d-flex align-center justify-space-between flex-wrap gap-2" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <div class="d-flex align-center gap-1 flex-wrap">
             <MudTooltip Text="Up one level">
-                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Color="Color.Primary" Disabled="@(string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase) || _showAllFlat)" OnClick="NavigateUp" />
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Color="Color.Primary" Disabled="@(string.Equals(LibraryService.CurrentFolder, LibraryService.RootFolder, StringComparison.OrdinalIgnoreCase) || _showAllFlat)" OnClick="NavigateUp" />
             </MudTooltip>
             
-            <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase) && !_showAllFlat ? Color.Tertiary : Color.Primary)" StartIcon="@Icons.Material.Filled.FolderSpecial" OnClick="@(() => NavigateToFolder(_rootFolder))">
-                @(Path.GetFileName(_rootFolder) is string rootName && !string.IsNullOrWhiteSpace(rootName) ? rootName : _rootFolder)
+            <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(string.Equals(LibraryService.CurrentFolder, LibraryService.RootFolder, StringComparison.OrdinalIgnoreCase) && !_showAllFlat ? Color.Tertiary : Color.Primary)" StartIcon="@Icons.Material.Filled.FolderSpecial" OnClick="@(() => NavigateToFolder(LibraryService.RootFolder))">
+                @(Path.GetFileName(LibraryService.RootFolder) is string rootName && !string.IsNullOrWhiteSpace(rootName) ? rootName : LibraryService.RootFolder)
             </MudButton>
 
-            @if (!_showAllFlat && !string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase)) {
+            @if (!_showAllFlat && !string.Equals(LibraryService.CurrentFolder, LibraryService.RootFolder, StringComparison.OrdinalIgnoreCase)) {
                 @foreach (var crumb in GetBreadcrumbs()) {
                     <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Secondary" />
-                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(crumb.FullPath == _currentFolder ? Color.Tertiary : Color.Primary)" OnClick="@(() => NavigateToFolder(crumb.FullPath))">
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(crumb.FullPath == LibraryService.CurrentFolder ? Color.Tertiary : Color.Primary)" OnClick="@(() => NavigateToFolder(crumb.FullPath))">
                         @crumb.Name
                     </MudButton>
                 }
@@ -89,11 +89,11 @@
         <div class="d-flex align-center gap-2">
             <MudText Typo="Typo.caption" Color="Color.Secondary">
                 @if (_showAllFlat) {
-                    <span>Showing all @_loraLibrary.Count LoRAs (Flat View)</span>
+                    <span>Showing all @LibraryService.Items.Count LoRAs (Flat View)</span>
                 } else if (!string.IsNullOrWhiteSpace(_searchQuery)) {
                     <span>Searching across all subfolders (@FilteredLoras.Count results)</span>
                 } else {
-                    <span>@FilteredLoras.Count LoRA@((FilteredLoras.Count == 1 ? "" : "s")) in this folder (@_loraLibrary.Count total indexed)</span>
+                    <span>@FilteredLoras.Count LoRA@((FilteredLoras.Count == 1 ? "" : "s")) in this folder (@LibraryService.Items.Count total indexed)</span>
                 }
             </MudText>
 
@@ -104,20 +104,20 @@
     </MudCard>
 }
 
-@if (_isScanning) {
+@if (LibraryService.IsScanning) {
     <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid #cba6f7; border-radius: 8px;">
         <div class="d-flex align-center justify-space-between mb-2">
             <div class="d-flex align-center gap-2">
-                <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="true" />
-                <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
-                    Scanning LoRAs recursively in background: @_scannedCount of @_totalFiles (@_currentScanningFile)
+                <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="@(LibraryService.TotalFiles == 0)" />
+                <MudText Typo="Typo.body2" Style="color: var(--text-primary); font-weight: 600;">
+                    Scanning LoRAs recursively in background: @LibraryService.ScannedCount of @LibraryService.TotalFiles (@LibraryService.CurrentScanningFile)
                 </MudText>
             </div>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelScan">
                 Stop Scan
             </MudButton>
         </div>
-        <MudProgressLinear Color="Color.Tertiary" Value="@(_totalFiles > 0 ? (double)_scannedCount / _totalFiles * 100 : 0)" Class="my-1" />
+        <MudProgressLinear Color="Color.Tertiary" Value="@(LibraryService.TotalFiles > 0 ? (double)LibraryService.ScannedCount / LibraryService.TotalFiles * 100 : 0)" Class="my-1" />
     </MudCard>
 }
 
@@ -146,7 +146,7 @@
 }
 
 @if (FilteredLoras.Count == 0 && CurrentSubfolders.Count == 0) {
-    @if (_isScanning) {
+    @if (LibraryService.IsScanning) {
         <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudProgressCircular Size="Size.Large" Color="Color.Tertiary" Indeterminate="true" Class="mb-3" />
             <MudText Typo="Typo.h6" Style="color: var(--text-primary);">Scanning Directory in Background...</MudText>
@@ -159,9 +159,9 @@
             <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
             <MudText Typo="Typo.h6" Style="color: var(--text-primary);">No LoRAs found</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-                @(string.IsNullOrWhiteSpace(_rootFolder) ? "Click \"Browse Folder...\" to point to your LoRA storage directory." : "No models or subfolders found in this directory.")
+                @(string.IsNullOrWhiteSpace(LibraryService.RootFolder) ? "Click \"Browse Folder...\" to point to your LoRA storage directory." : "No models or subfolders found in this directory.")
             </MudText>
-            @if (string.IsNullOrWhiteSpace(_rootFolder)) {
+            @if (string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
                     Select LoRA Folder
                 </MudButton>
@@ -357,15 +357,10 @@
 <MetadataInspectorDrawer @bind-IsOpen="_drawerOpen" Metadata="_selectedLora" />
 
 @code {
-    private readonly List<LoraMetadata> _loraLibrary = new();
-    private readonly object _libraryLock = new();
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
 
-    private string _rootFolder = string.Empty;
-    private string _currentFolder = string.Empty;
     private bool _showAllFlat;
-
     private string _viewMode = "grid";
     private string _searchQuery = string.Empty;
     private string _selectedArchitecture = "all";
@@ -373,38 +368,33 @@
     private bool _isEnrichingAll;
     private int _enrichProgress;
 
-    private CancellationTokenSource? _scanCts;
-    private bool _isScanning;
-    private int _scannedCount;
-    private int _totalFiles;
-    private string _currentScanningFile = string.Empty;
-
     private sealed record SubfolderItem(string Name, string FullPath, string RelativePath, int LoraCount);
     private sealed record CrumbItem(string Name, string FullPath);
 
     private List<SubfolderItem> CurrentSubfolders {
         get {
-            if (string.IsNullOrWhiteSpace(_currentFolder) || !Directory.Exists(_currentFolder) || _showAllFlat) {
+            string current = LibraryService.CurrentFolder;
+            string root = LibraryService.RootFolder;
+            if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || _showAllFlat) {
                 return new List<SubfolderItem>();
             }
 
             try {
-                string[] subDirs = Directory.GetDirectories(_currentFolder);
+                string[] subDirs = Directory.GetDirectories(current);
                 List<SubfolderItem> result = new();
+                var items = LibraryService.Items;
 
-                lock (_libraryLock) {
-                    foreach (string dir in subDirs) {
-                        string dirName = Path.GetFileName(dir);
-                        if (dirName.StartsWith('.')) {
-                            continue;
-                        }
-
-                        string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                        int count = _loraLibrary.Count(l => l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-                        string rel = string.IsNullOrWhiteSpace(_rootFolder) ? dirName : Path.GetRelativePath(_rootFolder, dir);
-
-                        result.Add(new SubfolderItem(dirName, dir, rel, count));
+                foreach (string dir in subDirs) {
+                    string dirName = Path.GetFileName(dir);
+                    if (dirName.StartsWith('.')) {
+                        continue;
                     }
+
+                    string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    int count = items.Count(l => l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                    string rel = string.IsNullOrWhiteSpace(root) ? dirName : Path.GetRelativePath(root, dir);
+
+                    result.Add(new SubfolderItem(dirName, dir, rel, count));
                 }
 
                 return result.OrderBy(s => s.Name).ToList();
@@ -416,42 +406,43 @@
 
     private List<LoraMetadata> FilteredLoras {
         get {
-            lock (_libraryLock) {
-                return _loraLibrary
-                    .Where(l => {
-                        if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery) || string.IsNullOrWhiteSpace(_currentFolder)) {
-                            return true;
-                        }
-                        string dir = Path.GetDirectoryName(l.FilePath) ?? string.Empty;
-                        return string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                             _currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                             StringComparison.OrdinalIgnoreCase);
-                    })
-                    .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
-                        || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
-                        || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                        || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                        || l.FilePath.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                    .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
+            string current = LibraryService.CurrentFolder;
+            return LibraryService.Items
+                .Where(l => {
+                    if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery) || string.IsNullOrWhiteSpace(current)) {
+                        return true;
+                    }
+                    string dir = Path.GetDirectoryName(l.FilePath) ?? string.Empty;
+                    return string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                         current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                         StringComparison.OrdinalIgnoreCase);
+                })
+                .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
+                    || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+                    || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                    || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                    || l.FilePath.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
     }
 
     private List<CrumbItem> GetBreadcrumbs() {
         List<CrumbItem> crumbs = new();
-        if (string.IsNullOrWhiteSpace(_rootFolder) || string.IsNullOrWhiteSpace(_currentFolder)) {
+        string root = LibraryService.RootFolder;
+        string current = LibraryService.CurrentFolder;
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(current)) {
             return crumbs;
         }
 
         try {
-            string rel = Path.GetRelativePath(_rootFolder, _currentFolder);
+            string rel = Path.GetRelativePath(root, current);
             if (string.IsNullOrWhiteSpace(rel) || rel == ".") {
                 return crumbs;
             }
 
             string[] parts = rel.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-            string currentAccum = _rootFolder;
+            string currentAccum = root;
             foreach (string part in parts) {
                 currentAccum = Path.Combine(currentAccum, part);
                 crumbs.Add(new CrumbItem(part, currentAccum));
@@ -465,33 +456,36 @@
 
     private void NavigateToFolder(string folderPath) {
         if (Directory.Exists(folderPath)) {
-            _currentFolder = folderPath;
+            LibraryService.SetCurrentSubfolder(folderPath);
             _showAllFlat = false;
             StateHasChanged();
         }
     }
 
     private void NavigateUp() {
-        if (string.IsNullOrWhiteSpace(_currentFolder) || string.IsNullOrWhiteSpace(_rootFolder)) {
+        string current = LibraryService.CurrentFolder;
+        string root = LibraryService.RootFolder;
+        if (string.IsNullOrWhiteSpace(current) || string.IsNullOrWhiteSpace(root)) {
             return;
         }
-        if (string.Equals(_currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                          _rootFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+        if (string.Equals(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                          root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                           StringComparison.OrdinalIgnoreCase)) {
             return;
         }
 
-        string? parent = Path.GetDirectoryName(_currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (!string.IsNullOrEmpty(parent) && parent.StartsWith(_rootFolder, StringComparison.OrdinalIgnoreCase)) {
-            _currentFolder = parent;
+        string? parent = Path.GetDirectoryName(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent) && parent.StartsWith(root, StringComparison.OrdinalIgnoreCase)) {
+            LibraryService.SetCurrentSubfolder(parent);
         } else {
-            _currentFolder = _rootFolder;
+            LibraryService.SetCurrentSubfolder(root);
         }
         StateHasChanged();
     }
 
     private string GetRelativeSubfolder(string filePath) {
-        if (string.IsNullOrWhiteSpace(_rootFolder)) {
+        string root = LibraryService.RootFolder;
+        if (string.IsNullOrWhiteSpace(root)) {
             return Path.GetDirectoryName(filePath) ?? string.Empty;
         }
         string? dir = Path.GetDirectoryName(filePath);
@@ -499,7 +493,7 @@
             return string.Empty;
         }
         try {
-            string rel = Path.GetRelativePath(_rootFolder, dir);
+            string rel = Path.GetRelativePath(root, dir);
             return rel == "." ? "Root" : rel;
         } catch {
             return dir;
@@ -516,7 +510,9 @@
     private async Task BrowseLibraryFolderAsync() {
         string? folder = await FileDialogService.PickFolderAsync("Select LoRA Storage Directory");
         if (!string.IsNullOrEmpty(folder)) {
-            await LoadFolderAsync(folder);
+            _showAllFlat = false;
+            LibraryService.StartScan(folder, forceClear: true);
+            Snackbar.Add($"Scanning {Path.GetFileName(folder)} in background...", Severity.Info);
         }
     }
 
@@ -525,16 +521,11 @@
             LoraMetadata meta = await MetadataReader.ReadMetadataAsync(filePath);
             LibraryService.FindLocalThumbnail(meta);
             await LibraryService.EnrichFromCivitaiAsync(meta);
+            LibraryService.AddOrUpdateLora(meta);
 
-            lock (_libraryLock) {
-                _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
-                _loraLibrary.Insert(0, meta);
-            }
-
-            if (string.IsNullOrWhiteSpace(_rootFolder)) {
+            if (string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
                 string dir = Path.GetDirectoryName(filePath) ?? string.Empty;
-                _rootFolder = dir;
-                _currentFolder = dir;
+                LibraryService.SetFolders(dir, dir);
             }
 
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
@@ -543,68 +534,28 @@
         }
     }
 
-    private async Task LoadFolderAsync(string folderPath) {
-        _scanCts?.Cancel();
-        _scanCts?.Dispose();
-        _scanCts = new CancellationTokenSource();
-        var token = _scanCts.Token;
-
-        _rootFolder = folderPath;
-        _currentFolder = folderPath;
-        _showAllFlat = false;
-
-        _isScanning = true;
-        _scannedCount = 0;
-        _totalFiles = 0;
-        _currentScanningFile = "Discovering files recursively...";
-        lock (_libraryLock) {
-            _loraLibrary.Clear();
-        }
-        await InvokeAsync(StateHasChanged);
-
-        _ = Task.Run(async () => {
-            try {
-                await LibraryService.ScanDirectoryStreamAsync(
-                    folderPath,
-                    async meta => {
-                        lock (_libraryLock) {
-                            _loraLibrary.Add(meta);
-                        }
-                        await InvokeAsync(StateHasChanged);
-                    },
-                    (file, current, total) => {
-                        _currentScanningFile = file;
-                        _scannedCount = current;
-                        _totalFiles = total;
-                        InvokeAsync(StateHasChanged);
-                    },
-                    token
-                );
-
-                await InvokeAsync(() => {
-                    Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs across subfolders", Severity.Success);
-                });
-            } catch (OperationCanceledException) {
-                await InvokeAsync(() => {
-                    Snackbar.Add("Background scan stopped.", Severity.Info);
-                });
-            } catch (Exception ex) {
-                await InvokeAsync(() => {
-                    Snackbar.Add($"Folder scan failed: {ex.Message}", Severity.Error);
-                });
-            } finally {
-                _isScanning = false;
-                await InvokeAsync(StateHasChanged);
-            }
-        }, token);
-    }
-
     private void CancelScan() {
-        _scanCts?.Cancel();
+        LibraryService.CancelScan();
+        Snackbar.Add("Background scan stopped.", Severity.Info);
     }
 
     protected override void OnInitialized() {
+        LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
+        LibraryService.OnScanProgress += HandleScanProgress;
+        LibraryService.OnScanStateChanged += HandleScanStateChanged;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
+    }
+
+    private async void HandleLibraryUpdated() {
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async void HandleScanProgress(string file, int current, int total) {
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async void HandleScanStateChanged(bool isScanning) {
+        await InvokeAsync(StateHasChanged);
     }
 
     private async void HandleUpdaterStateChanged() {
@@ -612,9 +563,10 @@
     }
 
     public void Dispose() {
+        LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
+        LibraryService.OnScanProgress -= HandleScanProgress;
+        LibraryService.OnScanStateChanged -= HandleScanStateChanged;
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
-        _scanCts?.Cancel();
-        _scanCts?.Dispose();
     }
 
     private async Task FetchSingleCivitaiAsync(LoraMetadata lora) {
@@ -632,7 +584,8 @@
         _isEnrichingAll = true;
         _enrichProgress = 0;
         try {
-            foreach (var lora in _loraLibrary) {
+            var items = LibraryService.Items;
+            foreach (var lora in items) {
                 if (lora.CivitaiInfo == null) {
                     await LibraryService.EnrichFromCivitaiAsync(lora);
                     _enrichProgress++;
@@ -710,7 +663,7 @@
 
     private async Task OpenLoraUpdaterAsync() {
         DialogParameters parameters = new() {
-            ["InitialFolder"] = !string.IsNullOrWhiteSpace(_rootFolder) ? _rootFolder : _currentFolder
+            ["InitialFolder"] = !string.IsNullOrWhiteSpace(LibraryService.RootFolder) ? LibraryService.RootFolder : LibraryService.CurrentFolder
         };
         DialogOptions options = new() {
             CloseOnEscapeKey = true,
@@ -720,8 +673,8 @@
 
         var dialog = await DialogService.ShowAsync<LoraUpdaterDialog>("Lora Updater", parameters, options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && !string.IsNullOrWhiteSpace(_rootFolder)) {
-            await LoadFolderAsync(_rootFolder);
+        if (result != null && !result.Canceled && !string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
+            LibraryService.StartScan(LibraryService.RootFolder, forceClear: true);
         }
     }
 }

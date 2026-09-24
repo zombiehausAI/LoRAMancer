@@ -259,5 +259,26 @@ public sealed class SettingsServiceTests {
             }
         }
     }
+
+    [Fact]
+    public async Task SettingsService_PersistsLoraStorageDirectory_AndLastSubfolder() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"lora_folder_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService settingsService = new(null, tempFile);
+            settingsService.Current.LoraStorageDirectory = @"C:\AI\Models\LoRA";
+            settingsService.Current.LastSubfolderPath = @"C:\AI\Models\LoRA\Characters";
+
+            await settingsService.SaveSettingsAsync(settingsService.Current);
+
+            SettingsService reloaded = new(null, tempFile);
+            Assert.Equal(@"C:\AI\Models\LoRA", reloaded.Current.LoraStorageDirectory);
+            Assert.Equal(@"C:\AI\Models\LoRA\Characters", reloaded.Current.LastSubfolderPath);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }
 

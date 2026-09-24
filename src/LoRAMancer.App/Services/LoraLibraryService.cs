@@ -10,7 +10,28 @@ public sealed class LoraLibraryService {
     private readonly SettingsService _settingsService;
     private readonly HttpClient _httpClient;
     private readonly string _cacheDirectory;
+    private readonly List<LoraMetadata> _items = new();
+    private readonly object _lock = new();
+    private CancellationTokenSource? _scanCts;
 
+    public string RootFolder { get; private set; } = string.Empty;
+    public string CurrentFolder { get; set; } = string.Empty;
+    public bool IsScanning { get; private set; }
+    public int ScannedCount { get; private set; }
+    public int TotalFiles { get; private set; }
+    public string CurrentScanningFile { get; private set; } = string.Empty;
+
+    public IReadOnlyList<LoraMetadata> Items {
+        get {
+            lock (_lock) {
+                return _items.ToList();
+            }
+        }
+    }
+
+    public event Action? OnLibraryUpdated;
+    public event Action<string, int, int>? OnScanProgress;
+    public event Action<bool>? OnScanStateChanged;
     public event Action<LoraMetadata>? OnLoraEnriched;
 
     public LoraLibraryService(
@@ -27,6 +48,103 @@ public sealed class LoraLibraryService {
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _cacheDirectory = Path.Combine(userProfile, ".loramancer", "lora_cache");
         Directory.CreateDirectory(_cacheDirectory);
+
+        // Restore previously selected folder across sessions
+        string savedRoot = _settingsService.Current.LoraStorageDirectory;
+        if (!string.IsNullOrWhiteSpace(savedRoot) && Directory.Exists(savedRoot)) {
+            RootFolder = savedRoot;
+            string savedCurrent = _settingsService.Current.LastSubfolderPath;
+            CurrentFolder = (!string.IsNullOrWhiteSpace(savedCurrent) && Directory.Exists(savedCurrent)) ? savedCurrent : savedRoot;
+            StartScan(savedRoot, forceClear: false);
+        }
+    }
+
+    public void SetFolders(string rootFolder, string? currentFolder = null) {
+        RootFolder = rootFolder;
+        CurrentFolder = currentFolder ?? rootFolder;
+        _settingsService.Current.LoraStorageDirectory = rootFolder;
+        _settingsService.Current.LastSubfolderPath = CurrentFolder;
+        _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
+    }
+
+    public void SetCurrentSubfolder(string currentFolder) {
+        CurrentFolder = currentFolder;
+        _settingsService.Current.LastSubfolderPath = currentFolder;
+        _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public void AddOrUpdateLora(LoraMetadata meta) {
+        lock (_lock) {
+            _items.RemoveAll(x => x.FilePath.Equals(meta.FilePath, StringComparison.OrdinalIgnoreCase));
+            _items.Insert(0, meta);
+        }
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public void StartScan(string directoryPath, bool forceClear = true) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directoryPath);
+        if (!Directory.Exists(directoryPath)) {
+            return;
+        }
+
+        SetFolders(directoryPath, CurrentFolder.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase) ? CurrentFolder : directoryPath);
+
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanCts = new CancellationTokenSource();
+        CancellationToken token = _scanCts.Token;
+
+        if (forceClear) {
+            lock (_lock) {
+                _items.Clear();
+            }
+            OnLibraryUpdated?.Invoke();
+        }
+
+        IsScanning = true;
+        ScannedCount = 0;
+        TotalFiles = 0;
+        CurrentScanningFile = "Discovering files recursively...";
+        OnScanStateChanged?.Invoke(true);
+
+        _ = Task.Run(async () => {
+            try {
+                await ScanDirectoryStreamAsync(
+                    directoryPath,
+                    meta => {
+                        lock (_lock) {
+                            int existingIndex = _items.FindIndex(x => x.FilePath.Equals(meta.FilePath, StringComparison.OrdinalIgnoreCase));
+                            if (existingIndex >= 0) {
+                                _items[existingIndex] = meta;
+                            } else {
+                                _items.Add(meta);
+                            }
+                        }
+                        OnLibraryUpdated?.Invoke();
+                        return Task.CompletedTask;
+                    },
+                    (file, current, total) => {
+                        CurrentScanningFile = file;
+                        ScannedCount = current;
+                        TotalFiles = total;
+                        OnScanProgress?.Invoke(file, current, total);
+                    },
+                    token
+                );
+            } catch (OperationCanceledException) {
+                // Background scan stopped
+            } catch {
+                // Suppress unexpected scan errors
+            } finally {
+                IsScanning = false;
+                OnScanStateChanged?.Invoke(false);
+            }
+        }, token);
+    }
+
+    public void CancelScan() {
+        _scanCts?.Cancel();
     }
 
     public async Task<int> ScanDirectoryStreamAsync(

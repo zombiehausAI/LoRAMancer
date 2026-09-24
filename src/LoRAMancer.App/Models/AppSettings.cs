@@ -33,6 +33,8 @@ public sealed class AppSettings {
 
     public string PreferredPythonPath { get; set; } = "python.exe";
     public string DefaultOutputDirectory { get; set; } = string.Empty;
+    public string LoraStorageDirectory { get; set; } = string.Empty;
+    public string LastSubfolderPath { get; set; } = string.Empty;
     public string UpdateManifestUrl { get; set; } = "https://raw.githubusercontent.com/loramancer/loramancer/main/installer/version.json";
     public bool AutoCheckUpdatesOnStartup { get; set; } = true;
     public bool EnableDarkTheme { get; set; } = true;
