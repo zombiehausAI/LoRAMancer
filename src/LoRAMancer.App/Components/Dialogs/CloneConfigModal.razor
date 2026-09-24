@@ -1,0 +1,140 @@
+@inject NativeFileDialogService FileDialogService
+@inject AiToolkitConfigBuilder ConfigBuilder
+@inject ISnackbar Snackbar
+
+<MudDialog Style="background-color: #181825; border: 1px solid #313244; max-width: 800px; width: 100%;">
+    <TitleContent>
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Color="Color.Primary" Class="mr-2" />
+            <MudText Typo="Typo.h6">Clone Configuration (AMD ROCm Sanitized)</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Class="mb-4" Dense="true" Style="background-color: rgba(137, 180, 250, 0.15); color: #89b4fa;">
+            Cloning hyperparameters from: <b>@DonorLora?.FileName</b>. Optimizers and attention will be automatically converted to AMD ROCm safe standards.
+        </MudAlert>
+
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="Config.RunName" Label="New Run Name" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect @bind-Value="Config.TargetBaseModel" Label="Target Base Model" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("FLUX.1-dev")">FLUX.1-dev</MudSelectItem>
+                    <MudSelectItem Value="@("FLUX.1-schnell")">FLUX.1-schnell</MudSelectItem>
+                    <MudSelectItem Value="@("stabilityai/stable-diffusion-xl-base-1.0")">SDXL 1.0</MudSelectItem>
+                    <MudSelectItem Value="@("PonyDiffusionV6XL")">Pony / Chroma (SDXL)</MudSelectItem>
+                    <MudSelectItem Value="@("runwayml/stable-diffusion-v1-5")">SD 1.5</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Dataset Directory</MudText>
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="Config.DatasetDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Select dataset folder using native picker..." FullWidth="true" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickDatasetDirectoryAsync">
+                        Browse...
+                    </MudButton>
+                </div>
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Output Directory</MudText>
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="Config.OutputDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Select output checkpoint folder..." FullWidth="true" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickOutputDirectoryAsync">
+                        Browse...
+                    </MudButton>
+                </div>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="Config.TriggerWord" Label="Trigger Word (e.g. ohwx woman)" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudNumericField @bind-Value="Config.MaxTrainEpochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="200" />
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudNumericField @bind-Value="Config.NetworkDim" Label="Network Dim (Rank)" Variant="Variant.Outlined" Min="1" Max="256" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudNumericField @bind-Value="Config.NetworkAlpha" Label="Network Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudNumericField @bind-Value="Config.LearningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" />
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 12px;">
+                    <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2">AMD ROCm Safety Engine Rules Applied:</MudText>
+                    <div class="d-flex flex-wrap gap-2">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Optimizer: @Config.Optimizer</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Attention: sdpa (native)</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Precision: bf16</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Disk Latent Caching: Enabled</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Quantize: Disabled (Safe)</MudChip>
+                    </div>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveConfigAsync">
+            Export Config
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public LoraMetadata? DonorLora { get; set; }
+
+    public TrainingConfig Config { get; set; } = new();
+
+    protected override void OnInitialized() {
+        if (DonorLora != null) {
+            Config = ConfigBuilder.CloneFromDonor(DonorLora, $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_clone", string.Empty, string.Empty);
+        }
+    }
+
+    private async Task PickDatasetDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Training Dataset Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            Config.DatasetDirectory = folder;
+        }
+    }
+
+    private async Task PickOutputDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Output Checkpoint Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            Config.OutputDirectory = folder;
+        }
+    }
+
+    private async Task SaveConfigAsync() {
+        if (string.IsNullOrWhiteSpace(Config.DatasetDirectory)) {
+            Snackbar.Add("Please select a dataset directory.", Severity.Warning);
+            return;
+        }
+
+        string yaml = ConfigBuilder.BuildAiToolkitYaml(Config);
+        string outputPath = Path.Combine(string.IsNullOrEmpty(Config.OutputDirectory) ? Directory.GetCurrentDirectory() : Config.OutputDirectory, $"{Config.RunName}_aitoolkit.yaml");
+
+        try {
+            await File.WriteAllTextAsync(outputPath, yaml);
+            Snackbar.Add($"Config saved: {outputPath}", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(outputPath));
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to write config: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel() {
+        MudDialog.Cancel();
+    }
+}

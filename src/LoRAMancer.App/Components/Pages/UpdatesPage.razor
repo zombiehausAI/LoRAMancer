@@ -1,0 +1,139 @@
+@page "/updates"
+@inject AutoUpdateService UpdateService
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Auto-Update Center</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Keep LoRAMancer and its AMD ROCm orchestrator up to date</MudText>
+    </div>
+    <div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="_isChecking" OnClick="CheckUpdatesAsync">
+            @(_isChecking ? "Checking..." : "Check for Updates")
+        </MudButton>
+    </div>
+</div>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" />
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Version Status</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <div class="d-flex align-center justify-space-between mb-3">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Installed Version:</MudText>
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">v@UpdateService.CurrentVersion</MudChip>
+                </div>
+                <div class="d-flex align-center justify-space-between mb-3">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Latest Available:</MudText>
+                    <MudChip T="string" Color="@(_updateResult?.IsUpdateAvailable == true ? Color.Warning : Color.Success)" Size="Size.Small">
+                        v@(_updateResult?.LatestVersion ?? UpdateService.CurrentVersion)
+                    </MudChip>
+                </div>
+
+                @if (_updateResult?.IsUpdateAvailable == true) {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mt-3">
+                        A new update (v@_updateResult.LatestVersion) is ready to install!
+                    </MudAlert>
+
+                    @if (_isDownloading) {
+                        <div class="mt-4">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Downloading update: @_downloadProgress%</MudText>
+                            <MudProgressLinear Color="Color.Primary" Value="@_downloadProgress" Class="mt-1" />
+                        </div>
+                    } else {
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" FullWidth="true" Class="mt-4" OnClick="DownloadAndApplyUpdateAsync">
+                            Download & Restart
+                        </MudButton>
+                    }
+                } else if (_checkedOnce) {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                        You are running the latest version of LoRAMancer.
+                    </MudAlert>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudIcon Icon="@Icons.Material.Filled.Notes" Color="Color.Secondary" />
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Release Notes</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (!string.IsNullOrWhiteSpace(_updateResult?.Changelog)) {
+                    <div style="white-space: pre-wrap; font-size: 0.85rem; color: #a6adc8;">
+                        @_updateResult.Changelog
+                    </div>
+                } else {
+                    <div class="text-secondary" style="font-style: italic;">
+                        Click "Check for Updates" to retrieve the latest release notes from the update server.
+                    </div>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _isChecking;
+    private bool _checkedOnce;
+    private bool _isDownloading;
+    private int _downloadProgress;
+    private UpdateCheckResult? _updateResult;
+
+    protected override void OnInitialized() {
+        UpdateService.OnDownloadProgress += progress => {
+            InvokeAsync(() => {
+                _downloadProgress = progress;
+                StateHasChanged();
+            });
+        };
+    }
+
+    private async Task CheckUpdatesAsync() {
+        _isChecking = true;
+        try {
+            _updateResult = await UpdateService.CheckForUpdatesAsync();
+            _checkedOnce = true;
+            if (_updateResult.IsUpdateAvailable) {
+                Snackbar.Add($"Update found: v{_updateResult.LatestVersion}", Severity.Info);
+            } else {
+                Snackbar.Add("LoRAMancer is up to date.", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Check failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isChecking = false;
+        }
+    }
+
+    private async Task DownloadAndApplyUpdateAsync() {
+        if (_updateResult == null || string.IsNullOrWhiteSpace(_updateResult.DownloadUrl)) {
+            return;
+        }
+
+        _isDownloading = true;
+        try {
+            Snackbar.Add("Downloading update payload...", Severity.Info);
+            string installerPath = await UpdateService.DownloadUpdateAsync(_updateResult.DownloadUrl, _updateResult.Sha256Checksum);
+            Snackbar.Add("Download complete. Launching installer...", Severity.Success);
+            UpdateService.LaunchInstallerAndExit(installerPath);
+        } catch (Exception ex) {
+            Snackbar.Add($"Update installation failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isDownloading = false;
+        }
+    }
+}

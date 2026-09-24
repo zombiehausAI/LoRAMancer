@@ -1,0 +1,2 @@
+# LoRAMancer Sample Python Plugin Dependencies
+# Isolated to plugins/sample_python_plugin/.venv

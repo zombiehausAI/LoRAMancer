@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/SampleCSharpPlugin/SampleCSharpPlugin.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/LoRAMancer.App/LoRAMancer.App.csproj" />
+    <Project Path="src/LoRAMancer.PluginSdk/LoRAMancer.PluginSdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LoRAMancer.Tests/LoRAMancer.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,9 @@
+{
+  "id": "sample-python-plugin",
+  "name": "LoRA Dataset Caption Sanitizer",
+  "version": "1.0.0",
+  "description": "Python plugin running inside dedicated isolated .venv to sanitize tag sets and trigger words.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12"
+}

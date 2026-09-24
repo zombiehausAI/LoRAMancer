@@ -1,0 +1,15 @@
+namespace LoRAMancer.App.Models;
+
+public sealed class PluginManifest {
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Version { get; set; } = "1.0.0";
+    public string Description { get; set; } = string.Empty;
+    public string Author { get; set; } = string.Empty;
+    public string EntryPoint { get; set; } = string.Empty;
+    public string PluginType { get; set; } = "Python";
+    public string PythonVersion { get; set; } = "3.12";
+    public string DirectoryPath { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public bool HasDedicatedVenv { get; set; }
+}

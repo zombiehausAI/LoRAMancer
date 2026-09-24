@@ -1,0 +1,55 @@
+# Visual Studio / Visual Studio Code / Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+artifacts/
+out/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+dist/
+
+# .NET MAUI / Xamarin
+Generated Files/
+.maui/
+
+# Python virtual environments & cache
+.venv/
+*/.venv/
+plugins/*/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs & temporary files
+*.log
+*.tmp
+*.pid
+
+# SafeTensors & Model weights / checkpoints (prevent massive accidental commits)
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+*.onnx
+
+# Inno Setup output
+Output/

@@ -1,0 +1,112 @@
+@page "/plugins"
+@inject PluginManagerService PluginManager
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Plugin Manager</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Extend LoRAMancer with C# assemblies (.dll) or Python plugins with isolated .venv environments</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshPluginsAsync">
+            Rescan Plugins
+        </MudButton>
+    </div>
+</div>
+
+<MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+    Plugins live in <code>@PluginManager.PluginsDirectory</code>. C# plugins are <code>.dll</code> files in subfolders; Python plugins live in their own folder with their own dedicated <code>.venv</code>.
+</MudAlert>
+
+<MudGrid>
+    @if (PluginManager.Plugins.Count == 0) {
+        <MudItem xs="12">
+            <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
+                <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                <MudText Typo="Typo.h6">No Plugins Discovered</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Add C# DLLs or Python packages to the plugins/ folder.</MudText>
+            </MudCard>
+        </MudItem>
+    } else {
+        @foreach (var plugin in PluginManager.Plugins) {
+            <MudItem xs="12" md="6">
+                <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; height: 100%;">
+                    <MudCardHeader>
+                        <CardHeaderAvatar>
+                            @if (plugin.PluginType == "CSharp") {
+                                <MudAvatar Color="Color.Primary" Variant="Variant.Filled">C#</MudAvatar>
+                            } else {
+                                <MudAvatar Color="Color.Secondary" Variant="Variant.Filled">Py</MudAvatar>
+                            }
+                        </CardHeaderAvatar>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@plugin.Name</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">v@plugin.Version • @plugin.PluginType Plugin</MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            @if (plugin.PluginType == "Python") {
+                                @if (plugin.HasDedicatedVenv) {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Outlined">.venv Ready</MudChip>
+                                } else {
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined">Needs .venv</MudChip>
+                                }
+                            }
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.body2" Class="mb-2">@plugin.Description</MudText>
+                        <div style="font-size: 0.75rem; color: #6c7086; word-break: break-all;">
+                            Directory: @plugin.DirectoryPath
+                        </div>
+                    </MudCardContent>
+                    <MudCardActions>
+                        @if (plugin.PluginType == "Python" && !plugin.HasDedicatedVenv) {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))">
+                                Provision .venv
+                            </MudButton>
+                        }
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => TestPluginAsync(plugin))">
+                            Test Run
+                        </MudButton>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    }
+</MudGrid>
+
+@code {
+    protected override async Task OnInitializedAsync() {
+        await PluginManager.DiscoverAndInitializePluginsAsync();
+    }
+
+    private async Task RefreshPluginsAsync() {
+        await PluginManager.DiscoverAndInitializePluginsAsync();
+        Snackbar.Add("Plugin scan complete.", Severity.Success);
+    }
+
+    private async Task ProvisionPluginVenvAsync(PluginManifest plugin) {
+        try {
+            Snackbar.Add($"Provisioning isolated .venv for {plugin.Name}...", Severity.Info);
+            await PluginManager.EnsurePythonPluginVenvAsync(plugin, msg => {
+                Console.WriteLine(msg);
+            });
+            Snackbar.Add($".venv created for {plugin.Name}!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to provision plugin venv: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task TestPluginAsync(PluginManifest plugin) {
+        try {
+            var result = await PluginManager.ExecutePluginAsync(plugin.Id, "ping", new Dictionary<string, object?> { ["test"] = true });
+            if (result.Success) {
+                Snackbar.Add($"Plugin response: {result.Message} ({result.Data})", Severity.Success);
+            } else {
+                Snackbar.Add($"Plugin error: {result.Message}", Severity.Error);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Execution failed: {ex.Message}", Severity.Error);
+        }
+    }
+}

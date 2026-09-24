@@ -1,0 +1,196 @@
+@page "/training"
+@inject TrainingRunnerService TrainingRunner
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Training Orchestrator & Live Console</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Execute AI-Toolkit or Kohya runs with live AMD ROCm telemetry and log streaming</MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        @if (TrainingRunner.IsRunning) {
+            <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="CancelTraining">
+                Stop Training
+            </MudButton>
+        } else {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartTrainingAsync">
+                Launch Training
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearLogs">
+            Clear Logs
+        </MudButton>
+    </div>
+</div>
+
+<!-- Configuration Bar -->
+<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+    <MudCardContent Class="py-3">
+        <MudGrid Class="align-center">
+            <MudItem xs="12" md="6">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_configYamlPath" Label="Training Config (.yaml)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Placeholder="Select AI-Toolkit .yaml config..." />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseConfigFileAsync">Browse...</MudButton>
+                </div>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_venvPath" Label="Python Venv Directory" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Placeholder="Main .venv directory..." />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseVenvFolderAsync">Browse...</MudButton>
+                </div>
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
+
+<!-- Metrics & Telemetry Grid -->
+<MudGrid Class="mb-4">
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Status</MudText>
+            <div class="d-flex align-center mt-1">
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(TrainingRunner.CurrentProgress.Status)">
+                    @TrainingRunner.CurrentProgress.Status
+                </MudChip>
+            </div>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Step Progress</MudText>
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">
+                @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
+            </MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Current Loss</MudText>
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #a6e3a1;">
+                @(TrainingRunner.CurrentProgress.CurrentLoss > 0 ? TrainingRunner.CurrentProgress.CurrentLoss.ToString("0.0000") : "-")
+            </MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="6" sm="3">
+        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Elapsed / ETA</MudText>
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">
+                @TrainingRunner.CurrentProgress.Elapsed.ToString(@"hh\:mm\:ss") / @TrainingRunner.CurrentProgress.EstimatedRemaining.ToString(@"hh\:mm\:ss")
+            </MudText>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12">
+        <MudProgressLinear Color="Color.Primary" Value="@TrainingRunner.CurrentProgress.ProgressPercentage" Class="my-2" Style="height: 6px; border-radius: 3px;" />
+    </MudItem>
+</MudGrid>
+
+<!-- Real-time Terminal Window -->
+<div class="terminal-window p-3" style="height: 480px; overflow-y: auto;" id="terminal-log-box">
+    @if (_logs.Count == 0) {
+        <div class="text-secondary" style="font-style: italic;">Awaiting training job initiation... Output and telemetry will stream here in real-time.</div>
+    } else {
+        @foreach (string log in _logs) {
+            <div class="terminal-line @GetLogClass(log)">@log</div>
+        }
+    }
+</div>
+
+@code {
+    private string _configYamlPath = string.Empty;
+    private string _venvPath = Path.Combine(AppContext.BaseDirectory, ".venv");
+    private readonly List<string> _logs = new();
+    private const int MaxLogLines = 2000;
+
+    protected override void OnInitialized() {
+        TrainingRunner.OnLogReceived += HandleLogReceived;
+        TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
+    }
+
+    private void HandleLogReceived(string line) {
+        InvokeAsync(() => {
+            _logs.Add(line);
+            if (_logs.Count > MaxLogLines) {
+                _logs.RemoveRange(0, 100);
+            }
+            StateHasChanged();
+        });
+    }
+
+    private void HandleProgressUpdated(TrainingProgress progress) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task BrowseConfigFileAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrEmpty(file)) {
+            _configYamlPath = file;
+        }
+    }
+
+    private async Task BrowseVenvFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select .venv Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _venvPath = folder;
+        }
+    }
+
+    private async Task StartTrainingAsync() {
+        if (string.IsNullOrWhiteSpace(_configYamlPath)) {
+            Snackbar.Add("Please select or clone a training configuration YAML file first.", Severity.Warning);
+            return;
+        }
+
+        try {
+            string toolkitScript = Path.Combine(_venvPath, "run.py");
+            if (!File.Exists(toolkitScript)) {
+                toolkitScript = "run.py";
+            }
+
+            _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
+            await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
+        } catch (Exception ex) {
+            Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CancelTraining() {
+        TrainingRunner.CancelTraining();
+        Snackbar.Add("Training cancelled by user.", Severity.Info);
+    }
+
+    private void ClearLogs() {
+        _logs.Clear();
+    }
+
+    private static Color GetStatusColor(TrainingStatus status) => status switch {
+        TrainingStatus.Training => Color.Success,
+        TrainingStatus.Initializing => Color.Info,
+        TrainingStatus.Completed => Color.Primary,
+        TrainingStatus.Failed => Color.Error,
+        TrainingStatus.Cancelled => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string GetLogClass(string log) {
+        if (log.Contains("error", StringComparison.OrdinalIgnoreCase) || log.Contains("exception", StringComparison.OrdinalIgnoreCase)) {
+            return "error";
+        }
+        if (log.Contains("warning", StringComparison.OrdinalIgnoreCase) || log.Contains("warn", StringComparison.OrdinalIgnoreCase)) {
+            return "warn";
+        }
+        if (log.Contains("step", StringComparison.OrdinalIgnoreCase) || log.Contains("epoch", StringComparison.OrdinalIgnoreCase)) {
+            return "info";
+        }
+        if (log.Contains("completed", StringComparison.OrdinalIgnoreCase) || log.Contains("success", StringComparison.OrdinalIgnoreCase)) {
+            return "success";
+        }
+        return string.Empty;
+    }
+
+    public void Dispose() {
+        TrainingRunner.OnLogReceived -= HandleLogReceived;
+        TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+    }
+}

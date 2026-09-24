@@ -1,0 +1,139 @@
+@inject IDialogService DialogService
+
+<MudDrawer @bind-Open="IsOpen" Anchor="Anchor.Right" Elevation="3" Variant="DrawerVariant.Temporary" Width="520px" Style="background-color: #181825; border-left: 1px solid #313244;">
+    <MudDrawerHeader Class="d-flex align-center justify-space-between pb-2" Style="border-bottom: 1px solid #313244;">
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" Class="mr-2" />
+            <MudText Typo="Typo.h6">LoRA Metadata Inspector</MudText>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => IsOpen = false)" />
+    </MudDrawerHeader>
+
+    <div class="p-4" style="overflow-y: auto; max-height: calc(100vh - 80px);">
+        @if (Metadata != null) {
+            <MudCard Elevation="0" Class="mb-4" Style="background-color: #11111b; border: 1px solid #313244;">
+                <MudCardContent>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight:700; color:#cba6f7;">@Metadata.FileName</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Path: @Metadata.FilePath</MudText>
+                    <div class="d-flex align-center gap-2 mt-2">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">@Metadata.BaseModel</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@(Metadata.FileSizeBytes / (1024 * 1024)) MB</MudChip>
+                    </div>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="OpenCloneModalAsync">
+                        Clone Configuration
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Style="background-color: transparent;">
+                <MudTabPanel Text="Hyperparameters" Icon="@Icons.Material.Filled.Tune">
+                    <MudSimpleTable Dense="true" Hover="true" Style="background-color: #11111b; border-radius: 8px;">
+                        <tbody>
+                            <tr>
+                                <td><b>Network Dim (Rank)</b></td>
+                                <td style="color:#89b4fa;">@(Metadata.NetworkDim?.ToString() ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Network Alpha</b></td>
+                                <td style="color:#89b4fa;">@(Metadata.NetworkAlpha?.ToString() ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Learning Rate</b></td>
+                                <td style="color:#a6e3a1;">@(Metadata.LearningRate?.ToString("0.#####e+00") ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>UNet LR</b></td>
+                                <td>@(Metadata.UnetLearningRate?.ToString("0.#####e+00") ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Text Encoder LR</b></td>
+                                <td>@(Metadata.TextEncoderLearningRate?.ToString("0.#####e+00") ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Optimizer</b></td>
+                                <td style="color:#f9e2af;">@(string.IsNullOrEmpty(Metadata.Optimizer) ? "N/A" : Metadata.Optimizer)</td>
+                            </tr>
+                            <tr>
+                                <td><b>LR Scheduler</b></td>
+                                <td>@(string.IsNullOrEmpty(Metadata.LrScheduler) ? "N/A" : Metadata.LrScheduler)</td>
+                            </tr>
+                            <tr>
+                                <td><b>Epochs</b></td>
+                                <td>@(Metadata.Epochs?.ToString() ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Total Steps</b></td>
+                                <td>@(Metadata.TotalSteps?.ToString() ?? "N/A")</td>
+                            </tr>
+                            <tr>
+                                <td><b>Resolution</b></td>
+                                <td>@(string.IsNullOrEmpty(Metadata.Resolution) ? "N/A" : Metadata.Resolution)</td>
+                            </tr>
+                            <tr>
+                                <td><b>Precision</b></td>
+                                <td>@(string.IsNullOrEmpty(Metadata.Precision) ? "N/A" : Metadata.Precision)</td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudTabPanel>
+
+                <MudTabPanel Text="Raw Header" Icon="@Icons.Material.Filled.Code">
+                    <MudTextField @bind-Value="_filterKey" Placeholder="Filter metadata keys..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        @foreach (var kvp in FilteredMetadata) {
+                            <div class="mb-2 p-2 rounded" style="background-color: #11111b; border: 1px solid #313244; font-family: monospace; font-size: 0.8rem;">
+                                <div style="color: #cba6f7; font-weight: 600;">@kvp.Key</div>
+                                <div style="color: #a6adc8; word-break: break-all;">@kvp.Value</div>
+                            </div>
+                        }
+                    </div>
+                </MudTabPanel>
+            </MudTabs>
+        }
+    </div>
+</MudDrawer>
+
+@code {
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> IsOpenChanged { get; set; }
+
+    [Parameter]
+    public LoraMetadata? Metadata { get; set; }
+
+    private string _filterKey = string.Empty;
+
+    private IEnumerable<KeyValuePair<string, string>> FilteredMetadata {
+        get {
+            if (Metadata == null) {
+                return Enumerable.Empty<KeyValuePair<string, string>>();
+            }
+            if (string.IsNullOrWhiteSpace(_filterKey)) {
+                return Metadata.RawHeaderMetadata;
+            }
+            return Metadata.RawHeaderMetadata.Where(k => k.Key.Contains(_filterKey, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task OpenCloneModalAsync() {
+        if (Metadata == null) {
+            return;
+        }
+
+        DialogParameters parameters = new() {
+            ["DonorLora"] = Metadata
+        };
+
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<CloneConfigModal>("Clone LoRA Configuration", parameters, options);
+    }
+}

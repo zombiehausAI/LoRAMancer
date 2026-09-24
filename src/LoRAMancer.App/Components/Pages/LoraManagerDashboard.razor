@@ -1,0 +1,158 @@
+@page "/"
+@inject SafeTensorsMetadataReader MetadataReader
+@inject NativeFileDialogService FileDialogService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using LoRAMancer.App.Components.Dialogs
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">LoRA Library & Metadata Inspector</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Inspect hyperparameters, clone configs, and prepare training matrices with zero weight overhead</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
+            Browse LoRA...
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+            Browse Library...
+        </MudButton>
+    </div>
+</div>
+
+<!-- Drag and Drop Dropzone -->
+<div class="drop-zone mb-6" @ondragover:preventDefault @ondrop="HandleFileDrop">
+    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
+    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Drag and Drop .safetensors files or folder here</MudText>
+    <MudText Typo="Typo.caption" Color="Color.Secondary">LoRAMancer parses header bytes in milliseconds without loading gigabytes of weights into memory</MudText>
+</div>
+
+<!-- Library Grid -->
+<MudTable Items="_loraLibrary" Hover="true" Breakpoint="Breakpoint.Sm" Loading="_isLoading" LoadingProgressColor="Color.Primary" Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <HeaderContent>
+        <MudTh>File Name</MudTh>
+        <MudTh>Base Model</MudTh>
+        <MudTh>Rank (Dim)</MudTh>
+        <MudTh>Alpha</MudTh>
+        <MudTh>LR</MudTh>
+        <MudTh>Optimizer</MudTh>
+        <MudTh>File Size</MudTh>
+        <MudTh Style="text-align: right;">Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="File Name">
+            <div class="d-flex align-center">
+                <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
+                <div>
+                    <div style="font-weight: 600; color: #cdd6f4;">@context.FileName</div>
+                    <div style="font-size: 0.75rem; color: #6c7086;">@context.FilePath</div>
+                </div>
+            </div>
+        </MudTd>
+        <MudTd DataLabel="Base Model">
+            <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@context.BaseModel</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Rank (Dim)">@(context.NetworkDim?.ToString() ?? "-")</MudTd>
+        <MudTd DataLabel="Alpha">@(context.NetworkAlpha?.ToString() ?? "-")</MudTd>
+        <MudTd DataLabel="LR">@(context.LearningRate?.ToString("0.#####e+00") ?? "-")</MudTd>
+        <MudTd DataLabel="Optimizer">@(string.IsNullOrEmpty(context.Optimizer) ? "-" : context.Optimizer)</MudTd>
+        <MudTd DataLabel="File Size">@((context.FileSizeBytes / (1024.0 * 1024.0)).ToString("0.0")) MB</MudTd>
+        <MudTd DataLabel="Actions" Style="text-align: right;">
+            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                <MudTooltip Text="Inspect Metadata">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Primary" OnClick="@(() => InspectLora(context))" />
+                </MudTooltip>
+                <MudTooltip Text="Clone Config">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Color="Color.Secondary" OnClick="@(() => CloneLoraConfig(context))" />
+                </MudTooltip>
+            </MudButtonGroup>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <div class="p-6 text-center text-secondary">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large" Class="mb-2" />
+            <div>No LoRAs loaded yet. Browse for a file or folder above.</div>
+        </div>
+    </NoRecordsContent>
+</MudTable>
+
+<!-- Metadata Inspector Drawer -->
+<MetadataInspectorDrawer @bind-IsOpen="_drawerOpen" Metadata="_selectedLora" />
+
+@code {
+    private readonly List<LoraMetadata> _loraLibrary = new();
+    private bool _isLoading;
+    private bool _drawerOpen;
+    private LoraMetadata? _selectedLora;
+
+    private async Task BrowseLoraFileAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrEmpty(file)) {
+            await LoadSingleLoraAsync(file);
+        }
+    }
+
+    private async Task BrowseLibraryFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select LoRA Library Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            await LoadFolderAsync(folder);
+        }
+    }
+
+    private async Task LoadSingleLoraAsync(string filePath) {
+        _isLoading = true;
+        try {
+            LoraMetadata meta = await MetadataReader.ReadMetadataAsync(filePath);
+            _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+            _loraLibrary.Insert(0, meta);
+            Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to inspect {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
+        } finally {
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadFolderAsync(string folderPath) {
+        _isLoading = true;
+        try {
+            string[] files = Directory.GetFiles(folderPath, "*.safetensors", SearchOption.AllDirectories);
+            int count = 0;
+            foreach (string file in files) {
+                try {
+                    LoraMetadata meta = await MetadataReader.ReadMetadataAsync(file);
+                    _loraLibrary.RemoveAll(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase));
+                    _loraLibrary.Add(meta);
+                    count++;
+                } catch {
+                    // Skip corrupt or unreadable files
+                }
+            }
+            Snackbar.Add($"Indexed {count} LoRAs from directory", Severity.Success);
+        } finally {
+            _isLoading = false;
+        }
+    }
+
+    private void HandleFileDrop() {
+        // Native drop handling can hook into platform clipboard/file payload
+        Snackbar.Add("Drop received. Use 'Browse LoRA...' or 'Browse Library...' for native Windows dialogs.", Severity.Info);
+    }
+
+    private void InspectLora(LoraMetadata lora) {
+        _selectedLora = lora;
+        _drawerOpen = true;
+    }
+
+    private async Task CloneLoraConfig(LoraMetadata lora) {
+        DialogParameters parameters = new() {
+            ["DonorLora"] = lora
+        };
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+        await DialogService.ShowAsync<CloneConfigModal>("Clone LoRA Configuration", parameters, options);
+    }
+}

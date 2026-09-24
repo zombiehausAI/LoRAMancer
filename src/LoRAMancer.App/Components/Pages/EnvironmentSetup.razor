@@ -1,0 +1,182 @@
+@page "/environment"
+@inject AmdVenvProvisioner Provisioner
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">AMD ROCm & Environment Setup</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Provision dedicated Python 3.12 .venv, install AMD PyTorch ROCm wheels, and ingest ComfyUI settings</MudText>
+    </div>
+    <div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Build" Disabled="_isProvisioning" OnClick="StartProvisioningAsync">
+            @(_isProvisioning ? "Provisioning..." : "Provision .venv")
+        </MudButton>
+    </div>
+</div>
+
+<MudGrid Class="mb-4">
+    <!-- Hardware & ROCm Diagnostics -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudIcon Icon="@Icons.Material.Filled.Memory" Color="Color.Primary" />
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">AMD Hardware Detection</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Radeon GPU & ROCm driver status</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSimpleTable Dense="true" Style="background-color: #11111b; border-radius: 8px;">
+                    <tbody>
+                        <tr>
+                            <td><b>AMD GPU Present</b></td>
+                            <td>
+                                @if (_envInfo.IsAmdGpuDetected) {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Detected</MudChip>
+                                } else {
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">None / Fallback</MudChip>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><b>GPU Model</b></td>
+                            <td style="color:#89b4fa;">@(_stringOrFallback(_envInfo.GpuName, "Generic AMD GPU"))</td>
+                        </tr>
+                        <tr>
+                            <td><b>ROCm Driver</b></td>
+                            <td>
+                                @if (_envInfo.RocmDriverFound) {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Installed (@_envInfo.RocmVersion)</MudChip>
+                                } else {
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">ROCm 7.x Driver Recommended</MudChip>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><b>Target PyTorch</b></td>
+                            <td style="color:#cba6f7;">@AmdVenvProvisioner.DefaultTorchVersion</td>
+                        </tr>
+                    </tbody>
+                </MudSimpleTable>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- ComfyUI Script Ingestion -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudIcon Icon="@Icons.Material.Filled.Terminal" Color="Color.Secondary" />
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">ComfyUI Script Ingestion</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Parse comfyui.ps1 to inherit ROCm wheel configuration</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <div class="mb-3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Select your existing ComfyUI startup script:</MudText>
+                    <div class="d-flex align-center gap-2 mt-1">
+                        <MudTextField @bind-Value="_scriptPath" Placeholder="e.g. Reference/comfyui.ps1" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseScriptAsync">Browse...</MudButton>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_envInfo.ComfyUiPath)) {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+                        ComfyUI detected at: <b>@_envInfo.ComfyUiPath</b>
+                    </MudAlert>
+                }
+
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Sync" OnClick="IngestScriptAsync">
+                    Parse & Ingest Script
+                </MudButton>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<!-- Provisioning Progress & Console -->
+<MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244;">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Provisioning Log Console</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Step-by-step AMD virtual environment setup</MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <div class="terminal-window p-3" style="height: 300px; overflow-y: auto;">
+            @if (_provisioningLogs.Count == 0) {
+                <div class="text-secondary" style="font-style: italic;">No active provisioning operation. Click "Provision .venv" above to configure your environment.</div>
+            } else {
+                @foreach (string line in _provisioningLogs) {
+                    <div class="terminal-line">@line</div>
+                }
+            }
+        </div>
+    </MudCardContent>
+</MudCard>
+
+@code {
+    private AmdEnvironmentInfo _envInfo = new();
+    private string _scriptPath = string.Empty;
+    private bool _isProvisioning;
+    private readonly List<string> _provisioningLogs = new();
+
+    protected override async Task OnInitializedAsync() {
+        _envInfo = await Provisioner.DetectEnvironmentAsync();
+        string defaultRefScript = Path.Combine(Directory.GetCurrentDirectory(), "Reference", "comfyui.ps1");
+        if (File.Exists(defaultRefScript)) {
+            _scriptPath = defaultRefScript;
+            await Provisioner.IngestComfyUiScriptAsync(_scriptPath, _envInfo);
+        }
+    }
+
+    private async Task BrowseScriptAsync() {
+        string? script = await FileDialogService.PickScriptFileAsync();
+        if (!string.IsNullOrEmpty(script)) {
+            _scriptPath = script;
+            await IngestScriptAsync();
+        }
+    }
+
+    private async Task IngestScriptAsync() {
+        if (!File.Exists(_scriptPath)) {
+            Snackbar.Add("Selected script file does not exist.", Severity.Warning);
+            return;
+        }
+
+        await Provisioner.IngestComfyUiScriptAsync(_scriptPath, _envInfo);
+        Snackbar.Add("ComfyUI script parsed successfully!", Severity.Success);
+    }
+
+    private async Task StartProvisioningAsync() {
+        _isProvisioning = true;
+        _provisioningLogs.Clear();
+        _provisioningLogs.Add("[LoRAMancer] Starting AMD ROCm virtual environment provisioning...");
+
+        try {
+            string targetDir = Directory.GetCurrentDirectory();
+            await Provisioner.ProvisionVenvAsync(targetDir, line => {
+                InvokeAsync(() => {
+                    _provisioningLogs.Add(line);
+                    StateHasChanged();
+                });
+            });
+            Snackbar.Add(".venv provisioned successfully!", Severity.Success);
+        } catch (Exception ex) {
+            _provisioningLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Provisioning failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProvisioning = false;
+        }
+    }
+
+    private static string _stringOrFallback(string? val, string fallback) {
+        return string.IsNullOrWhiteSpace(val) ? fallback : val;
+    }
+}
