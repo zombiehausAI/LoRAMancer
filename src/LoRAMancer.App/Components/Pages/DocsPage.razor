@@ -205,6 +205,7 @@
     private static string GetFriendlyTitle(string fileName) {
         return fileName.ToUpperInvariant() switch {
             "FEATURES_OVERVIEW.MD" => "Features & Subsystem Reference",
+            "HYPERPARAMETER_GUIDE.MD" => "Hyperparameters & Options Guide",
             "LORA_LIBRARY_BROWSER.MD" => "LoRA Library & Multi-Library Browser",
             "TRAINING_WIZARD.MD" => "Civitai-Style Training Wizard",
             "HISTORY_AND_VAULT.MD" => "LoRA Training History & Vault",
@@ -221,6 +222,7 @@
     private static string GetDocIcon(string fileName) {
         return fileName.ToUpperInvariant() switch {
             "FEATURES_OVERVIEW.MD" => Icons.Material.Filled.Star,
+            "HYPERPARAMETER_GUIDE.MD" => Icons.Material.Filled.Tune,
             "LORA_LIBRARY_BROWSER.MD" => Icons.Material.Filled.CollectionsBookmark,
             "TRAINING_WIZARD.MD" => Icons.Material.Filled.AutoAwesome,
             "HISTORY_AND_VAULT.MD" => Icons.Material.Filled.HistoryEdu,
@@ -237,15 +239,16 @@
     private static int GetSortWeight(string fileName) {
         return fileName.ToUpperInvariant() switch {
             "FEATURES_OVERVIEW.MD" => 1,
-            "LORA_LIBRARY_BROWSER.MD" => 2,
-            "TRAINING_WIZARD.MD" => 3,
-            "HISTORY_AND_VAULT.MD" => 4,
-            "GPU_AND_ENVIRONMENT_SETUP.MD" => 5,
-            "AMD_ROCM_SETUP.MD" => 6,
-            "REMOTE_TRAINING.MD" => 7,
-            "PLUGINS.MD" => 8,
-            "ARCHITECTURE.MD" => 9,
-            "INSTALLER_AND_UPDATES.MD" => 10,
+            "HYPERPARAMETER_GUIDE.MD" => 2,
+            "LORA_LIBRARY_BROWSER.MD" => 3,
+            "TRAINING_WIZARD.MD" => 4,
+            "HISTORY_AND_VAULT.MD" => 5,
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => 6,
+            "AMD_ROCM_SETUP.MD" => 7,
+            "REMOTE_TRAINING.MD" => 8,
+            "PLUGINS.MD" => 9,
+            "ARCHITECTURE.MD" => 10,
+            "INSTALLER_AND_UPDATES.MD" => 11,
             _ => 99
         };
     }
