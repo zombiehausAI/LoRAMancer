@@ -60,4 +60,4 @@ Users have complete autonomy to manage their underlying Python environment direc
 1. **Pip Package Manager**: One-click **"Upgrade Pip"** button to keep pip at the latest version.
 2. **PyTorch Version Switcher**: Upgrade, downgrade, or switch distributions on demand (AMD ROCm 7.2.1, ROCm 7.1.0, NVIDIA CUDA 12.4, CUDA 12.1, Intel XPU, CPU, or custom wheel URLs).
 3. **ROCm Driver Stubs**: One-click **"Reapply Patch"** button to verify and fix Windows `rocm_sdk` library stubs if the environment is modified.
-4. **AI-Toolkit In-App Git Updates**: In **Settings & Admin Console** -> **AI-Toolkit Engine**, one-click **"Update AI-Toolkit (git pull)"** pulls upstream changes, updates submodules recursively, and synchronizes `.venv` dependencies with `--no-deps` protection.
+4. **AI-Toolkit In-App Git Updates**: In **Settings & Admin Console** -> **AI-Toolkit Engine**, one-click **"Update AI-Toolkit (git pull)"** pulls upstream changes, updates submodules recursively, and synchronizes `.venv` dependencies with full transitive package resolution while protecting existing PyTorch wheels.

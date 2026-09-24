@@ -44,6 +44,6 @@ When not overridden, LoRAMancer defaults to:
 
 The `rocm_sdk` package on Windows requires library entry stubs for non-present Unix shared objects (`hipsparselt`, `hipdnn`, `rocm-openblas`) inside `rocm_sdk/_dist_info.py`. `AmdVenvProvisioner` implements this patch automatically after wheel installation to prevent `ModuleNotFoundError` during process initialization.
 
-## Dependency Protection
+## PyTorch Protection & Dependency Resolution
 
-When installing AI-Toolkit or Kohya requirements, packages must be installed with `--no-deps` for any package tree that attempts to overwrite torch/torchvision with PyPI CUDA or CPU binaries.
+Hardware PyTorch wheels (`torch`, `torchvision`, `torchaudio`) are installed directly with `--no-deps` to ensure they are isolated from standard PyPI indexes. When subsequently installing training engine requirements (AI-Toolkit or Kohya), requirements are installed with full dependency resolution (omitting `--upgrade`), ensuring all core packages (`numpy`, `Pillow`, `filelock`, `tqdm`, `requests`, `sympy`, `networkx`, `jinja2`) are fully provisioned without replacing or downgrading the AMD ROCm PyTorch binaries.

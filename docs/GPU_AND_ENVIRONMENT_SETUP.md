@@ -29,7 +29,7 @@ When provisioning or validating the training environment (`AmdVenvProvisioner`):
    - **AMD ROCm**: Downloads and installs official AMD ROCm wheels, SDK wheels, and applies the automated Windows shared library entry stubs.
    - **Intel**: Runs `pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu`.
    - **CPU**: Runs `pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu`.
-6. **Dependency Protection**: AI-Toolkit and custom requirements are installed with `--no-deps` for any package hierarchy to prevent overwriting hardware-specific PyTorch binaries.
+6. **PyTorch Preservation & Full Dependency Resolution**: Hardware PyTorch wheels are installed directly without dependencies to prevent pulling standard PyPI CUDA/CPU packages. Subsequently, AI-Toolkit and training requirements are resolved with full dependency resolution (without `--upgrade`), ensuring core libraries like `numpy`, `Pillow`, `filelock`, `tqdm`, `requests`, `sympy`, `networkx`, and `jinja2` are fully provisioned while preserving hardware-specific PyTorch binaries.
 
 ---
 
