@@ -2,6 +2,8 @@
 @inject NavigationManager Navigation
 @inject TrainingRunnerService TrainingRunner
 @inject ThemeService ThemeManager
+@inject AmdVenvProvisioner Provisioner
+@using LoRAMancer.App.Models
 @implements IDisposable
 
 <MudThemeProvider IsDarkMode="@ThemeManager.CurrentTheme.IsDark" Theme="@ThemeManager.GetMudTheme()" />
@@ -98,9 +100,24 @@
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
             <img src="favicon.png" alt="LoRAMancer" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 10px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
             <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {ThemeManager.CurrentTheme.Primary}; letter-spacing: 0.5px;")">LoRAMancer</MudText>
-            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Class="ml-3 d-none d-md-inline-flex" Style="@($"border-color: {ThemeManager.CurrentTheme.Border}; color: {ThemeManager.CurrentTheme.TextSecondary};")">
-                Universal GPU Ready
-            </MudChip>
+            @if (_envInfo != null) {
+                <MudTooltip Text="@($"{_envInfo.GpuName} | {GetAcceleratorDetail()}")">
+                    <MudChip T="string" 
+                             Size="Size.Small" 
+                             Color="@GetAcceleratorChipColor()" 
+                             Variant="Variant.Outlined" 
+                             Icon="@Icons.Material.Filled.Bolt"
+                             Class="ml-3 d-none d-md-inline-flex" 
+                             OnClick="@(() => Navigation.NavigateTo("environment"))" 
+                             Style="cursor: pointer; font-weight: 600;">
+                        @GetAcceleratorLabel()
+                    </MudChip>
+                </MudTooltip>
+            } else {
+                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Class="ml-3 d-none d-md-inline-flex" Style="@($"border-color: {ThemeManager.CurrentTheme.Border}; color: {ThemeManager.CurrentTheme.TextSecondary};")">
+                    Detecting Hardware...
+                </MudChip>
+            }
         </div>
 
         <MudSpacer />
@@ -138,10 +155,64 @@
 
 @code {
     private bool _drawerOpen = true;
+    private AmdEnvironmentInfo? _envInfo;
 
-    protected override void OnInitialized() {
+    protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
         ThemeManager.OnThemeChanged += HandleThemeChanged;
+        try {
+            _envInfo = await Provisioner.DetectEnvironmentAsync();
+        } catch {
+            // Fallback non-critical
+        }
+    }
+
+    private string GetAcceleratorLabel() {
+        if (_envInfo == null) {
+            return "Hardware Ready";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Amd) {
+            return _envInfo.RocmDriverFound ? $"AMD ROCm {_envInfo.RocmVersion} Active" : "AMD Radeon Ready";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Nvidia) {
+            return "NVIDIA CUDA Ready";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Intel) {
+            return "Intel Arc XPU Ready";
+        }
+        return "CPU Mode";
+    }
+
+    private string GetAcceleratorDetail() {
+        if (_envInfo == null) {
+            return "Hardware Acceleration";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Amd) {
+            return _envInfo.RocmDriverFound ? $"ROCm {_envInfo.RocmVersion} Driver Installed" : "ROCm Driver Recommended";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Nvidia) {
+            return "CUDA Hardware Detected";
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Intel) {
+            return "Intel XPU Detected";
+        }
+        return "CPU Compute Mode";
+    }
+
+    private Color GetAcceleratorChipColor() {
+        if (_envInfo == null) {
+            return Color.Default;
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Amd) {
+            return _envInfo.RocmDriverFound ? Color.Success : Color.Warning;
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Nvidia) {
+            return Color.Success;
+        }
+        if (_envInfo.DetectedVendor == HardwareVendor.Intel) {
+            return Color.Info;
+        }
+        return Color.Default;
     }
 
     private void HandleProgressUpdated(TrainingProgress progress) {
