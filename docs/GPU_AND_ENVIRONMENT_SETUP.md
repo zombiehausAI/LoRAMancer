@@ -33,15 +33,28 @@ When provisioning or validating the training environment (`AmdVenvProvisioner`):
 
 ---
 
-## AMD ROCm Windows Specifics
+## Vendor-Specific PyTorch Wheel Configuration & Customization
 
-For AMD Radeon GPUs on Windows:
-- **Default Wheels**:
-  - `torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-  - `torchaudio-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-  - `torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-- **ROCm SDK Patching**: Automatically injects library stubs (`hipsparselt`, `hipdnn`, `rocm-openblas`) inside `rocm_sdk/_dist_info.py` to prevent missing Unix shared library crashes on Windows.
-- **Dynamic Wheel Updates**: In **Settings → AMD ROCm Wheels**, users can update the base repository URL (e.g. for ROCm 7.3+ releases) with live URL reachability probing.
+Under **Settings → GPU & PyTorch Wheels**, each GPU architecture has its own dedicated card configuration panel where users can use official defaults or provide custom wheel URLs / index repositories:
+
+1. **AMD Radeon (ROCm)**:
+   - **Default**: Official AMD ROCm 7.2.1 Windows wheels from `https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1`.
+   - **Customization**: Update ROCm release base URL, PyTorch version tag, direct `.whl` links, and ROCm SDK wheels with auto-generation and reachability probing.
+   - **Reset**: One-click "Reset AMD Defaults" button.
+
+2. **NVIDIA GeForce / RTX (CUDA)**:
+   - **Default**: Official PyTorch CUDA 12.4 index (`https://download.pytorch.org/whl/cu124`) with `torch torchvision torchaudio`.
+   - **Customization**: Switch to custom direct wheels or alternate CUDA index repositories (e.g. `cu121`). Includes live link reachability testing.
+   - **Reset**: One-click "Reset NVIDIA Defaults" button.
+
+3. **Intel Arc / Core Ultra / Data Center (XPU)**:
+   - **Default**: Official PyTorch XPU index (`https://download.pytorch.org/whl/xpu`) with native PyTorch 2.5+ Intel GPU acceleration.
+   - **Customization**: Specify custom XPU wheel URLs or alternative Intel oneAPI/XPU package repositories with reachability testing.
+   - **Reset**: One-click "Reset Intel Defaults" button.
+
+4. **CPU Fallback**:
+   - **Default**: Official CPU-optimized PyTorch build (`https://download.pytorch.org/whl/cpu`).
+   - **Reset**: One-click "Reset CPU Defaults" button.
 
 ---
 

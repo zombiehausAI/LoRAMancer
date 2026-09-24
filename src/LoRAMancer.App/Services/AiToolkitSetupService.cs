@@ -173,7 +173,7 @@ public sealed class AiToolkitSetupService {
 
         string reqFile = Path.Combine(installDir, "requirements.txt");
         if (File.Exists(reqFile)) {
-            onProgress?.Invoke("[AI-Toolkit] Installing requirements into AMD ROCm .venv (protecting PyTorch wheels)...");
+            onProgress?.Invoke("[AI-Toolkit] Installing requirements into compute .venv (protecting PyTorch wheels)...");
 
             // Install dependencies protecting torch binaries
             int pipExit = await _processRunner.RunAsync(

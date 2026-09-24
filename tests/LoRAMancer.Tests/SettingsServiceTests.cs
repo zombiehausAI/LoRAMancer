@@ -167,5 +167,44 @@ public sealed class SettingsServiceTests {
             }
         }
     }
+
+    [Fact]
+    public void AppSettings_MultiVendorGpuDefaults_AndResetMethods_WorkAsExpected() {
+        AppSettings settings = new();
+
+        // Verify AMD Defaults
+        Assert.Contains("repo.radeon.com", settings.RocmBaseUrl);
+        Assert.Equal("2.9.1+rocm7.2.1", settings.PyTorchVersion);
+
+        // Verify NVIDIA Defaults
+        Assert.Equal("https://download.pytorch.org/whl/cu124", settings.NvidiaIndexUrl);
+        Assert.Equal("torch torchvision torchaudio", settings.NvidiaPackageSpec);
+        Assert.False(settings.NvidiaUseCustomWheels);
+
+        // Verify Intel Defaults (official PyTorch XPU index)
+        Assert.Equal("https://download.pytorch.org/whl/xpu", settings.IntelIndexUrl);
+        Assert.Equal("torch torchvision torchaudio", settings.IntelPackageSpec);
+        Assert.False(settings.IntelUseCustomWheels);
+
+        // Verify CPU Defaults
+        Assert.Equal("https://download.pytorch.org/whl/cpu", settings.CpuIndexUrl);
+
+        // Modify and test reset methods
+        settings.NvidiaIndexUrl = "https://custom-nvidia.com";
+        settings.NvidiaUseCustomWheels = true;
+        settings.ResetNvidiaToDefault();
+        Assert.Equal("https://download.pytorch.org/whl/cu124", settings.NvidiaIndexUrl);
+        Assert.False(settings.NvidiaUseCustomWheels);
+
+        settings.IntelIndexUrl = "https://custom-intel.com";
+        settings.IntelUseCustomWheels = true;
+        settings.ResetIntelToDefault();
+        Assert.Equal("https://download.pytorch.org/whl/xpu", settings.IntelIndexUrl);
+        Assert.False(settings.IntelUseCustomWheels);
+
+        settings.RocmBaseUrl = "https://custom-rocm.com";
+        settings.ResetAmdToDefault();
+        Assert.Equal("https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1", settings.RocmBaseUrl);
+    }
 }
 

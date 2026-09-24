@@ -81,10 +81,19 @@ public sealed class TrainingRunnerService {
             WorkingDirectory = Path.GetDirectoryName(configYamlPath) ?? Directory.GetCurrentDirectory()
         };
 
-        // Inject AMD ROCm optimization flags
-        startInfo.EnvironmentVariables["PYTORCH_ROCM_ARCH"] = "native";
-        startInfo.EnvironmentVariables["MIOPEN_FIND_MODE"] = "FAST";
-        startInfo.EnvironmentVariables["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0";
+        // Inject GPU hardware environment flags based on detected accelerator
+        var envInfo = new AmdEnvironmentInfo();
+        new AmdVenvProvisioner(new Engines.ProcessRunner()).DetectGpuHardware(envInfo);
+
+        if (envInfo.DetectedVendor == HardwareVendor.Amd) {
+            startInfo.EnvironmentVariables["PYTORCH_ROCM_ARCH"] = "native";
+            startInfo.EnvironmentVariables["MIOPEN_FIND_MODE"] = "FAST";
+            startInfo.EnvironmentVariables["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0";
+        } else if (envInfo.DetectedVendor == HardwareVendor.Nvidia) {
+            startInfo.EnvironmentVariables["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID";
+        } else if (envInfo.DetectedVendor == HardwareVendor.Intel) {
+            startInfo.EnvironmentVariables["ZE_AFFINITY_MASK"] = "0";
+        }
 
         // Inject HuggingFace tokens and cache path if configured
         if (_settingsService != null) {

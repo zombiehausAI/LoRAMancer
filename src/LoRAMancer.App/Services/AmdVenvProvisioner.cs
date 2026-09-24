@@ -211,44 +211,84 @@ public sealed class AmdVenvProvisioner {
             cancellationToken
         );
 
+        AppSettings settings = _settingsService?.Current ?? new AppSettings();
+
         switch (vendor) {
             case HardwareVendor.Nvidia:
-                onProgress?.Invoke("[Provisioner] NVIDIA GPU detected. Installing PyTorch with CUDA 12.4 support from official index...");
-                int nvExit = await _processRunner.RunAsync(
-                    pythonExe,
-                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
-                    targetDirectory,
-                    null,
-                    line => onProgress?.Invoke($"[torch-cuda] {line}"),
-                    line => onProgress?.Invoke($"[torch-cuda err] {line}"),
-                    cancellationToken
-                );
-                if (nvExit != 0) {
-                    throw new InvalidOperationException("Failed to install PyTorch CUDA wheels into .venv");
+                if (settings.NvidiaUseCustomWheels && !string.IsNullOrWhiteSpace(settings.NvidiaCustomWheelUrls)) {
+                    onProgress?.Invoke("[Provisioner] NVIDIA GPU detected. Installing custom NVIDIA PyTorch wheels...");
+                    int customExit = await _processRunner.RunAsync(
+                        pythonExe,
+                        $"-m pip install --no-cache-dir {settings.NvidiaCustomWheelUrls}",
+                        targetDirectory,
+                        null,
+                        line => onProgress?.Invoke($"[torch-cuda-custom] {line}"),
+                        line => onProgress?.Invoke($"[torch-cuda-custom err] {line}"),
+                        cancellationToken
+                    );
+                    if (customExit != 0) {
+                        throw new InvalidOperationException("Failed to install custom NVIDIA PyTorch wheels into .venv");
+                    }
+                } else {
+                    string nvIndex = !string.IsNullOrWhiteSpace(settings.NvidiaIndexUrl) ? settings.NvidiaIndexUrl : "https://download.pytorch.org/whl/cu124";
+                    string nvPkg = !string.IsNullOrWhiteSpace(settings.NvidiaPackageSpec) ? settings.NvidiaPackageSpec : "torch torchvision torchaudio";
+                    onProgress?.Invoke($"[Provisioner] NVIDIA GPU detected. Installing PyTorch ({nvPkg}) from index: {nvIndex}...");
+                    int nvExit = await _processRunner.RunAsync(
+                        pythonExe,
+                        $"-m pip install --no-cache-dir {nvPkg} --index-url {nvIndex}",
+                        targetDirectory,
+                        null,
+                        line => onProgress?.Invoke($"[torch-cuda] {line}"),
+                        line => onProgress?.Invoke($"[torch-cuda err] {line}"),
+                        cancellationToken
+                    );
+                    if (nvExit != 0) {
+                        throw new InvalidOperationException("Failed to install PyTorch CUDA wheels into .venv");
+                    }
                 }
                 break;
 
             case HardwareVendor.Intel:
-                onProgress?.Invoke("[Provisioner] Intel GPU detected. Installing PyTorch with Intel XPU acceleration from official index...");
-                int intelExit = await _processRunner.RunAsync(
-                    pythonExe,
-                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu",
-                    targetDirectory,
-                    null,
-                    line => onProgress?.Invoke($"[torch-xpu] {line}"),
-                    line => onProgress?.Invoke($"[torch-xpu err] {line}"),
-                    cancellationToken
-                );
-                if (intelExit != 0) {
-                    throw new InvalidOperationException("Failed to install PyTorch XPU wheels into .venv");
+                if (settings.IntelUseCustomWheels && !string.IsNullOrWhiteSpace(settings.IntelCustomWheelUrls)) {
+                    onProgress?.Invoke("[Provisioner] Intel GPU detected. Installing custom Intel PyTorch wheels...");
+                    int customExit = await _processRunner.RunAsync(
+                        pythonExe,
+                        $"-m pip install --no-cache-dir {settings.IntelCustomWheelUrls}",
+                        targetDirectory,
+                        null,
+                        line => onProgress?.Invoke($"[torch-xpu-custom] {line}"),
+                        line => onProgress?.Invoke($"[torch-xpu-custom err] {line}"),
+                        cancellationToken
+                    );
+                    if (customExit != 0) {
+                        throw new InvalidOperationException("Failed to install custom Intel PyTorch wheels into .venv");
+                    }
+                } else {
+                    string intelIndex = !string.IsNullOrWhiteSpace(settings.IntelIndexUrl) ? settings.IntelIndexUrl : "https://download.pytorch.org/whl/xpu";
+                    string intelPkg = !string.IsNullOrWhiteSpace(settings.IntelPackageSpec) ? settings.IntelPackageSpec : "torch torchvision torchaudio";
+                    onProgress?.Invoke($"[Provisioner] Intel GPU detected. Installing PyTorch with Intel XPU acceleration ({intelPkg}) from index: {intelIndex}...");
+                    int intelExit = await _processRunner.RunAsync(
+                        pythonExe,
+                        $"-m pip install --no-cache-dir {intelPkg} --index-url {intelIndex}",
+                        targetDirectory,
+                        null,
+                        line => onProgress?.Invoke($"[torch-xpu] {line}"),
+                        line => onProgress?.Invoke($"[torch-xpu err] {line}"),
+                        cancellationToken
+                    );
+                    if (intelExit != 0) {
+                        throw new InvalidOperationException("Failed to install PyTorch XPU wheels into .venv");
+                    }
                 }
                 break;
 
             case HardwareVendor.Cpu:
-                onProgress?.Invoke("[Provisioner] No dedicated GPU detected. Installing CPU-optimized PyTorch build from official index...");
+                string cpuIndex = !string.IsNullOrWhiteSpace(settings.CpuIndexUrl) ? settings.CpuIndexUrl : "https://download.pytorch.org/whl/cpu";
+                string cpuPkg = !string.IsNullOrWhiteSpace(settings.CpuPackageSpec) ? settings.CpuPackageSpec : "torch torchvision torchaudio";
+                onProgress?.Invoke($"[Provisioner] No dedicated GPU detected. Installing CPU-optimized PyTorch ({cpuPkg}) from index: {cpuIndex}...");
                 int cpuExit = await _processRunner.RunAsync(
                     pythonExe,
-                    "-m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu",
+                    $"-m pip install --no-cache-dir {cpuPkg} --index-url {cpuIndex}",
                     targetDirectory,
                     null,
                     line => onProgress?.Invoke($"[torch-cpu] {line}"),
