@@ -141,10 +141,18 @@ if (Test-Path $pluginsSource) {
     Copy-Item "$pluginsSource\*" -Destination $pluginsDest -Recurse -Force
 }
 
-# Copy Licensing and Installer Support Files into package
+# Copy Licensing, Documentation, and Installer Support Files into package
 Copy-Item (Join-Path $repoRoot "LICENSE") -Destination $packageAppDir -Force
 Copy-Item (Join-Path $repoRoot "README.md") -Destination $packageAppDir -Force
 Copy-Item (Join-Path $repoRoot "installer\Install-LoRAMancer.ps1") -Destination $packageAppDir -Force
+
+$docsSource = Join-Path $repoRoot "docs"
+$docsDest = Join-Path $packageAppDir "docs"
+if (Test-Path $docsSource) {
+    Write-Host "  > Bundling documentation..." -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $docsDest -Force | Out-Null
+    Copy-Item "$docsSource\*" -Destination $docsDest -Recurse -Force
+}
 
 Write-Host "  > Application published to staging: $packageAppDir" -ForegroundColor Green
 
