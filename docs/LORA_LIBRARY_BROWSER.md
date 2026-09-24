@@ -45,6 +45,12 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
   - **Civitai API Key & Cloudflare Bypass**: Automated fallback between HTTP `Authorization: Bearer <key>` headers and `?token=<key>` query parameters with desktop browser `User-Agent` emulation, enabling lookup of private, early-access, or member-only models.
   - **Local & SQLite Caching**: All retrieved Civitai model versions, trigger tags, descriptions, download URLs, and companion thumbnails are persisted to `~/.LoRAMancer/loras.db` and cached to `~/.LoRAMancer/lora_cache/`.
 - **Persistent SQLite Library (`~/.LoRAMancer/loras.db`)**: All indexed LoRA models, computed hashes, SafeTensors metadata, Civitai payloads, user favorites, and base model overrides are stored in an ACID SQLite database. When navigating to the LoRA Manager, the gallery loads instantly (0ms) from SQLite with zero background scan overhead.
+- **Multi-Library Manager**:
+  - Organize collections into multiple independent libraries (e.g. `FLUX Characters`, `Anime Styles`, `SDXL Concepts`, or specialized project folders).
+  - All libraries reside within the same SQLite database (`~/.LoRAMancer/loras.db`) under the `Libraries` table.
+  - Browse each library independently with instant switching from the top navigation dropdown or Library Manager modal.
+  - **1-Click Subfolder Conversion**: Convert any active subfolder into its own independent library with a single click (`Make Subfolder a Library`), or bulk-convert all immediate subdirectories under a root path using **"Convert Subfolders"** in the Library Manager.
+  - **Per-Library LoRA Updater**: The `LoraUpdater` plugin and dialog natively supports targeting a specific library from a dropdown selector, keeping each collection up to date with Civitai without scanning external directories.
 - **On-Demand Differential Rescan**:
   - Scanning is strictly user-initiated via the **"Rescan / Sync"** menu or folder refresh buttons.
   - **Fast Delta Sync**: Compares file last-modified timestamps and file sizes against SQLite signatures, parsing headers only for newly added or modified files and pruning removed files in milliseconds.
@@ -75,4 +81,15 @@ A central feature of LoRAMancer is borrowing the mathematical settings from high
 
 - **Inspect Header**: Launches the header inspector drawer, displaying raw JSON metadata, tensor keys, and model architecture tags with zero tensor weight overhead.
 - **Reveal in Explorer**: Opens Windows Explorer with the specific `.safetensors` file selected.
+
+---
+
+## 5. Theme Engine & JSON Import / Export
+
+- **High-Contrast Dark Themes**: Curated modern palettes tailored for OLED and high-resolution displays, including Catppuccin Mocha, Tokyo Night, Slate Greys (Obsidian), Crimson Blood, Emerald Cyber, Solar Amber, and Cobalt Sapphire.
+- **JSON Theme Import & Export**:
+  - Export any active theme or design custom palettes using JSON definitions with color tokens (`id`, `name`, `isDark`, `background`, `surface`, `accent`, `textPrimary`, etc.).
+  - Custom imported themes are persisted to `~/.LoRAMancer/themes/<id>.json` and load seamlessly at runtime.
+  - Import themes directly from `.json` files or paste raw JSON in the Settings page.
+
 
