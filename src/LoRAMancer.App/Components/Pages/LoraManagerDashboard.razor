@@ -14,12 +14,31 @@
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Library & Visual Browser</MudText>
+        <div class="d-flex align-center gap-2">
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Library & Visual Browser</MudText>
+            @if (LibraryService.ActiveLibrary != null) {
+                <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CollectionsBookmark" OnClick="OpenManageLibrariesAsync" Style="cursor: pointer;">
+                    @LibraryService.ActiveLibrary.Name
+                </MudChip>
+            }
+        </div>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             Instant SQLite-backed model library with quick favorites, base model assignment, and Civitai metadata
         </MudText>
     </div>
     <div class="d-flex align-center flex-wrap gap-2">
+        <MudMenu Label="@(LibraryService.ActiveLibrary != null ? $"Library: {LibraryService.ActiveLibrary.Name}" : "Select Library")" Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.CollectionsBookmark">
+            @foreach (var lib in LibraryService.Libraries) {
+                <MudMenuItem Icon="@(LibraryService.ActiveLibrary?.Id == lib.Id ? Icons.Material.Filled.Check : Icons.Material.Filled.Folder)" OnClick="@(() => SwitchActiveLibraryAsync(lib.Id))">
+                    @lib.Name (@lib.ModelCount)
+                </MudMenuItem>
+            }
+            <MudDivider Class="my-1" />
+            <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="OpenManageLibrariesAsync">
+                Manage Libraries...
+            </MudMenuItem>
+        </MudMenu>
+
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
             Browse Folder...
         </MudButton>
@@ -102,6 +121,12 @@
                         @crumb.Name
                     </MudButton>
                 }
+
+                <MudTooltip Text="Turn this subfolder into a separate, independent library">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.BookmarkAdd" Class="ml-2" OnClick="QuickConvertCurrentSubfolderToLibraryAsync">
+                        Make Subfolder a Library
+                    </MudButton>
+                </MudTooltip>
             }
         </div>
 
@@ -230,9 +255,14 @@
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.LoraCount LoRA@((sub.LoraCount == 1 ? "" : "s"))</MudText>
                                 </div>
                             </div>
-                            <MudTooltip Text="Rescan Subfolder">
-                                <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Color="Color.Tertiary" OnClick="@((e) => RescanSubfolder(sub.FullPath))" />
-                            </MudTooltip>
+                            <div class="d-flex align-center gap-1">
+                                <MudTooltip Text="Turn this subfolder into a separate library">
+                                    <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small" Color="Color.Primary" OnClick="@((e) => ConvertFolderToLibraryAsync(sub.FullPath, sub.Name))" />
+                                </MudTooltip>
+                                <MudTooltip Text="Rescan Subfolder">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Color="Color.Tertiary" OnClick="@((e) => RescanSubfolder(sub.FullPath))" />
+                                </MudTooltip>
+                            </div>
                         </div>
                         <div class="d-flex align-center justify-space-between mt-3">
                             <MudText Typo="Typo.caption" Style="color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">
@@ -797,6 +827,7 @@
 
     protected override void OnInitialized() {
         LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
+        LibraryService.OnLibrariesChanged += HandleLibrariesChanged;
         LibraryService.OnScanProgress += HandleScanProgress;
         LibraryService.OnScanStateChanged += HandleScanStateChanged;
         LibraryService.OnEnrichStateChanged += HandleEnrichStateChanged;
@@ -804,6 +835,13 @@
         LibraryService.OnLoraEnriched += HandleLoraEnriched;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
         UpdateFilteredList();
+    }
+
+    private async void HandleLibrariesChanged() {
+        await InvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
     }
 
     private async void HandleLibraryUpdated() {
@@ -848,6 +886,7 @@
 
     public void Dispose() {
         LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
+        LibraryService.OnLibrariesChanged -= HandleLibrariesChanged;
         LibraryService.OnScanProgress -= HandleScanProgress;
         LibraryService.OnScanStateChanged -= HandleScanStateChanged;
         LibraryService.OnEnrichStateChanged -= HandleEnrichStateChanged;
@@ -856,6 +895,46 @@
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
         _searchCts?.Cancel();
         _searchCts?.Dispose();
+    }
+
+    private async Task SwitchActiveLibraryAsync(string libraryId) {
+        await LibraryService.SwitchLibraryAsync(libraryId);
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
+        Snackbar.Add($"Switched to library '{LibraryService.ActiveLibrary?.Name}'", Severity.Info);
+    }
+
+    private async Task OpenManageLibrariesAsync() {
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+        var dialog = await DialogService.ShowAsync<ManageLibrariesDialog>("LoRA Library Manager", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is string libId) {
+            await SwitchActiveLibraryAsync(libId);
+        }
+    }
+
+    private async Task QuickConvertCurrentSubfolderToLibraryAsync() {
+        string current = LibraryService.CurrentFolder;
+        if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current)) {
+            return;
+        }
+        string name = Path.GetFileName(current);
+        await ConvertFolderToLibraryAsync(current, name);
+    }
+
+    private async Task ConvertFolderToLibraryAsync(string folderPath, string name) {
+        try {
+            var lib = await LibraryService.CreateLibraryAsync(name, folderPath, $"Created from subfolder {name}");
+            Snackbar.Add($"Created library '{lib.Name}'! Switching to it...", Severity.Success);
+            await SwitchActiveLibraryAsync(lib.Id);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to create library: {ex.Message}", Severity.Error);
+        }
     }
 
     private void FetchSingleCivitaiAsync(LoraMetadata lora) {
