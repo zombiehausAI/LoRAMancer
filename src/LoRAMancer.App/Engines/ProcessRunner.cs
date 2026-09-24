@@ -34,13 +34,21 @@ public sealed class ProcessRunner {
 
         process.OutputDataReceived += (_, e) => {
             if (e.Data != null && onOutputLine != null) {
-                onOutputLine(e.Data);
+                try {
+                    onOutputLine(e.Data);
+                } catch {
+                    // Protect ThreadPool worker thread from crashing host process
+                }
             }
         };
 
         process.ErrorDataReceived += (_, e) => {
             if (e.Data != null && onErrorLine != null) {
-                onErrorLine(e.Data);
+                try {
+                    onErrorLine(e.Data);
+                } catch {
+                    // Protect ThreadPool worker thread from crashing host process
+                }
             }
         };
 

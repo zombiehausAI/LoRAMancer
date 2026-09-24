@@ -258,9 +258,10 @@ public sealed class PluginManagerService {
         string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
 
         if (!File.Exists(pythonExe)) {
-            onProgress?.Invoke($"[Plugin: {plugin.Name}] Creating isolated virtual environment in {venvPath}...");
+            string shellExe = GetPowerShellExecutable();
+            onProgress?.Invoke($"[Plugin: {plugin.Name}] Creating isolated virtual environment in {venvPath} using {Path.GetFileName(shellExe)}...");
             int venvExit = await _processRunner.RunAsync(
-                "pwsh.exe",
+                shellExe,
                 $"-NoProfile -Command \"python -m venv '{venvPath}'\"",
                 plugin.DirectoryPath,
                 null,
@@ -484,5 +485,30 @@ public sealed class PluginManagerService {
         public void LogInformation(string message) => Console.WriteLine($"[INFO] {message}");
         public void LogWarning(string message) => Console.WriteLine($"[WARN] {message}");
         public void LogError(string message, Exception? exception = null) => Console.WriteLine($"[ERROR] {message} {exception?.Message}");
+    }
+
+    private static string GetPowerShellExecutable() {
+        string winDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string systemPowerShell = Path.Combine(winDir, "WindowsPowerShell", "v1.0", "powershell.exe");
+
+        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathEnv)) {
+            foreach (string dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)) {
+                try {
+                    string pwshPath = Path.Combine(dir.Trim('\"'), "pwsh.exe");
+                    if (File.Exists(pwshPath)) {
+                        return "pwsh.exe";
+                    }
+                } catch {
+                    // Ignore invalid path segments
+                }
+            }
+        }
+
+        if (File.Exists(systemPowerShell)) {
+            return systemPowerShell;
+        }
+
+        return "powershell.exe";
     }
 }

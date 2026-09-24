@@ -52,7 +52,7 @@
     </MudCard>
 }
 
-@if (_isBusy || _logLines.Count > 0) {
+@if (_isBusy || HasLogs) {
     <MudCard Elevation="2" Class="mb-4" Style="background-color: #11111b; border: 1px solid #313244;">
         <MudCardHeader>
             <CardHeaderContent>
@@ -68,13 +68,13 @@
                 </div>
             </CardHeaderContent>
             <CardHeaderActions>
-                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => _logLines.Clear())" Disabled="_isBusy">
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" OnClick="ClearLog" Disabled="_isBusy">
                     Clear Log
                 </MudButton>
             </CardHeaderActions>
         </MudCardHeader>
         <MudCardContent Style="max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; background-color: #0b0b10; color: #a6adc8; padding: 12px; border-radius: 4px;">
-            @foreach (var line in _logLines) {
+            @foreach (var line in GetSafeLogLines()) {
                 <div style="white-space: pre-wrap; word-break: break-all;">@line</div>
             }
         </MudCardContent>
@@ -170,6 +170,26 @@
     private bool _isBusy = false;
     private readonly List<string> _logLines = new();
 
+    private bool HasLogs {
+        get {
+            lock (_logLines) {
+                return _logLines.Count > 0;
+            }
+        }
+    }
+
+    private IReadOnlyList<string> GetSafeLogLines() {
+        lock (_logLines) {
+            return _logLines.ToArray();
+        }
+    }
+
+    private void ClearLog() {
+        lock (_logLines) {
+            _logLines.Clear();
+        }
+    }
+
     protected override async Task OnInitializedAsync() {
         await PluginManager.DiscoverAndInitializePluginsAsync();
     }
@@ -190,9 +210,8 @@
         }
 
         _isBusy = true;
-        _logLines.Clear();
+        ClearLog();
         AppendLog($"Initiating installation from: {_gitRepoUrl}...");
-        StateHasChanged();
 
         try {
             await PluginManager.InstallPluginFromGitAsync(_gitRepoUrl.Trim(), AppendLog);
@@ -204,15 +223,14 @@
             Snackbar.Add($"Installation failed: {ex.Message}", Severity.Error);
         } finally {
             _isBusy = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
     private async Task UpdateGitPluginAsync(PluginManifest plugin) {
         _isBusy = true;
-        _logLines.Clear();
+        ClearLog();
         AppendLog($"Updating plugin: {plugin.Name}...");
-        StateHasChanged();
 
         try {
             await PluginManager.UpdatePluginAsync(plugin, AppendLog);
@@ -222,15 +240,14 @@
             Snackbar.Add($"Update failed: {ex.Message}", Severity.Error);
         } finally {
             _isBusy = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
     private async Task UpdateAllGitPluginsAsync() {
         _isBusy = true;
-        _logLines.Clear();
+        ClearLog();
         AppendLog("Updating all Git-based plugins...");
-        StateHasChanged();
 
         try {
             await PluginManager.UpdateAllGitPluginsAsync(AppendLog);
@@ -240,15 +257,14 @@
             Snackbar.Add($"Batch update error: {ex.Message}", Severity.Error);
         } finally {
             _isBusy = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
     private async Task ProvisionPluginVenvAsync(PluginManifest plugin) {
         _isBusy = true;
-        _logLines.Clear();
+        ClearLog();
         AppendLog($"Provisioning isolated .venv for {plugin.Name}...");
-        StateHasChanged();
 
         try {
             await PluginManager.EnsurePythonPluginVenvAsync(plugin, AppendLog);
@@ -258,7 +274,7 @@
             Snackbar.Add($"Failed to provision plugin venv: {ex.Message}", Severity.Error);
         } finally {
             _isBusy = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -285,7 +301,14 @@
     }
 
     private void AppendLog(string message) {
-        _logLines.Add(message);
-        StateHasChanged();
+        _ = InvokeAsync(() => {
+            lock (_logLines) {
+                _logLines.Add(message);
+                if (_logLines.Count > 1000) {
+                    _logLines.RemoveAt(0);
+                }
+            }
+            StateHasChanged();
+        });
     }
 }
