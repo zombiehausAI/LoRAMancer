@@ -1,0 +1,267 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject LoraLibraryService LibraryService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<MudDialog Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); max-width: 850px; width: 100%;">
+    <TitleContent>
+        <div class="d-flex align-center justify-space-between w-100 pr-4">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Color="Color.Primary" />
+                <MudText Typo="Typo.h6" Style="font-weight: 700; color: var(--text-primary);">LoRA Library Manager</MudText>
+            </div>
+            @if (!_isCreating && !_isEditing) {
+                <div class="d-flex align-center gap-2">
+                    @if (!string.IsNullOrWhiteSpace(LibraryService.RootFolder) && Directory.Exists(LibraryService.RootFolder)) {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="ImportSubfoldersAsLibrariesAsync">
+                            Convert Subfolders
+                        </MudButton>
+                    }
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="StartCreating">
+                        New Library
+                    </MudButton>
+                </div>
+            }
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            Manage separate LoRA libraries stored in your SQLite database. Each library points to a root folder and can be browsed, searched, and updated independently.
+        </MudText>
+
+        @if (_isCreating || _isEditing) {
+            <MudCard Elevation="1" Class="pa-4 mb-4" Style="background-color: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-dark); border-radius: 8px;">
+                <MudText Typo="Typo.subtitle1" Class="mb-2" Style="font-weight: 600; color: var(--text-primary);">
+                    @(_isCreating ? "Create New Library" : $"Edit Library: {_editingLibrary?.Name}")
+                </MudText>
+
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_formName" Label="Library Name" Placeholder="e.g. FLUX LoRAs, Characters, Style Vault" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_formDescription" Label="Description (Optional)" Placeholder="Notes about models in this collection" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField @bind-Value="_formFolderPath" Label="Folder Path" Placeholder="Absolute folder path containing safetensors files" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" FullWidth="true" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryPathAsync" Style="height: 40px; margin-top: 4px;">
+                                Browse...
+                            </MudButton>
+                        </div>
+                    </MudItem>
+                </MudGrid>
+
+                <div class="d-flex justify-end gap-2 mt-3">
+                    <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="CancelForm">Cancel</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveFormAsync">
+                        @(_isCreating ? "Create Library" : "Save Changes")
+                    </MudButton>
+                </div>
+            </MudCard>
+        }
+
+        <div class="d-flex flex-column gap-3" style="max-height: 440px; overflow-y: auto;">
+            @if (LibraryService.Libraries.Count == 0) {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                    No custom libraries registered yet. Click <b>New Library</b> above or browse a folder from the dashboard.
+                </MudAlert>
+            } else {
+                @foreach (var lib in LibraryService.Libraries) {
+                    bool isActive = LibraryService.ActiveLibrary?.Id == lib.Id;
+                    <MudCard Elevation="1" Style="@($"border-radius: 8px; border: {(isActive ? "2px solid var(--accent, #cba6f7)" : "1px solid var(--border-dark, #313244)")}; background-color: {(isActive ? "rgba(203, 166, 247, 0.05)" : "var(--bg-dark-surface, #181825)")};")">
+                        <MudCardContent Class="pa-3">
+                            <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                                <div style="min-width: 250px; flex: 1;">
+                                    <div class="d-flex align-center gap-2">
+                                        <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">
+                                            @lib.Name
+                                        </MudText>
+                                        @if (isActive) {
+                                            <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Filled">Active Library</MudChip>
+                                        }
+                                        <MudChip T="string" Color="Color.Default" Size="Size.Small" Variant="Variant.Outlined">
+                                            @lib.ModelCount @(lib.ModelCount == 1 ? "model" : "models")
+                                        </MudChip>
+                                    </div>
+                                    <MudText Typo="Typo.caption" Style="color: var(--text-muted); font-family: monospace; word-break: break-all;">
+                                        @lib.FolderPath
+                                    </MudText>
+                                    @if (!string.IsNullOrWhiteSpace(lib.Description)) {
+                                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">
+                                            @lib.Description
+                                        </MudText>
+                                    }
+                                </div>
+
+                                <div class="d-flex align-center gap-2">
+                                    @if (!isActive) {
+                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Check" OnClick="@(() => SelectLibraryAsync(lib))">
+                                            Switch To
+                                        </MudButton>
+                                    } else {
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Sync" Disabled="@LibraryService.IsScanning" OnClick="@(() => RescanLibraryAsync(lib))">
+                                            Rescan
+                                        </MudButton>
+                                    }
+
+                                    <MudTooltip Text="Edit library">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Default" Size="Size.Small" OnClick="@(() => StartEditing(lib))" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="Remove library registration">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" Disabled="@(LibraryService.Libraries.Count <= 1)" OnClick="@(() => DeleteLibraryAsync(lib))" />
+                                    </MudTooltip>
+                                </div>
+                            </div>
+                        </MudCardContent>
+                    </MudCard>
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="CloseDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private bool _isCreating;
+    private bool _isEditing;
+    private LoraLibrary? _editingLibrary;
+
+    private string _formName = string.Empty;
+    private string _formFolderPath = string.Empty;
+    private string _formDescription = string.Empty;
+
+    private void StartCreating() {
+        _isEditing = false;
+        _editingLibrary = null;
+        _formName = string.Empty;
+        _formFolderPath = LibraryService.RootFolder ?? string.Empty;
+        _formDescription = string.Empty;
+        _isCreating = true;
+    }
+
+    private void StartEditing(LoraLibrary lib) {
+        _isCreating = false;
+        _editingLibrary = lib;
+        _formName = lib.Name;
+        _formFolderPath = lib.FolderPath;
+        _formDescription = lib.Description ?? string.Empty;
+        _isEditing = true;
+    }
+
+    private void CancelForm() {
+        _isCreating = false;
+        _isEditing = false;
+        _editingLibrary = null;
+    }
+
+    private async Task BrowseLibraryPathAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Library Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            _formFolderPath = folder;
+            if (string.IsNullOrWhiteSpace(_formName)) {
+                _formName = Path.GetFileName(folder);
+            }
+        }
+    }
+
+    private async Task SaveFormAsync() {
+        if (string.IsNullOrWhiteSpace(_formName)) {
+            Snackbar.Add("Please enter a library name.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_formFolderPath) || !Directory.Exists(_formFolderPath)) {
+            Snackbar.Add("Please enter a valid existing folder path.", Severity.Warning);
+            return;
+        }
+
+        try {
+            if (_isCreating) {
+                var lib = await LibraryService.CreateLibraryAsync(_formName.Trim(), _formFolderPath.Trim(), _formDescription.Trim());
+                Snackbar.Add($"Created library '{lib.Name}'", Severity.Success);
+                await LibraryService.SwitchLibraryAsync(lib.Id);
+            } else if (_isEditing && _editingLibrary != null) {
+                _editingLibrary.Name = _formName.Trim();
+                _editingLibrary.FolderPath = _formFolderPath.Trim();
+                _editingLibrary.Description = string.IsNullOrWhiteSpace(_formDescription) ? null : _formDescription.Trim();
+                await LibraryService.UpdateLibraryAsync(_editingLibrary);
+                Snackbar.Add($"Updated library '{_editingLibrary.Name}'", Severity.Success);
+            }
+            CancelForm();
+        } catch (Exception ex) {
+            Snackbar.Add($"Error saving library: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SelectLibraryAsync(LoraLibrary lib) {
+        await LibraryService.SwitchLibraryAsync(lib.Id);
+        Snackbar.Add($"Switched to library '{lib.Name}'", Severity.Info);
+        MudDialog.Close(DialogResult.Ok(lib.Id));
+    }
+
+    private void RescanLibraryAsync(LoraLibrary lib) {
+        if (!string.IsNullOrWhiteSpace(lib.FolderPath) && Directory.Exists(lib.FolderPath)) {
+            LibraryService.StartScan(lib.FolderPath, forceClear: false);
+            Snackbar.Add($"Rescanning library '{lib.Name}'...", Severity.Info);
+            MudDialog.Close(DialogResult.Ok(lib.Id));
+        }
+    }
+
+    private async Task DeleteLibraryAsync(LoraLibrary lib) {
+        if (LibraryService.Libraries.Count <= 1) {
+            Snackbar.Add("Cannot delete the only remaining library.", Severity.Warning);
+            return;
+        }
+
+        await LibraryService.DeleteLibraryAsync(lib.Id);
+        Snackbar.Add($"Removed library '{lib.Name}' from manager. Physical files remain intact.", Severity.Info);
+    }
+
+    private async Task ImportSubfoldersAsLibrariesAsync() {
+        string root = LibraryService.RootFolder;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) {
+            Snackbar.Add("No active root folder found.", Severity.Warning);
+            return;
+        }
+
+        try {
+            var subDirs = Directory.GetDirectories(root);
+            int created = 0;
+            foreach (var dir in subDirs) {
+                string name = Path.GetFileName(dir);
+                if (name.StartsWith('.')) {
+                    continue;
+                }
+
+                // If a library already points to this exact folder, skip
+                if (LibraryService.Libraries.Any(l => string.Equals(l.FolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                                                    dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                                                    StringComparison.OrdinalIgnoreCase))) {
+                    continue;
+                }
+
+                await LibraryService.CreateLibraryAsync(name, dir, $"Converted from subfolder of {Path.GetFileName(root)}");
+                created++;
+            }
+
+            if (created > 0) {
+                Snackbar.Add($"Created {created} new libraries from subfolders!", Severity.Success);
+            } else {
+                Snackbar.Add("All subfolders are already registered as libraries.", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Error scanning subfolders: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Cancel();
+    }
+}
