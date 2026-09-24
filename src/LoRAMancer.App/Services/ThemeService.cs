@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using LoRAMancer.App.Models;
 using MudBlazor;
 
@@ -19,17 +21,51 @@ public sealed record ThemeDefinition {
     public required string Border { get; init; }
     public required string TextPrimary { get; init; }
     public required string TextSecondary { get; init; }
+    public bool IsCustom { get; init; }
+
+    public string ToJson(bool indented = true) {
+        var options = new JsonSerializerOptions {
+            WriteIndented = indented,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+        return JsonSerializer.Serialize(this, options);
+    }
+
+    public static ThemeDefinition? FromJson(string json) {
+        try {
+            var options = new JsonSerializerOptions {
+                PropertyNameCaseInsensitive = true
+            };
+            return JsonSerializer.Deserialize<ThemeDefinition>(json, options);
+        } catch {
+            return null;
+        }
+    }
 }
 
 public sealed class ThemeService {
+    private static ThemeService? _instance;
     private readonly SettingsService? _settingsService;
+    private readonly string _themesDirectory;
+    private readonly List<ThemeDefinition> _customThemes = new();
+    private readonly object _lock = new();
+
     public event Action? OnThemeChanged;
 
-    public static readonly IReadOnlyList<ThemeDefinition> AvailableThemes = new List<ThemeDefinition> {
+    public static IReadOnlyList<ThemeDefinition> AvailableThemes {
+        get {
+            if (_instance != null) {
+                return _instance.GetAvailableThemes();
+            }
+            return BuiltInThemes;
+        }
+    }
+
+    public static readonly IReadOnlyList<ThemeDefinition> BuiltInThemes = new List<ThemeDefinition> {
         new() {
             Id = "dark-purple",
-            Name = "Catppuccin Purple (Dark)",
-            Description = "Default dark aesthetic with vibrant lavender and blue accents",
+            Name = "Catppuccin Mocha (Dark)",
+            Description = "Lavender and sky blue accents on rich deep slate",
             IsDark = true,
             Primary = "#cba6f7",
             Secondary = "#89b4fa",
@@ -40,98 +76,122 @@ public sealed class ThemeService {
             DrawerBackground = "#11111b",
             Overlay = "#1e1e2e",
             Border = "#313244",
-            TextPrimary = "#cdd6f4",
-            TextSecondary = "#a6adc8"
+            TextPrimary = "#f1f5f9",
+            TextSecondary = "#94a3b8",
+            IsCustom = false
+        },
+        new() {
+            Id = "tokyo-night",
+            Name = "Tokyo Night (Dark)",
+            Description = "Electric neon cyan and indigo over deep midnight navy",
+            IsDark = true,
+            Primary = "#7aa2f7",
+            Secondary = "#bb9af7",
+            Tertiary = "#7dcfff",
+            Background = "#1a1b26",
+            Surface = "#24283b",
+            AppbarBackground = "#24283b",
+            DrawerBackground = "#1f2335",
+            Overlay = "#292e42",
+            Border = "#3b4261",
+            TextPrimary = "#c0caf5",
+            TextSecondary = "#9aa5ce",
+            IsCustom = false
         },
         new() {
             Id = "dark-grey",
             Name = "Slate Greys (Dark)",
-            Description = "Pure monochrome charcoal and graphite with platinum accents",
+            Description = "Neutral charcoal and steel with high-contrast platinum text",
             IsDark = true,
-            Primary = "#e0e0e0",
-            Secondary = "#9e9e9e",
-            Tertiary = "#757575",
-            Background = "#141414",
-            Surface = "#1f1f1f",
-            AppbarBackground = "#1f1f1f",
-            DrawerBackground = "#141414",
-            Overlay = "#2a2a2a",
-            Border = "#383838",
-            TextPrimary = "#f5f5f5",
-            TextSecondary = "#b0b0b0"
-        },
-        new() {
-            Id = "dark-red",
-            Name = "Crimson Ruby (Dark)",
-            Description = "Deep obsidian with striking crimson red accents",
-            IsDark = true,
-            Primary = "#f38ba8",
-            Secondary = "#f87171",
-            Tertiary = "#fb7185",
-            Background = "#140b0f",
-            Surface = "#1e1017",
-            AppbarBackground = "#1e1017",
-            DrawerBackground = "#140b0f",
-            Overlay = "#291520",
-            Border = "#3d1828",
-            TextPrimary = "#fde2e4",
-            TextSecondary = "#d1a8b0"
-        },
-        new() {
-            Id = "dark-green",
-            Name = "Emerald Forest (Dark)",
-            Description = "Cyberpunk dark theme with vibrant emerald and mint accents",
-            IsDark = true,
-            Primary = "#a6e3a1",
-            Secondary = "#34d399",
-            Tertiary = "#6ee7b7",
-            Background = "#0b140e",
-            Surface = "#112017",
-            AppbarBackground = "#112017",
-            DrawerBackground = "#0b140e",
-            Overlay = "#182c20",
-            Border = "#1e3828",
-            TextPrimary = "#e8f5e9",
-            TextSecondary = "#a3c9ab"
+            Primary = "#38bdf8",
+            Secondary = "#818cf8",
+            Tertiary = "#34d399",
+            Background = "#0f172a",
+            Surface = "#1e293b",
+            AppbarBackground = "#1e293b",
+            DrawerBackground = "#0f172a",
+            Overlay = "#334155",
+            Border = "#334155",
+            TextPrimary = "#f8fafc",
+            TextSecondary = "#94a3b8",
+            IsCustom = false
         },
         new() {
             Id = "dark-blue",
             Name = "Cobalt Sapphire (Dark)",
-            Description = "Deep midnight navy with electric blue accents",
+            Description = "Deep midnight navy with high-contrast electric sapphire accents",
             IsDark = true,
-            Primary = "#89b4fa",
-            Secondary = "#60a5fa",
+            Primary = "#60a5fa",
+            Secondary = "#818cf8",
             Tertiary = "#93c5fd",
-            Background = "#0c1222",
-            Surface = "#141e34",
-            AppbarBackground = "#141e34",
-            DrawerBackground = "#0c1222",
-            Overlay = "#1c2a47",
-            Border = "#203254",
-            TextPrimary = "#e0f2fe",
-            TextSecondary = "#94a3b8"
+            Background = "#0b1329",
+            Surface = "#111d3d",
+            AppbarBackground = "#111d3d",
+            DrawerBackground = "#0b1329",
+            Overlay = "#18264e",
+            Border = "#233566",
+            TextPrimary = "#f0f9ff",
+            TextSecondary = "#94a3b8",
+            IsCustom = false
+        },
+        new() {
+            Id = "dark-red",
+            Name = "Crimson Blood (Dark)",
+            Description = "Deep obsidian with vivid rose and ruby highlights",
+            IsDark = true,
+            Primary = "#fb7185",
+            Secondary = "#f43f5e",
+            Tertiary = "#fecdd3",
+            Background = "#120a0d",
+            Surface = "#1f1218",
+            AppbarBackground = "#1f1218",
+            DrawerBackground = "#120a0d",
+            Overlay = "#2c1922",
+            Border = "#4a2134",
+            TextPrimary = "#fde2e4",
+            TextSecondary = "#e2b8c2",
+            IsCustom = false
+        },
+        new() {
+            Id = "dark-green",
+            Name = "Emerald Cyber (Dark)",
+            Description = "Matrix carbon with glowing mint and emerald accents",
+            IsDark = true,
+            Primary = "#10b981",
+            Secondary = "#34d399",
+            Tertiary = "#6ee7b7",
+            Background = "#09140f",
+            Surface = "#12231b",
+            AppbarBackground = "#12231b",
+            DrawerBackground = "#09140f",
+            Overlay = "#1a3327",
+            Border = "#234736",
+            TextPrimary = "#ecfdf5",
+            TextSecondary = "#a7f3d0",
+            IsCustom = false
         },
         new() {
             Id = "dark-amber",
-            Name = "Amber Sunset (Dark)",
-            Description = "Rich dark bronze with warm golden amber accents",
+            Name = "Solar Amber (Dark)",
+            Description = "Dark roast espresso with radiant golden amber illumination",
             IsDark = true,
-            Primary = "#f9e2af",
+            Primary = "#f59e0b",
             Secondary = "#fbbf24",
             Tertiary = "#fcd34d",
-            Background = "#141008",
-            Surface = "#20190d",
-            AppbarBackground = "#20190d",
-            DrawerBackground = "#141008",
-            Overlay = "#2e2413",
-            Border = "#3a2d18",
-            TextPrimary = "#fef3c7",
-            TextSecondary = "#d5be9b"
+            Background = "#14100b",
+            Surface = "#211b13",
+            AppbarBackground = "#211b13",
+            DrawerBackground = "#14100b",
+            Overlay = "#30261b",
+            Border = "#483827",
+            TextPrimary = "#fffbeb",
+            TextSecondary = "#fde68a",
+            IsCustom = false
         },
         new() {
             Id = "light",
             Name = "Clean Modern (Light)",
-            Description = "Soft porcelain surfaces with crisp indigo accents",
+            Description = "Porcelain background with crisp indigo and slate accents",
             IsDark = false,
             Primary = "#6366f1",
             Secondary = "#0284c7",
@@ -143,13 +203,35 @@ public sealed class ThemeService {
             Overlay = "#e2e8f0",
             Border = "#cbd5e1",
             TextPrimary = "#0f172a",
-            TextSecondary = "#475569"
+            TextSecondary = "#475569",
+            IsCustom = false
         }
     };
 
     public ThemeService(SettingsService? settingsService = null) {
+        _instance = this;
         _settingsService = settingsService;
+
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _themesDirectory = Path.Combine(userProfile, ".LoRAMancer", "themes");
+        try {
+            Directory.CreateDirectory(_themesDirectory);
+        } catch {
+            // Ignore directory creation errors
+        }
+
+        LoadCustomThemes();
     }
+
+    public IReadOnlyList<ThemeDefinition> GetAvailableThemes() {
+        lock (_lock) {
+            var list = new List<ThemeDefinition>(BuiltInThemes);
+            list.AddRange(_customThemes);
+            return list;
+        }
+    }
+
+    public IReadOnlyList<ThemeDefinition> Themes => AvailableThemes;
 
     public string CurrentThemeId {
         get => _settingsService?.Current.ThemePreset ?? "dark-purple";
@@ -162,9 +244,155 @@ public sealed class ThemeService {
         }
     }
 
-    public ThemeDefinition CurrentTheme =>
-        AvailableThemes.FirstOrDefault(t => string.Equals(t.Id, CurrentThemeId, StringComparison.OrdinalIgnoreCase))
-        ?? AvailableThemes[0];
+    public ThemeDefinition CurrentTheme {
+        get {
+            string currentId = CurrentThemeId;
+            return AvailableThemes.FirstOrDefault(t => string.Equals(t.Id, currentId, StringComparison.OrdinalIgnoreCase))
+                ?? BuiltInThemes[0];
+        }
+    }
+
+    public void LoadCustomThemes() {
+        lock (_lock) {
+            _customThemes.Clear();
+            if (Directory.Exists(_themesDirectory)) {
+                try {
+                    string[] files = Directory.GetFiles(_themesDirectory, "*.json");
+                    foreach (string file in files) {
+                        try {
+                            string json = File.ReadAllText(file);
+                            var theme = ThemeDefinition.FromJson(json);
+                            if (theme != null && !string.IsNullOrWhiteSpace(theme.Id)) {
+                                _customThemes.Add(theme with { IsCustom = true });
+                            }
+                        } catch {
+                            // Skip invalid theme files
+                        }
+                    }
+                } catch {
+                    // Suppress directory read errors
+                }
+            }
+        }
+    }
+
+    public bool SaveCustomTheme(ThemeDefinition theme, out string? error) {
+        error = null;
+        if (string.IsNullOrWhiteSpace(theme.Name)) {
+            error = "Theme name cannot be empty.";
+            return false;
+        }
+
+        string id = string.IsNullOrWhiteSpace(theme.Id)
+            ? "custom-" + Guid.NewGuid().ToString("N")[..8]
+            : theme.Id.Trim().ToLowerInvariant();
+
+        // Disallow overwriting built-in theme IDs
+        if (BuiltInThemes.Any(b => string.Equals(b.Id, id, StringComparison.OrdinalIgnoreCase))) {
+            id = id + "-custom";
+        }
+
+        var customTheme = theme with {
+            Id = id,
+            IsCustom = true
+        };
+
+        try {
+            Directory.CreateDirectory(_themesDirectory);
+            string filePath = Path.Combine(_themesDirectory, $"{id}.json");
+            File.WriteAllText(filePath, customTheme.ToJson(indented: true));
+
+            lock (_lock) {
+                _customThemes.RemoveAll(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase));
+                _customThemes.Add(customTheme);
+            }
+
+            OnThemeChanged?.Invoke();
+            return true;
+        } catch (Exception ex) {
+            error = $"Failed to save theme: {ex.Message}";
+            return false;
+        }
+    }
+
+    public bool DeleteCustomTheme(string themeId) {
+        lock (_lock) {
+            var target = _customThemes.FirstOrDefault(t => string.Equals(t.Id, themeId, StringComparison.OrdinalIgnoreCase));
+            if (target == null) {
+                return false;
+            }
+
+            try {
+                string filePath = Path.Combine(_themesDirectory, $"{target.Id}.json");
+                if (File.Exists(filePath)) {
+                    File.Delete(filePath);
+                }
+            } catch {
+                // Ignore file delete errors
+            }
+
+            _customThemes.Remove(target);
+
+            if (string.Equals(CurrentThemeId, themeId, StringComparison.OrdinalIgnoreCase)) {
+                CurrentThemeId = "dark-purple";
+            } else {
+                OnThemeChanged?.Invoke();
+            }
+
+            return true;
+        }
+    }
+
+    public bool ImportTheme(string json, out ThemeDefinition? imported, out string? error) {
+        imported = null;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(json)) {
+            error = "Theme JSON cannot be empty.";
+            return false;
+        }
+
+        ThemeDefinition? parsed = ThemeDefinition.FromJson(json);
+        if (parsed == null) {
+            error = "Invalid JSON format. Please verify the theme JSON structure.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(parsed.Name)) {
+            error = "Theme must contain a valid 'Name' property.";
+            return false;
+        }
+
+        string baseId = string.IsNullOrWhiteSpace(parsed.Id)
+            ? "theme-" + Guid.NewGuid().ToString("N")[..8]
+            : parsed.Id.Trim().ToLowerInvariant();
+
+        // Ensure unique ID for imported theme
+        string id = baseId;
+        int counter = 1;
+        while (AvailableThemes.Any(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase))) {
+            id = $"{baseId}-imported{counter++}";
+        }
+
+        var customTheme = parsed with {
+            Id = id,
+            IsCustom = true
+        };
+
+        if (SaveCustomTheme(customTheme, out error)) {
+            imported = customTheme;
+            CurrentThemeId = id;
+            return true;
+        }
+
+        return false;
+    }
+
+    public string ExportTheme(string themeId) {
+        var theme = AvailableThemes.FirstOrDefault(t => string.Equals(t.Id, themeId, StringComparison.OrdinalIgnoreCase))
+            ?? CurrentTheme;
+        return theme.ToJson(indented: true);
+    }
 
     public MudTheme GetMudTheme() {
         ThemeDefinition current = CurrentTheme;
