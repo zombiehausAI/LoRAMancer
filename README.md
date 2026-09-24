@@ -5,10 +5,15 @@ LoRAMancer is a production-grade, highly responsive desktop LoRA Manager, Config
 ## Key Features
 
 - **Extensible Model Architecture Support**: Native presets and automatic header inference for **FLUX.1** (dev/schnell), **PonyXL V6** (SDXL), **Illustrious-XL**, and standard SDXL/SD1.5, backed by an extensible registry (`ModelArchitectureRegistry`) for future architectures.
+- **AI-Toolkit Automated Setup**: One-click automated setup (`AiToolkitSetupService`) that recursively clones the official AI-Toolkit repository and installs dependencies into the dedicated AMD ROCm `.venv` with `--no-deps` protection.
+- **HuggingFace & Civitai API Integrations**:
+  - **HuggingFace**: Configurable user access tokens with live authentication check (`whoami-v2`) and gated model access validation (e.g. for downloading `black-forest-labs/FLUX.1-dev` weights).
+  - **Civitai**: Instant model identification via SHA256 hash lookup (`CivitaiService`) to retrieve official model names, thumbnails, trained trigger words, sample prompts, and Civitai links.
+- **Admin Settings & Dynamic AMD Wheel Configuration**: Full in-app admin console (`/settings`) enabling users to update AMD PyTorch wheel repository URLs (e.g. for newer ROCm 7.3+ releases) with live URL reachability probing and zero script editing.
 - **ComfyUI Environment Ingestion & AMD Provisioning**: Automatically detects or parses your ComfyUI setup and ROCm wheel sources to provision a robust dedicated `.venv` (Python 3.12+) equipped with AMD ROCm-compatible PyTorch binaries.
 - **LoRA Library Manager & SafeTensors Inspector**: Ultra-fast header-only `.safetensors` binary parsing in C# without loading heavy model weights. Instant inspection of rank (dim), alpha, learning rates, optimizer, and base model architecture.
 - **Clone Configuration & AMD Hardware Sanitizer**: Clones hyperparameters from donor LoRAs into AI-Toolkit and Kohya-compatible training configs, automatically translating CUDA-only settings (such as 8-bit optimizers or Flash Attention) into AMD ROCm-safe counterparts (`bf16`, `sdpa`, disk latent caching).
-- **Interactive Training Orchestrator**: Async process runner with live terminal telemetry, real-time step counters, loss metrics, and cancellation controls.
+- **Interactive Training Orchestrator & Civitai-Style Wizard**: Streamlined setup with subject-type presets (Character, Style, Concept, Clothing), dataset health auditing (missing captions, low-res warnings), live hardware estimators (total steps, VRAM requirement vs detected AMD GPU, output file size, and training time), and zero-crash AMD ROCm pre-flight verification.
 - **Dual Plugin Architecture**: Extensible plugin system supporting:
   - **C# Plugins**: Compiled `.dll` modules loaded dynamically from `plugins/<plugin_name>/<plugin_name>.dll`.
   - **Python Plugins**: Independent Python plugins located in `plugins/<plugin_name>/`, each running inside its own isolated `.venv`.
@@ -23,7 +28,7 @@ LoRAMancer/
 │   │   ├── Components/         # MudBlazor UI Components, Pages & Drawers
 │   │   ├── Engines/            # SafeTensors parser, config builder, runners, model registry
 │   │   ├── Models/             # Domain and configuration entities
-│   │   └── Services/           # Provisioner, training, plugin & update services
+│   │   └── Services/           # Provisioner, training, AI-Toolkit, Civitai, HF, settings & plugins
 │   ├── LoRAMancer.PluginSdk/   # C# Plugin contract & interface library
 │   └── plugins/                # Plugin directory (C# DLLs and Python venvs)
 ├── installer/                  # Packaging & auto-update scripts
@@ -37,6 +42,7 @@ LoRAMancer/
 ## Documentation
 
 For comprehensive guides and technical specifications, refer to:
+- [Training Wizard & Estimators](file:///d:/repos/LoRAMancer/docs/TRAINING_WIZARD.md)
 - [Architecture Overview](file:///d:/repos/LoRAMancer/docs/ARCHITECTURE.md)
 - [AMD ROCm & Python Environment Provisioning](file:///d:/repos/LoRAMancer/docs/AMD_ROCM_SETUP.md)
 - [Plugin System Guide (C# & Python)](file:///d:/repos/LoRAMancer/docs/PLUGINS.md)

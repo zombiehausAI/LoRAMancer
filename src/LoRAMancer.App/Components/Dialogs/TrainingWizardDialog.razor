@@ -1,0 +1,379 @@
+@inject NativeFileDialogService FileDialogService
+@inject AiToolkitConfigBuilder ConfigBuilder
+@inject ModelArchitectureRegistry ArchitectureRegistry
+@inject TrainingEstimationService EstimationService
+@inject DatasetInspectorService DatasetInspector
+@inject NavigationManager NavManager
+@inject ISnackbar Snackbar
+
+<MudDialog Style="background-color: #181825; border: 1px solid #313244; max-width: 960px; width: 100%;">
+    <TitleContent>
+        <div class="d-flex align-center justify-space-between">
+            <div class="d-flex align-center">
+                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" Class="mr-2" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">New Training Wizard</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Civitai-style streamlined setup with AMD ROCm hardware safety checks and live estimators</MudText>
+                </div>
+            </div>
+            <div class="d-flex align-center gap-3">
+                <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <!-- Step 1: Subject Type & Architecture Selection -->
+        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2" Style="font-weight: 600;">1. What are you training?</MudText>
+        <MudGrid Class="mb-4">
+            @foreach (var preset in _presets) {
+                <MudItem xs="6" sm="4" md="2">
+                    <MudCard Elevation="0"
+                             Class="cursor-pointer p-3 text-center"
+                             Style="@GetCardStyle(_selectedSubject == preset.SubjectType)"
+                             @onclick="@(() => SelectSubject(preset))">
+                        <MudIcon Icon="@GetSubjectIcon(preset.SubjectType)" Color="@(_selectedSubject == preset.SubjectType ? Color.Primary : Color.Secondary)" Size="Size.Medium" Class="mb-1" />
+                        <MudText Typo="Typo.body2" Style="font-weight: 700;">@preset.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-size: 0.7rem; display: block; line-height: 1.1; margin-top: 4px;">
+                            @preset.Description
+                        </MudText>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+
+        <!-- Base Model & Run Identifiers -->
+        <MudGrid Class="mb-3">
+            <MudItem xs="12" md="6">
+                <MudSelect T="string" Value="_targetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                        <MudSelectItem Value="@arch.DisplayName">
+                            @arch.DisplayName (@arch.Family)
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudTextField @bind-Value="_runName" Label="Run Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" />
+            </MudItem>
+        </MudGrid>
+
+        <!-- Step 2: Dataset & Folder Inspection -->
+        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2 mt-4" Style="font-weight: 600;">2. Dataset & Output Folders</MudText>
+        <MudGrid Class="mb-3">
+            <MudItem xs="12" md="6">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_datasetDirectory" Label="Dataset Directory" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select dataset folder..." FullWidth="true" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetDirectoryAsync">Browse</MudButton>
+                </div>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_outputDirectory" Label="Output Checkpoints" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select output folder..." FullWidth="true" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickOutputDirectoryAsync">Browse</MudButton>
+                </div>
+            </MudItem>
+        </MudGrid>
+
+        <!-- Dataset Health Audit Banner -->
+        @if (_datasetReport != null) {
+            <MudCard Elevation="0" Class="p-3 mb-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.FolderZip" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Dataset Health Audit:</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_datasetReport.TotalImages Images</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@_datasetReport.TotalCaptions Captions</MudChip>
+                        @if (_datasetReport.MissingCaptions > 0) {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">@_datasetReport.MissingCaptions Missing Captions</MudChip>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_triggerWord) && _datasetReport.TotalImages > 0) {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="PrependTriggerWordAsync">
+                            Prepend Trigger to All Captions
+                        </MudButton>
+                    }
+                </div>
+                @foreach (string warn in _datasetReport.Warnings) {
+                    <div style="font-size: 0.78rem; color: #fab387; margin-top: 2px;">• @warn</div>
+                }
+            </MudCard>
+        }
+
+        <!-- Step 3: Live Resource & Training Estimators -->
+        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2 mt-4" Style="font-weight: 600;">3. Live Training Estimators</MudText>
+        <MudGrid Class="mb-4">
+            <MudItem xs="6" sm="3">
+                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Total Steps</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">@_estimates.TotalSteps.ToString("N0")</MudText>
+                    <div style="font-size: 0.7rem; color: #6c7086;">@_repeats reps × @_epochs ep</div>
+                </MudCard>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. VRAM Needed</MudText>
+                    <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(_preFlight.HasSufficientVram ? "#a6e3a1" : "#f38ba8")};")">
+                        ~@_estimates.EstimatedVramGb.ToString("0.0") GB
+                    </MudText>
+                    <div style="font-size: 0.7rem; color: #6c7086;">@_preFlight.GpuName (@_preFlight.TotalVramGb.ToString("0") GB)</div>
+                </MudCard>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. Output Size</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">~@_estimates.EstimatedOutputSizeMb.ToString("0") MB</MudText>
+                    <div style="font-size: 0.7rem; color: #6c7086;">Rank @_networkDim / Alpha @_networkAlpha</div>
+                </MudCard>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. Training Time</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #f9e2af;">~@FormatDuration(_estimates.EstimatedDuration)</MudText>
+                    <div style="font-size: 0.7rem; color: #6c7086;">Estimated on AMD ROCm</div>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+
+        <!-- Pre-Flight Warnings -->
+        @if (_preFlight.Warnings.Count > 0) {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                @foreach (string w in _preFlight.Warnings) {
+                    <div>• @w</div>
+                }
+            </MudAlert>
+        }
+
+        <!-- Pro Mode Hyperparameter Accordion -->
+        <MudExpansionPanels Class="mb-3">
+            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" MaxHeight="400">
+                <MudGrid>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_networkAlpha" Label="Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_learningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Min="1" Max="8" TextChanged="RecalculateEstimates" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_epochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="100" TextChanged="RecalculateEstimates" />
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_samplePrompt" Label="Periodic Sample Generation Prompt" Variant="Variant.Outlined" Placeholder="Prompt used for in-training test images..." />
+                    </MudItem>
+                </MudGrid>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="ExportConfigAsync">
+            Export Config
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="SaveAndLaunchAsync">
+            Save & Launch Training
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private IReadOnlyList<SubjectPreset> _presets = Array.Empty<SubjectPreset>();
+    private TrainingSubjectType _selectedSubject = TrainingSubjectType.Character;
+    private string _targetBaseModel = "FLUX.1 Dev";
+    private string _runName = "my_lora_run";
+    private string _triggerWord = string.Empty;
+    private string _datasetDirectory = string.Empty;
+    private string _outputDirectory = string.Empty;
+    private string _samplePrompt = string.Empty;
+
+    private int _networkDim = 16;
+    private double _networkAlpha = 16.0;
+    private double _learningRate = 1e-4;
+    private int _epochs = 10;
+    private int _repeats = 10;
+    private int _batchSize = 1;
+    private bool _isProMode;
+
+    private DatasetHealthReport? _datasetReport;
+    private TrainingEstimates _estimates = new();
+    private PreFlightCheckResult _preFlight = new();
+
+    protected override void OnInitialized() {
+        _presets = EstimationService.GetSubjectPresets();
+        SubjectPreset defaultPreset = _presets.First();
+        ApplyPreset(defaultPreset);
+        RecalculateEstimates();
+    }
+
+    private void SelectSubject(SubjectPreset preset) {
+        _selectedSubject = preset.SubjectType;
+        ApplyPreset(preset);
+        RecalculateEstimates();
+    }
+
+    private void ApplyPreset(SubjectPreset preset) {
+        _networkDim = preset.DefaultDim;
+        _networkAlpha = preset.DefaultAlpha;
+        _learningRate = preset.DefaultLearningRate;
+        _epochs = preset.DefaultEpochs;
+        _repeats = preset.DefaultRepeats;
+
+        if (string.IsNullOrWhiteSpace(_samplePrompt) || _samplePrompt.Contains("{trigger}")) {
+            _samplePrompt = preset.RecommendedPromptTemplate;
+        }
+    }
+
+    private void OnArchitectureChanged(string selectedDisplayName) {
+        _targetBaseModel = selectedDisplayName;
+        ModelArchitectureInfo arch = ConfigBuilder.ResolveArchitecture(selectedDisplayName);
+        if (_selectedSubject == TrainingSubjectType.Custom) {
+            _networkDim = arch.DefaultDim;
+            _networkAlpha = arch.DefaultAlpha;
+            _learningRate = arch.DefaultLearningRate;
+        }
+        RecalculateEstimates();
+    }
+
+    private void OnTriggerWordChanged(string newTrigger) {
+        _triggerWord = newTrigger;
+    }
+
+    private async Task PickDatasetDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Training Dataset Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            _datasetDirectory = folder;
+            _datasetReport = await DatasetInspector.InspectDatasetAsync(folder);
+            if (string.IsNullOrEmpty(_outputDirectory)) {
+                _outputDirectory = Path.Combine(folder, "output");
+            }
+            RecalculateEstimates();
+        }
+    }
+
+    private async Task PickOutputDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Checkpoint Output Folder");
+        if (!string.IsNullOrEmpty(folder)) {
+            _outputDirectory = folder;
+            RecalculateEstimates();
+        }
+    }
+
+    private async Task PrependTriggerWordAsync() {
+        if (string.IsNullOrWhiteSpace(_triggerWord) || string.IsNullOrWhiteSpace(_datasetDirectory)) {
+            Snackbar.Add("Specify a trigger word first.", Severity.Warning);
+            return;
+        }
+
+        int modified = await DatasetInspector.PrependTriggerWordAsync(_datasetDirectory, _triggerWord);
+        Snackbar.Add($"Updated {modified} caption files with trigger word '{_triggerWord}'", Severity.Success);
+        _datasetReport = await DatasetInspector.InspectDatasetAsync(_datasetDirectory);
+    }
+
+    private void RecalculateEstimates() {
+        int imgCount = _datasetReport?.TotalImages ?? 25;
+        _estimates = EstimationService.CalculateEstimates(
+            _targetBaseModel,
+            imgCount,
+            _repeats,
+            _epochs,
+            _batchSize,
+            _networkDim
+        );
+        _preFlight = EstimationService.RunPreFlightCheck(_targetBaseModel, _outputDirectory, _batchSize);
+        StateHasChanged();
+    }
+
+    private TrainingConfig BuildConfig() {
+        string effectivePrompt = _samplePrompt.Replace("{trigger}", string.IsNullOrWhiteSpace(_triggerWord) ? "subject" : _triggerWord);
+        return new TrainingConfig {
+            RunName = _runName,
+            TargetBaseModel = _targetBaseModel,
+            DatasetDirectory = _datasetDirectory,
+            OutputDirectory = _outputDirectory,
+            TriggerWord = _triggerWord,
+            MaxTrainEpochs = _epochs,
+            NetworkDim = _networkDim,
+            NetworkAlpha = _networkAlpha,
+            LearningRate = _learningRate,
+            BatchSize = _batchSize,
+            Optimizer = "adamw_bf16",
+            SamplePrompts = new List<string> { effectivePrompt }
+        };
+    }
+
+    private async Task<string?> GenerateYamlAsync() {
+        if (string.IsNullOrWhiteSpace(_datasetDirectory)) {
+            Snackbar.Add("Please select a training dataset directory.", Severity.Warning);
+            return null;
+        }
+
+        TrainingConfig config = BuildConfig();
+        string yaml = ConfigBuilder.BuildAiToolkitYaml(config);
+        string outDir = string.IsNullOrEmpty(config.OutputDirectory) ? Directory.GetCurrentDirectory() : config.OutputDirectory;
+        if (!Directory.Exists(outDir)) {
+            Directory.CreateDirectory(outDir);
+        }
+        string outputPath = Path.Combine(outDir, $"{config.RunName}_aitoolkit.yaml");
+        await File.WriteAllTextAsync(outputPath, yaml);
+        return outputPath;
+    }
+
+    private async Task ExportConfigAsync() {
+        try {
+            string? path = await GenerateYamlAsync();
+            if (path != null) {
+                Snackbar.Add($"Training configuration saved: {path}", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(path));
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to export config: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveAndLaunchAsync() {
+        try {
+            string? path = await GenerateYamlAsync();
+            if (path != null) {
+                Snackbar.Add($"Training config generated: {Path.GetFileName(path)}", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(path));
+                NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(path)}&autostart=true");
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to start training: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private static string GetCardStyle(bool isSelected) => isSelected
+        ? "background-color: #1e1e2e; border: 2px solid #89b4fa; border-radius: 8px;"
+        : "background-color: #11111b; border: 1px solid #313244; border-radius: 8px;";
+
+    private static string GetSubjectIcon(TrainingSubjectType type) => type switch {
+        TrainingSubjectType.Character => Icons.Material.Filled.Person,
+        TrainingSubjectType.Style => Icons.Material.Filled.Palette,
+        TrainingSubjectType.Concept => Icons.Material.Filled.Lightbulb,
+        TrainingSubjectType.Clothing => Icons.Material.Filled.Checkroom,
+        _ => Icons.Material.Filled.Tune
+    };
+
+    private static string FormatDuration(TimeSpan span) {
+        if (span.TotalHours >= 1) {
+            return $"{(int)span.TotalHours}h {span.Minutes}m";
+        }
+        return $"{Math.Max(1, (int)span.TotalMinutes)} mins";
+    }
+}

@@ -1,0 +1,350 @@
+@page "/settings"
+@inject SettingsService Settings
+@inject HuggingFaceService HfService
+@inject AiToolkitSetupService ToolkitSetup
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">System Settings & Admin Console</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Configure custom AMD ROCm wheels, AI-Toolkit auto-setup, and API keys (HuggingFace & Civitai)</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetDefaultsAsync">
+            Reset Defaults
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSettingsAsync">
+            Save Settings
+        </MudButton>
+    </div>
+</div>
+
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <!-- AMD ROCm Wheels Tab -->
+    <MudTabPanel Text="AMD ROCm Wheels" Icon="@Icons.Material.Filled.CloudDownload">
+        <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+                Configure where LoRAMancer downloads AMD ROCm PyTorch wheels. When AMD updates wheels (e.g. ROCm 7.3+), update the repository URL here without touching any scripts!
+            </MudAlert>
+
+            <MudGrid>
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_settings.RocmBaseUrl" Label="ROCm Release Base URL" Variant="Variant.Outlined" Placeholder="https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1" HelperText="Root HTTP directory containing AMD-compiled wheels" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField @bind-Value="_settings.PyTorchVersion" Label="PyTorch Version Tag" Variant="Variant.Outlined" Placeholder="2.9.1+rocm7.2.1" HelperText="Version identifier (e.g. 2.9.1+rocm7.2.1)" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="AutoGenerateUrls">
+                        Auto-Generate Wheel URLs from Base & Version
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.NetworkCheck" Class="ml-2" Disabled="_isTestingUrls" OnClick="TestAllWheelUrlsAsync">
+                        @(_isTestingUrls ? "Testing Reachability..." : "Test All Links")
+                    </MudButton>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudDivider Class="my-2" Style="border-color: #313244;" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2" Color="Color.Primary">Direct Wheel URLs</MudText>
+                </MudItem>
+
+                <!-- Torch Wheel -->
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.TorchWheelUrl" Label="Torch Wheel (.whl)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="@(() => TestSingleUrlAsync(_settings.TorchWheelUrl, "torch"))">
+                            Test
+                        </MudButton>
+                    </div>
+                    @if (_urlStatuses.TryGetValue("torch", out var torchStatus)) {
+                        <MudChip T="string" Size="Size.Small" Color="@(torchStatus.Reachable ? Color.Success : Color.Error)" Class="mt-1">
+                            @torchStatus.Message
+                        </MudChip>
+                    }
+                </MudItem>
+
+                <!-- TorchVision Wheel -->
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.TorchVisionWheelUrl" Label="TorchVision Wheel (.whl)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="@(() => TestSingleUrlAsync(_settings.TorchVisionWheelUrl, "torchvision"))">
+                            Test
+                        </MudButton>
+                    </div>
+                    @if (_urlStatuses.TryGetValue("torchvision", out var tvStatus)) {
+                        <MudChip T="string" Size="Size.Small" Color="@(tvStatus.Reachable ? Color.Success : Color.Error)" Class="mt-1">
+                            @tvStatus.Message
+                        </MudChip>
+                    }
+                </MudItem>
+
+                <!-- TorchAudio Wheel -->
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.TorchAudioWheelUrl" Label="TorchAudio Wheel (.whl)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="@(() => TestSingleUrlAsync(_settings.TorchAudioWheelUrl, "torchaudio"))">
+                            Test
+                        </MudButton>
+                    </div>
+                    @if (_urlStatuses.TryGetValue("torchaudio", out var taStatus)) {
+                        <MudChip T="string" Size="Size.Small" Color="@(taStatus.Reachable ? Color.Success : Color.Error)" Class="mt-1">
+                            @taStatus.Message
+                        </MudChip>
+                    }
+                </MudItem>
+
+                <!-- ROCm SDK Wheels -->
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1" Color="Color.Primary">ROCm SDK Wheels & Packages</MudText>
+                    @for (int i = 0; i < _settings.RocmSdkWheels.Count; i++) {
+                        int index = i;
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudTextField @bind-Value="_settings.RocmSdkWheels[index]" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => RemoveSdkWheel(index))" />
+                        </div>
+                    }
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSdkWheel">
+                        Add SDK Wheel URL
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+
+    <!-- AI-Toolkit Auto-Setup Tab -->
+    <MudTabPanel Text="AI-Toolkit Auto-Setup" Icon="@Icons.Material.Filled.Build">
+        <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(137, 180, 250, 0.15); color: #89b4fa;">
+                AI-Toolkit is LoRAMancer's primary training orchestrator engine. You can clone and provision it into your isolated AMD ROCm .venv automatically below.
+            </MudAlert>
+
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight:700;">Engine Status</MudText>
+                        <div class="d-flex align-center gap-2 my-2">
+                            @if (ToolkitSetup.IsInstalled()) {
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small">AI-Toolkit Installed & Ready</MudChip>
+                            } else {
+                                <MudChip T="string" Color="Color.Warning" Size="Size.Small">Not Installed</MudChip>
+                            }
+                        </div>
+                        <div style="font-size:0.8rem; color:#a6adc8;" class="mb-3">
+                            Path: <code>@ToolkitSetup.GetInstallDirectory()</code>
+                        </div>
+
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="_isSettingUpToolkit" OnClick="AutoSetupAiToolkitAsync">
+                            @(_isSettingUpToolkit ? "Setting Up AI-Toolkit..." : "Auto-Setup / Clone AI-Toolkit")
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_settings.AiToolkitRepoUrl" Label="Git Repository URL" Variant="Variant.Outlined" HelperText="Official or custom AI-Toolkit fork" Class="mb-3" />
+                    <MudTextField @bind-Value="_settings.AiToolkitPath" Label="Custom Installation Directory (Optional)" Variant="Variant.Outlined" Placeholder="Leave blank for default (tools/ai-toolkit)" />
+                </MudItem>
+
+                @if (_toolkitLogs.Count > 0) {
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.subtitle2" Class="mb-1">Setup Telemetry Log</MudText>
+                        <div class="terminal-window p-3" style="height: 240px; overflow-y: auto;">
+                            @foreach (var log in _toolkitLogs) {
+                                <div class="terminal-line">@log</div>
+                            }
+                        </div>
+                    </MudItem>
+                }
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+
+    <!-- API Keys Tab (HuggingFace & Civitai) -->
+    <MudTabPanel Text="API Keys & Integrations" Icon="@Icons.Material.Filled.VpnKey">
+        <div class="px-4 pb-4">
+            <MudGrid>
+                <!-- HuggingFace Token -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Token" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">HuggingFace Settings</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Required to download gated base models (e.g. <b>FLUX.1-dev</b>) and push LoRA checkpoints.
+                        </MudText>
+
+                        <MudTextField @bind-Value="_settings.HuggingFaceToken" Label="Hugging Face User Access Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                        <MudTextField @bind-Value="_settings.HfHomeCachePath" Label="Custom HF_HOME Cache Path (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.VerifiedUser" Disabled="_isValidatingHf" OnClick="ValidateHfTokenAsync">
+                                @(_isValidatingHf ? "Verifying..." : "Verify Token")
+                            </MudButton>
+                            @if (!string.IsNullOrEmpty(_hfValidationMessage)) {
+                                <MudChip T="string" Size="Size.Small" Color="@(_hfTokenValid ? Color.Success : Color.Error)">
+                                    @_hfValidationMessage
+                                </MudChip>
+                            }
+                        </div>
+                    </MudCard>
+                </MudItem>
+
+                <!-- Civitai API Key -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Hub" Color="Color.Secondary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Civitai Integration</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Used for instant hash lookups of donor LoRAs to fetch trigger words, preview thumbnails, and sample prompts.
+                        </MudText>
+
+                        <MudTextField @bind-Value="_settings.CivitaiApiKey" Label="Civitai API Key (Optional for private models)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+
+                        <MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Dense="true" Style="font-size:0.8rem; color:#a6adc8;">
+                            Public models on Civitai can be inspected without a key; adding your key enables higher rate limits and access to your private models.
+                        </MudAlert>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+
+    <!-- General Preferences Tab -->
+    <MudTabPanel Text="General & Paths" Icon="@Icons.Material.Filled.Tune">
+        <div class="px-4 pb-4">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_settings.PreferredPythonPath" Label="Preferred Python Executable" Variant="Variant.Outlined" HelperText="Name on PATH or full path to python.exe (Python 3.12+ required)" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_settings.UpdateManifestUrl" Label="Auto-Update Manifest URL" Variant="Variant.Outlined" HelperText="Remote endpoint serving version.json updates" />
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Default Checkpoints Output Directory</MudText>
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.DefaultOutputDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Select default LoRA export directory..." FullWidth="true" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseOutputFolderAsync">
+                            Browse...
+                        </MudButton>
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="_settings.AutoCheckUpdatesOnStartup" Label="Check for updates automatically on application startup" Color="Color.Primary" />
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private AppSettings _settings = new();
+    private bool _isTestingUrls;
+    private readonly Dictionary<string, (bool Reachable, string Message)> _urlStatuses = new();
+
+    private bool _isSettingUpToolkit;
+    private readonly List<string> _toolkitLogs = new();
+
+    private bool _isValidatingHf;
+    private bool _hfTokenValid;
+    private string _hfValidationMessage = string.Empty;
+
+    protected override void OnInitialized() {
+        _settings = Settings.Current;
+    }
+
+    private void AutoGenerateUrls() {
+        _settings.UpdateFromBaseUrl(_settings.RocmBaseUrl, _settings.PyTorchVersion);
+        Snackbar.Add("Updated wheel URLs from Base URL & Version!", Severity.Success);
+    }
+
+    private async Task TestSingleUrlAsync(string url, string key) {
+        Snackbar.Add($"Testing reachability of {key}...", Severity.Info);
+        var result = await Settings.TestWheelUrlAsync(url);
+        _urlStatuses[key] = (result.Reachable, result.StatusMessage);
+        StateHasChanged();
+    }
+
+    private async Task TestAllWheelUrlsAsync() {
+        _isTestingUrls = true;
+        try {
+            await TestSingleUrlAsync(_settings.TorchWheelUrl, "torch");
+            await TestSingleUrlAsync(_settings.TorchVisionWheelUrl, "torchvision");
+            await TestSingleUrlAsync(_settings.TorchAudioWheelUrl, "torchaudio");
+            Snackbar.Add("All links tested.", Severity.Info);
+        } finally {
+            _isTestingUrls = false;
+        }
+    }
+
+    private void AddSdkWheel() {
+        _settings.RocmSdkWheels.Add(string.Empty);
+    }
+
+    private void RemoveSdkWheel(int index) {
+        if (index >= 0 && index < _settings.RocmSdkWheels.Count) {
+            _settings.RocmSdkWheels.RemoveAt(index);
+        }
+    }
+
+    private async Task AutoSetupAiToolkitAsync() {
+        _isSettingUpToolkit = true;
+        _toolkitLogs.Clear();
+        _toolkitLogs.Add("[LoRAMancer] Initiating AI-Toolkit automated setup...");
+
+        try {
+            string venvPath = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
+            await ToolkitSetup.SetupAiToolkitAsync(venvPath, line => {
+                InvokeAsync(() => {
+                    _toolkitLogs.Add(line);
+                    StateHasChanged();
+                });
+            });
+            Snackbar.Add("AI-Toolkit setup completed successfully!", Severity.Success);
+        } catch (Exception ex) {
+            _toolkitLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"AI-Toolkit setup failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isSettingUpToolkit = false;
+        }
+    }
+
+    private async Task ValidateHfTokenAsync() {
+        _isValidatingHf = true;
+        try {
+            var (valid, user, details) = await HfService.ValidateTokenAsync(_settings.HuggingFaceToken);
+            _hfTokenValid = valid;
+            _hfValidationMessage = valid ? $"Verified: {user}" : details;
+            Snackbar.Add(valid ? $"HuggingFace authenticated as {user}" : details, valid ? Severity.Success : Severity.Warning);
+        } finally {
+            _isValidatingHf = false;
+        }
+    }
+
+    private async Task BrowseOutputFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Default Output Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _settings.DefaultOutputDirectory = folder;
+        }
+    }
+
+    private async Task SaveSettingsAsync() {
+        try {
+            await Settings.SaveSettingsAsync(_settings);
+            Snackbar.Add("Settings saved successfully!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save settings: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ResetDefaultsAsync() {
+        _settings = await Settings.ResetToDefaultsAsync();
+        _urlStatuses.Clear();
+        _hfValidationMessage = string.Empty;
+        Snackbar.Add("Settings reset to factory defaults.", Severity.Warning);
+    }
+}

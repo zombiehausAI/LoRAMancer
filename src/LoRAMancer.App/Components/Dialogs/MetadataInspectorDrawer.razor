@@ -1,6 +1,8 @@
 @inject IDialogService DialogService
+@inject CivitaiService Civitai
+@inject ISnackbar Snackbar
 
-<MudDrawer @bind-Open="IsOpen" Anchor="Anchor.Right" Elevation="3" Variant="DrawerVariant.Temporary" Width="520px" Style="background-color: #181825; border-left: 1px solid #313244;">
+<MudDrawer @bind-Open="IsOpen" Anchor="Anchor.Right" Elevation="3" Variant="DrawerVariant.Temporary" Width="540px" Style="background-color: #181825; border-left: 1px solid #313244;">
     <MudDrawerHeader Class="d-flex align-center justify-space-between pb-2" Style="border-bottom: 1px solid #313244;">
         <div class="d-flex align-center">
             <MudIcon Icon="@Icons.Material.Filled.Info" Color="Color.Primary" Class="mr-2" />
@@ -20,7 +22,7 @@
                         <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@(Metadata.FileSizeBytes / (1024 * 1024)) MB</MudChip>
                     </div>
                 </MudCardContent>
-                <MudCardActions>
+                <MudCardActions Class="d-flex gap-2">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="OpenCloneModalAsync">
                         Clone Configuration
                     </MudButton>
@@ -28,6 +30,7 @@
             </MudCard>
 
             <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Style="background-color: transparent;">
+                <!-- Hyperparameters Tab -->
                 <MudTabPanel Text="Hyperparameters" Icon="@Icons.Material.Filled.Tune">
                     <MudSimpleTable Dense="true" Hover="true" Style="background-color: #11111b; border-radius: 8px;">
                         <tbody>
@@ -79,6 +82,56 @@
                     </MudSimpleTable>
                 </MudTabPanel>
 
+                <!-- Civitai Lookup Tab -->
+                <MudTabPanel Text="Civitai Lookup" Icon="@Icons.Material.Filled.Hub">
+                    @if (_isQueryingCivitai) {
+                        <div class="p-4 text-center">
+                            <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+                            <MudText Typo="Typo.body2">@_civitaiStatus</MudText>
+                            @if (_hashProgress > 0 && _hashProgress < 100) {
+                                <MudProgressLinear Color="Color.Primary" Value="@_hashProgress" Class="mt-2" />
+                            }
+                        </div>
+                    } else if (_civitaiInfo != null) {
+                        <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244;" Class="mb-3">
+                            @if (!string.IsNullOrEmpty(_civitaiInfo.PreviewImageUrl)) {
+                                <MudCardMedia Image="@_civitaiInfo.PreviewImageUrl" Height="200" />
+                            }
+                            <MudCardContent>
+                                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">@_civitaiInfo.ModelName</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Version: @_civitaiInfo.VersionName • Base: @_civitaiInfo.BaseModel</MudText>
+
+                                @if (_civitaiInfo.TrainedWords.Count > 0) {
+                                    <div class="mt-3">
+                                        <MudText Typo="Typo.subtitle2" Class="mb-1" Color="Color.Primary">Trained Trigger Words:</MudText>
+                                        <div class="d-flex flex-wrap gap-1">
+                                            @foreach (var word in _civitaiInfo.TrainedWords) {
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@word</MudChip>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </MudCardContent>
+                            <MudCardActions>
+                                @if (!string.IsNullOrEmpty(_civitaiInfo.CivitaiUrl)) {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" Href="@_civitaiInfo.CivitaiUrl" Target="_blank" StartIcon="@Icons.Material.Filled.OpenInNew">
+                                        Open on Civitai
+                                    </MudButton>
+                                }
+                            </MudCardActions>
+                        </MudCard>
+                    } else {
+                        <div class="p-4 text-center" style="background-color: #11111b; border: 1px dashed #313244; border-radius: 8px;">
+                            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">Lookup model details, thumbnails, and trigger words directly from Civitai via SHA256 hash.</MudText>
+                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudSync" OnClick="LookupCivitaiAsync">
+                                Query Civitai
+                            </MudButton>
+                        </div>
+                    }
+                </MudTabPanel>
+
+                <!-- Raw Header Tab -->
                 <MudTabPanel Text="Raw Header" Icon="@Icons.Material.Filled.Code">
                     <MudTextField @bind-Value="_filterKey" Placeholder="Filter metadata keys..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
                     <div style="max-height: 400px; overflow-y: auto;">
@@ -106,6 +159,10 @@
     public LoraMetadata? Metadata { get; set; }
 
     private string _filterKey = string.Empty;
+    private bool _isQueryingCivitai;
+    private string _civitaiStatus = string.Empty;
+    private int _hashProgress;
+    private CivitaiModelVersionInfo? _civitaiInfo;
 
     private IEnumerable<KeyValuePair<string, string>> FilteredMetadata {
         get {
@@ -116,6 +173,38 @@
                 return Metadata.RawHeaderMetadata;
             }
             return Metadata.RawHeaderMetadata.Where(k => k.Key.Contains(_filterKey, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task LookupCivitaiAsync() {
+        if (Metadata == null || !File.Exists(Metadata.FilePath)) {
+            Snackbar.Add("LoRA file path not available.", Severity.Warning);
+            return;
+        }
+
+        _isQueryingCivitai = true;
+        _civitaiStatus = "Computing SHA256 model hash...";
+        _hashProgress = 0;
+
+        try {
+            string hash = await Civitai.ComputeFileSha256Async(Metadata.FilePath, p => {
+                _hashProgress = p;
+                InvokeAsync(StateHasChanged);
+            });
+
+            _civitaiStatus = $"Querying Civitai API for hash {hash[..10]}...";
+            StateHasChanged();
+
+            _civitaiInfo = await Civitai.LookupByHashAsync(hash);
+            if (_civitaiInfo != null) {
+                Snackbar.Add($"Found Civitai model: {_civitaiInfo.ModelName}", Severity.Success);
+            } else {
+                Snackbar.Add("Model hash not found on Civitai (might be unlisted or local).", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Civitai lookup failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isQueryingCivitai = false;
         }
     }
 

@@ -7,26 +7,42 @@ namespace LoRAMancer.App.Services;
 
 public sealed class AmdVenvProvisioner {
     private readonly ProcessRunner _processRunner;
+    private readonly SettingsService? _settingsService;
 
     public const string DefaultTorchVersion = "2.9.1+rocm7.2.1";
     public const string DefaultRocmBaseUrl = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1";
 
-    public static readonly string[] DefaultPyTorchWheels = new[] {
+    public static readonly IReadOnlyList<string> DefaultPyTorchWheels = new[] {
         $"{DefaultRocmBaseUrl}/torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl",
         $"{DefaultRocmBaseUrl}/torchaudio-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl",
         $"{DefaultRocmBaseUrl}/torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl"
     };
 
-    public static readonly string[] DefaultRocmSdkWheels = new[] {
+    public static readonly IReadOnlyList<string> DefaultRocmSdkWheels = new[] {
         $"{DefaultRocmBaseUrl}/rocm-7.2.1.tar.gz",
         $"{DefaultRocmBaseUrl}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
         $"{DefaultRocmBaseUrl}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
         $"{DefaultRocmBaseUrl}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl"
     };
 
-    public AmdVenvProvisioner(ProcessRunner processRunner) {
+    public AmdVenvProvisioner(ProcessRunner processRunner, SettingsService? settingsService = null) {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
+        _settingsService = settingsService;
     }
+
+    public string CurrentTorchVersion => _settingsService?.Current.PyTorchVersion ?? DefaultTorchVersion;
+
+    public IReadOnlyList<string> CurrentPyTorchWheels {
+        get {
+            if (_settingsService != null) {
+                AppSettings s = _settingsService.Current;
+                return new[] { s.TorchWheelUrl, s.TorchAudioWheelUrl, s.TorchVisionWheelUrl };
+            }
+            return DefaultPyTorchWheels;
+        }
+    }
+
+    public IReadOnlyList<string> CurrentRocmSdkWheels => _settingsService?.Current.RocmSdkWheels ?? DefaultRocmSdkWheels;
 
     public async Task<AmdEnvironmentInfo> DetectEnvironmentAsync(string? comfyUiScriptPath = null, CancellationToken cancellationToken = default) {
         AmdEnvironmentInfo info = new();
@@ -53,7 +69,6 @@ public sealed class AmdVenvProvisioner {
                 }
             }
         } catch {
-            // Fallback for non-WMI or restricted environments
             info.IsAmdGpuDetected = true;
             info.GpuName = "AMD Radeon Graphics (Generic)";
         }
@@ -64,8 +79,10 @@ public sealed class AmdVenvProvisioner {
     }
 
     public async Task DetectSystemPythonAsync(AmdEnvironmentInfo info, CancellationToken cancellationToken = default) {
-        string[] candidates = new[] { "python3.12", "python", "py -3.12" };
-        foreach (string cmd in candidates) {
+        string preferred = _settingsService?.Current.PreferredPythonPath ?? "python.exe";
+        string[] candidates = new[] { preferred, "python3.12", "python", "py -3.12" };
+
+        foreach (string cmd in candidates.Distinct(StringComparer.OrdinalIgnoreCase)) {
             try {
                 string versionOutput = string.Empty;
                 int exitCode = await _processRunner.RunAsync(
@@ -160,8 +177,8 @@ public sealed class AmdVenvProvisioner {
             cancellationToken
         );
 
-        onProgress?.Invoke($"[Provisioner] Installing AMD ROCm PyTorch wheels ({DefaultTorchVersion})...");
-        string wheelsArg = string.Join(" ", DefaultPyTorchWheels.Select(w => $"\"{w}\""));
+        onProgress?.Invoke($"[Provisioner] Installing AMD ROCm PyTorch wheels ({CurrentTorchVersion})...");
+        string wheelsArg = string.Join(" ", CurrentPyTorchWheels.Select(w => $"\"{w}\""));
         int torchExit = await _processRunner.RunAsync(
             pythonExe,
             $"-m pip install --no-cache-dir --no-deps {wheelsArg}",
@@ -177,7 +194,7 @@ public sealed class AmdVenvProvisioner {
         }
 
         onProgress?.Invoke("[Provisioner] Installing AMD ROCm SDK wheels...");
-        string sdkArg = string.Join(" ", DefaultRocmSdkWheels.Select(w => $"\"{w}\""));
+        string sdkArg = string.Join(" ", CurrentRocmSdkWheels.Select(w => $"\"{w}\""));
         int sdkExit = await _processRunner.RunAsync(
             pythonExe,
             $"-m pip install --no-cache-dir {sdkArg}",

@@ -8,6 +8,8 @@ public sealed class TrainingRunnerService {
     private Process? _currentProcess;
     private CancellationTokenSource? _trainingCts;
     private readonly Stopwatch _stopwatch = new();
+    private readonly SettingsService? _settingsService;
+    private readonly AiToolkitSetupService? _toolkitSetupService;
 
     public TrainingProgress CurrentProgress { get; } = new();
     public event Action<TrainingProgress>? OnProgressUpdated;
@@ -15,9 +17,14 @@ public sealed class TrainingRunnerService {
 
     public bool IsRunning => CurrentProgress.Status == TrainingStatus.Training || CurrentProgress.Status == TrainingStatus.Initializing;
 
+    public TrainingRunnerService(SettingsService? settingsService = null, AiToolkitSetupService? toolkitSetupService = null) {
+        _settingsService = settingsService;
+        _toolkitSetupService = toolkitSetupService;
+    }
+
     public async Task StartTrainingAsync(
         string venvPath,
-        string toolkitScriptPath,
+        string? toolkitScriptPath,
         string configYamlPath,
         CancellationToken cancellationToken = default
     ) {
@@ -26,6 +33,20 @@ public sealed class TrainingRunnerService {
 
         if (IsRunning) {
             throw new InvalidOperationException("A training job is already running.");
+        }
+
+        string effectiveScriptPath = toolkitScriptPath ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(effectiveScriptPath)) {
+            effectiveScriptPath = _toolkitSetupService?.GetRunScriptPath() ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(effectiveScriptPath) || !File.Exists(effectiveScriptPath)) {
+            string localRun = Path.Combine(AppContext.BaseDirectory, "tools", "ai-toolkit", "run.py");
+            if (File.Exists(localRun)) {
+                effectiveScriptPath = localRun;
+            } else {
+                effectiveScriptPath = "run.py";
+            }
         }
 
         string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
@@ -45,7 +66,7 @@ public sealed class TrainingRunnerService {
 
         ProcessStartInfo startInfo = new() {
             FileName = pythonExe,
-            Arguments = $"\"{toolkitScriptPath}\" \"{configYamlPath}\"",
+            Arguments = $"\"{effectiveScriptPath}\" \"{configYamlPath}\"",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -57,6 +78,20 @@ public sealed class TrainingRunnerService {
         startInfo.EnvironmentVariables["PYTORCH_ROCM_ARCH"] = "native";
         startInfo.EnvironmentVariables["MIOPEN_FIND_MODE"] = "FAST";
         startInfo.EnvironmentVariables["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0";
+
+        // Inject HuggingFace tokens and cache path if configured
+        if (_settingsService != null) {
+            string hfToken = _settingsService.Current.HuggingFaceToken?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(hfToken)) {
+                startInfo.EnvironmentVariables["HF_TOKEN"] = hfToken;
+                startInfo.EnvironmentVariables["HUGGING_FACE_HUB_TOKEN"] = hfToken;
+            }
+
+            string hfHome = _settingsService.Current.HfHomeCachePath?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(hfHome)) {
+                startInfo.EnvironmentVariables["HF_HOME"] = hfHome;
+            }
+        }
 
         _currentProcess = new Process { StartInfo = startInfo };
 

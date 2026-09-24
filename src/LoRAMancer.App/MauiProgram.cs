@@ -20,10 +20,16 @@ public static class MauiProgram {
         builder.Services.AddSingleton<HttpClient>();
         builder.Services.AddSingleton<ProcessRunner>();
         builder.Services.AddSingleton<ModelArchitectureRegistry>();
+        builder.Services.AddSingleton<SettingsService>();
+        builder.Services.AddSingleton<AiToolkitSetupService>();
+        builder.Services.AddSingleton<CivitaiService>();
+        builder.Services.AddSingleton<HuggingFaceService>();
         builder.Services.AddSingleton<SafeTensorsMetadataReader>();
         builder.Services.AddSingleton<AiToolkitConfigBuilder>();
         builder.Services.AddSingleton<AmdVenvProvisioner>();
         builder.Services.AddSingleton<TrainingRunnerService>();
+        builder.Services.AddSingleton<TrainingEstimationService>();
+        builder.Services.AddSingleton<DatasetInspectorService>();
         builder.Services.AddSingleton<NativeFileDialogService>();
         builder.Services.AddSingleton<PluginManagerService>();
         builder.Services.AddSingleton<AutoUpdateService>();

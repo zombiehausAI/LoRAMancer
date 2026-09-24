@@ -2,24 +2,30 @@
 
 ## Overview
 
-LoRAMancer targets AMD Radeon GPUs on Windows utilizing official AMD ROCm wheels. The application requires **Python 3.12+ (prefer 3.12)** and establishes a dedicated `.venv` in the application environment.
+LoRAMancer targets AMD Radeon GPUs on Windows utilizing official AMD ROCm wheels. The application requires **Python 3.12+ (prefer 3.12)** and establishes a dedicated `.venv` in the application environment without modifying any existing external tools (such as ComfyUI).
 
-## Wheel Sourcing Strategy
+## Wheel Sourcing & Admin Configuration
 
-LoRAMancer can ingest AMD wheel configurations directly from:
-1. **ComfyUI Reference Scripts**: Ingests paths and ROCm base URLs from user-provided scripts (such as `Reference/comfyui.ps1`).
-2. **AMD Radeon Official Repositories**:
-   - PyTorch ROCm Base: `https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1`
-   - PyTorch Version: `2.9.1+rocm7.2.1`
-   - Wheels:
-     - `torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-     - `torchaudio-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-     - `torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
-   - ROCm SDK Packages:
-     - `rocm-7.2.1.tar.gz`
-     - `rocm_sdk_core-7.2.1-py3-none-win_amd64.whl`
-     - `rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl`
-     - `rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl`
+LoRAMancer supports dynamic, script-free wheel updates via the **Admin & Settings Page** (`/settings`):
+- **Base Repository URL**: Define or update the AMD release URL (e.g., `https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1` or newer 7.3+ releases).
+- **Auto-Generation & Custom Overrides**: Automatically generate wheel paths from the base URL and version tag, or override individual wheel URLs for `torch`, `torchvision`, and `torchaudio`.
+- **Live URL Reachability Probing**: Built-in HTTP probe verifies wheel links and reports HTTP status and file sizes before attempting provisioning.
+- **Persistence**: Saved to `%LOCALAPPDATA%\LoRAMancer\settings.json`, allowing upgrades without editing source files or PowerShell scripts.
+
+## Default Wheel Sourcing
+
+When not overridden, LoRAMancer defaults to:
+- **PyTorch ROCm Base**: `https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1`
+- **PyTorch Version**: `2.9.1+rocm7.2.1`
+- **Wheels**:
+  - `torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
+  - `torchaudio-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
+  - `torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl`
+- **ROCm SDK Packages**:
+  - `rocm-7.2.1.tar.gz`
+  - `rocm_sdk_core-7.2.1-py3-none-win_amd64.whl`
+  - `rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl`
+  - `rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl`
 
 ## ROCm SDK Windows Patching
 

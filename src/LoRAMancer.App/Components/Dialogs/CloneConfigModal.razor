@@ -1,6 +1,7 @@
 @inject NativeFileDialogService FileDialogService
 @inject AiToolkitConfigBuilder ConfigBuilder
 @inject ModelArchitectureRegistry ArchitectureRegistry
+@inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 
 <MudDialog Style="background-color: #181825; border: 1px solid #313244; max-width: 800px; width: 100%;">
@@ -82,8 +83,11 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveConfigAsync">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveConfigAsync">
             Export Config
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="SaveAndLaunchTrainingAsync">
+            Save & Launch Training
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -144,6 +148,25 @@
             await File.WriteAllTextAsync(outputPath, yaml);
             Snackbar.Add($"Config saved: {outputPath}", Severity.Success);
             MudDialog.Close(DialogResult.Ok(outputPath));
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to write config: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveAndLaunchTrainingAsync() {
+        if (string.IsNullOrWhiteSpace(Config.DatasetDirectory)) {
+            Snackbar.Add("Please select a dataset directory.", Severity.Warning);
+            return;
+        }
+
+        string yaml = ConfigBuilder.BuildAiToolkitYaml(Config);
+        string outputPath = Path.Combine(string.IsNullOrEmpty(Config.OutputDirectory) ? Directory.GetCurrentDirectory() : Config.OutputDirectory, $"{Config.RunName}_aitoolkit.yaml");
+
+        try {
+            await File.WriteAllTextAsync(outputPath, yaml);
+            Snackbar.Add($"Config saved: {outputPath}", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(outputPath));
+            NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(outputPath)}&autostart=true");
         } catch (Exception ex) {
             Snackbar.Add($"Failed to write config: {ex.Message}", Severity.Error);
         }

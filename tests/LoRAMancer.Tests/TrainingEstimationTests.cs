@@ -1,0 +1,78 @@
+using LoRAMancer.App.Engines;
+using LoRAMancer.App.Models;
+using LoRAMancer.App.Services;
+
+namespace LoRAMancer.Tests;
+
+public sealed class TrainingEstimationTests {
+    [Fact]
+    public void CalculateEstimates_FluxDev_ReturnsAccurateMetrics() {
+        ModelArchitectureRegistry registry = new();
+        TrainingEstimationService estimator = new(registry);
+
+        TrainingEstimates estimates = estimator.CalculateEstimates(
+            baseModelDisplayName: "FLUX.1 Dev",
+            imageCount: 20,
+            repeats: 10,
+            epochs: 10,
+            batchSize: 1,
+            networkDim: 16
+        );
+
+        Assert.Equal(2000, estimates.TotalSteps);
+        Assert.True(estimates.EstimatedVramGb >= 13.0);
+        Assert.True(estimates.EstimatedOutputSizeMb > 150.0);
+        Assert.True(estimates.EstimatedDuration.TotalMinutes > 0);
+    }
+
+    [Fact]
+    public void GetSubjectPresets_ContainsAllDefaultTypes() {
+        ModelArchitectureRegistry registry = new();
+        TrainingEstimationService estimator = new(registry);
+
+        var presets = estimator.GetSubjectPresets();
+
+        Assert.Contains(presets, p => p.SubjectType == TrainingSubjectType.Character);
+        Assert.Contains(presets, p => p.SubjectType == TrainingSubjectType.Style);
+        Assert.Contains(presets, p => p.SubjectType == TrainingSubjectType.Concept);
+        Assert.Contains(presets, p => p.SubjectType == TrainingSubjectType.Clothing);
+    }
+
+    [Fact]
+    public async Task DatasetInspector_InspectAndPrepend_WorksCorrectly() {
+        DatasetInspectorService inspector = new();
+        string tempDir = Path.Combine(Path.GetTempPath(), "loramancer_dataset_test_" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+
+        try {
+            string img1 = Path.Combine(tempDir, "img01.png");
+            string img2 = Path.Combine(tempDir, "img02.png");
+            await File.WriteAllBytesAsync(img1, new byte[20480]); // 20KB
+            await File.WriteAllBytesAsync(img2, new byte[20480]); // 20KB
+
+            string txt1 = Path.Combine(tempDir, "img01.txt");
+            await File.WriteAllTextAsync(txt1, "a photo of a person");
+
+            DatasetHealthReport report = await inspector.InspectDatasetAsync(tempDir);
+
+            Assert.Equal(2, report.TotalImages);
+            Assert.Equal(1, report.TotalCaptions);
+            Assert.Equal(1, report.MissingCaptions);
+
+            int modified = await inspector.PrependTriggerWordAsync(tempDir, "ohwx character");
+            Assert.Equal(2, modified);
+
+            string updatedTxt1 = await File.ReadAllTextAsync(txt1);
+            Assert.StartsWith("ohwx character, a photo of a person", updatedTxt1);
+
+            string txt2 = Path.Combine(tempDir, "img02.txt");
+            Assert.True(File.Exists(txt2));
+            string updatedTxt2 = await File.ReadAllTextAsync(txt2);
+            Assert.Equal("ohwx character", updatedTxt2);
+        } finally {
+            if (Directory.Exists(tempDir)) {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+}

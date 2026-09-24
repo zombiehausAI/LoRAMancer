@@ -21,11 +21,17 @@
 
     <ItemGroup>
         <PackageReference Include="YamlDotNet" Version="16.3.0" />
+        <PackageReference Include="System.Management" Version="10.0.12" />
     </ItemGroup>
 
     <ItemGroup>
         <Compile Include="..\..\src\LoRAMancer.App\Models\*.cs" Link="Models\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Engines\*.cs" Link="Engines\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\SettingsService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\CivitaiService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\HuggingFaceService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\TrainingEstimationService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\DatasetInspectorService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>
