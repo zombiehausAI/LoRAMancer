@@ -1,0 +1,393 @@
+@page "/docs"
+@page "/documentation"
+@using System.IO
+@using System.Text
+@using System.Text.RegularExpressions
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+    <div>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.MenuBook" Color="Color.Primary" Size="Size.Large" />
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">Documentation & User Guides</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Comprehensive manuals, architectural specifications, and hardware setup guides packaged with LoRAMancer
+        </MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        @if (!string.IsNullOrWhiteSpace(_docsDirectory) && Directory.Exists(_docsDirectory)) {
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenDocsInExplorer">
+                Open Docs Folder
+            </MudButton>
+        }
+        @if (_selectedDoc != null) {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyCurrentDoc">
+                Copy Markdown
+            </MudButton>
+        }
+    </div>
+</div>
+
+<MudGrid Spacing="3">
+    <!-- Navigation Sidebar / Document Index -->
+    <MudItem xs="12" md="4" lg="3">
+        <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+            <MudCardContent Class="pa-3">
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Filter guides..." Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true" Immediate="true" Class="mb-3" />
+
+                <div class="d-flex flex-column gap-1" style="max-height: calc(100vh - 240px); overflow-y: auto;">
+                    @foreach (var doc in FilteredDocs) {
+                        bool isSelected = _selectedDoc?.FileName == doc.FileName;
+                        <div class="pa-2 rounded d-flex align-center justify-space-between" 
+                             style="@($"cursor: pointer; transition: all 0.15s ease; border-radius: 6px; {(isSelected ? "background-color: rgba(203, 166, 247, 0.12); border-left: 3px solid var(--accent, #cba6f7);" : "background-color: transparent;")}")" 
+                             @onclick="@(() => SelectDoc(doc))">
+                            <div class="d-flex align-center gap-2 text-truncate">
+                                <MudIcon Icon="@doc.Icon" Color="@(isSelected ? Color.Primary : Color.Default)" Size="Size.Small" />
+                                <div class="text-truncate">
+                                    <MudText Typo="Typo.body2" Style="@($"font-weight: {(isSelected ? "700" : "500")}; color: {(isSelected ? "var(--accent, #cba6f7)" : "var(--text-primary, #cdd6f4)")};")" Class="text-truncate">
+                                        @doc.Title
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="text-truncate d-block">
+                                        @doc.FileName
+                                    </MudText>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!FilteredDocs.Any()) {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="pa-3 text-center">
+                            No guides match your search.
+                        </MudText>
+                    }
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Document Viewer Viewport -->
+    <MudItem xs="12" md="8" lg="9">
+        <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px; min-height: 600px;">
+            <MudCardContent Class="pa-4 pa-md-6">
+                @if (_selectedDoc != null) {
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 pb-3 mb-4" style="border-bottom: 1px solid var(--border-dark, #313244);">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@_selectedDoc.Icon" Color="Color.Primary" Size="Size.Medium" />
+                            <div>
+                                <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary, #cdd6f4);">
+                                    @_selectedDoc.Title
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @_selectedDoc.FileName &bull; @_renderedLines.Count sections
+                                </MudText>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Rendered Document Body -->
+                    <div class="markdown-body" style="color: var(--text-primary, #cdd6f4); line-height: 1.6; font-size: 0.95rem;">
+                        @((MarkupString)_renderedHtml)
+                    </div>
+                } else {
+                    <div class="d-flex flex-column align-center justify-center pa-8 text-center" style="min-height: 400px;">
+                        <MudIcon Icon="@Icons.Material.Filled.MenuBook" Size="Size.Large" Color="Color.Secondary" Style="opacity: 0.4;" Class="mb-3" />
+                        <MudText Typo="Typo.h6" Style="color: var(--text-primary);">Select a Guide to Read</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            Choose from any of the manuals and specifications on the left to read inside the app.
+                        </MudText>
+                    </div>
+                }
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private sealed record DocItem(string Title, string FileName, string FullPath, string Icon, string Category);
+
+    private List<DocItem> _availableDocs = new();
+    private DocItem? _selectedDoc;
+    private string _searchQuery = string.Empty;
+    private string _docsDirectory = string.Empty;
+    private string _renderedHtml = string.Empty;
+    private List<string> _renderedLines = new();
+
+    private IEnumerable<DocItem> FilteredDocs =>
+        string.IsNullOrWhiteSpace(_searchQuery)
+            ? _availableDocs
+            : _availableDocs.Where(d => d.Title.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                                       d.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized() {
+        LocateDocsDirectory();
+        LoadAvailableDocs();
+        if (_availableDocs.Count > 0) {
+            SelectDoc(_availableDocs[0]);
+        }
+    }
+
+    private void LocateDocsDirectory() {
+        string baseDir = AppContext.BaseDirectory;
+        string appDocs = Path.Combine(baseDir, "docs");
+        if (Directory.Exists(appDocs) && Directory.GetFiles(appDocs, "*.md").Length > 0) {
+            _docsDirectory = appDocs;
+            return;
+        }
+
+        // Development fallback
+        string candidate = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "docs"));
+        if (Directory.Exists(candidate) && Directory.GetFiles(candidate, "*.md").Length > 0) {
+            _docsDirectory = candidate;
+            return;
+        }
+
+        string curCandidate = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "docs"));
+        if (Directory.Exists(curCandidate) && Directory.GetFiles(curCandidate, "*.md").Length > 0) {
+            _docsDirectory = curCandidate;
+            return;
+        }
+
+        _docsDirectory = appDocs;
+    }
+
+    private void LoadAvailableDocs() {
+        _availableDocs.Clear();
+        if (string.IsNullOrWhiteSpace(_docsDirectory) || !Directory.Exists(_docsDirectory)) {
+            return;
+        }
+
+        var files = Directory.GetFiles(_docsDirectory, "*.md");
+        foreach (var file in files) {
+            string fileName = Path.GetFileName(file);
+            string title = GetFriendlyTitle(fileName);
+            string icon = GetDocIcon(fileName);
+            _availableDocs.Add(new DocItem(title, fileName, file, icon, "Guides"));
+        }
+
+        _availableDocs = _availableDocs.OrderBy(d => GetSortWeight(d.FileName)).ToList();
+    }
+
+    private void SelectDoc(DocItem doc) {
+        _selectedDoc = doc;
+        try {
+            if (File.Exists(doc.FullPath)) {
+                string markdown = File.ReadAllText(doc.FullPath);
+                _renderedLines = markdown.Split('\n').ToList();
+                _renderedHtml = ConvertMarkdownToHtml(markdown);
+            } else {
+                _renderedHtml = "<p>Document file not found.</p>";
+            }
+        } catch (Exception ex) {
+            _renderedHtml = $"<p class='text-danger'>Error reading document: {ex.Message}</p>";
+        }
+    }
+
+    private async Task CopyCurrentDoc() {
+        if (_selectedDoc != null && File.Exists(_selectedDoc.FullPath)) {
+            string markdown = await File.ReadAllTextAsync(_selectedDoc.FullPath);
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", markdown);
+            Snackbar.Add($"Copied '{_selectedDoc.Title}' to clipboard!", Severity.Success);
+        }
+    }
+
+    private void OpenDocsInExplorer() {
+        if (!string.IsNullOrWhiteSpace(_docsDirectory) && Directory.Exists(_docsDirectory)) {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "explorer.exe",
+                Arguments = $"\"{_docsDirectory}\"",
+                UseShellExecute = true
+            });
+        }
+    }
+
+    private static string GetFriendlyTitle(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => "Features & Subsystem Reference",
+            "LORA_LIBRARY_BROWSER.MD" => "LoRA Library & Multi-Library Browser",
+            "TRAINING_WIZARD.MD" => "Civitai-Style Training Wizard",
+            "HISTORY_AND_VAULT.MD" => "LoRA Training History & Vault",
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => "Universal GPU Setup (ROCm / CUDA / Intel)",
+            "AMD_ROCM_SETUP.MD" => "AMD ROCm Windows Setup Guide",
+            "REMOTE_TRAINING.MD" => "Remote Web UI & Public Serving",
+            "PLUGINS.MD" => "Plugin System (C# & Python)",
+            "ARCHITECTURE.MD" => "Architecture & Core Engine",
+            "INSTALLER_AND_UPDATES.MD" => "Installer & Update Specs",
+            _ => Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ')
+        };
+    }
+
+    private static string GetDocIcon(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => Icons.Material.Filled.Star,
+            "LORA_LIBRARY_BROWSER.MD" => Icons.Material.Filled.CollectionsBookmark,
+            "TRAINING_WIZARD.MD" => Icons.Material.Filled.AutoAwesome,
+            "HISTORY_AND_VAULT.MD" => Icons.Material.Filled.HistoryEdu,
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => Icons.Material.Filled.Memory,
+            "AMD_ROCM_SETUP.MD" => Icons.Material.Filled.DeveloperBoard,
+            "REMOTE_TRAINING.MD" => Icons.Material.Filled.Public,
+            "PLUGINS.MD" => Icons.Material.Filled.Extension,
+            "ARCHITECTURE.MD" => Icons.Material.Filled.AccountTree,
+            "INSTALLER_AND_UPDATES.MD" => Icons.Material.Filled.SystemUpdate,
+            _ => Icons.Material.Filled.Description
+        };
+    }
+
+    private static int GetSortWeight(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => 1,
+            "LORA_LIBRARY_BROWSER.MD" => 2,
+            "TRAINING_WIZARD.MD" => 3,
+            "HISTORY_AND_VAULT.MD" => 4,
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => 5,
+            "AMD_ROCM_SETUP.MD" => 6,
+            "REMOTE_TRAINING.MD" => 7,
+            "PLUGINS.MD" => 8,
+            "ARCHITECTURE.MD" => 9,
+            "INSTALLER_AND_UPDATES.MD" => 10,
+            _ => 99
+        };
+    }
+
+    private static string ConvertMarkdownToHtml(string markdown) {
+        if (string.IsNullOrWhiteSpace(markdown)) {
+            return string.Empty;
+        }
+
+        var lines = markdown.Replace("\r\n", "\n").Split('\n');
+        var sb = new StringBuilder();
+        bool inCodeBlock = false;
+        string codeLang = string.Empty;
+        bool inList = false;
+
+        foreach (var rawLine in lines) {
+            string line = rawLine;
+
+            // Fenced code blocks
+            if (line.TrimStart().StartsWith("```")) {
+                if (!inCodeBlock) {
+                    inCodeBlock = true;
+                    codeLang = line.TrimStart().Substring(3).Trim();
+                    sb.Append("<pre style='background: #11111b; border: 1px solid #313244; padding: 12px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 0.88rem;'><code>");
+                } else {
+                    inCodeBlock = false;
+                    sb.Append("</code></pre>\n");
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                sb.Append(System.Net.WebUtility.HtmlEncode(line)).Append('\n');
+                continue;
+            }
+
+            string trimmed = line.Trim();
+
+            // Headings
+            if (trimmed.StartsWith("### ")) {
+                CloseList(sb, ref inList);
+                sb.Append("<h3 style='margin-top: 1.2rem; margin-bottom: 0.5rem; font-weight: 700; color: var(--text-primary); font-size: 1.15rem;'>")
+                  .Append(FormatInline(trimmed[4..]))
+                  .Append("</h3>\n");
+                continue;
+            }
+            if (trimmed.StartsWith("## ")) {
+                CloseList(sb, ref inList);
+                sb.Append("<h2 style='margin-top: 1.6rem; margin-bottom: 0.6rem; font-weight: 700; color: var(--accent, #cba6f7); font-size: 1.35rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px;'>")
+                  .Append(FormatInline(trimmed[3..]))
+                  .Append("</h2>\n");
+                continue;
+            }
+            if (trimmed.StartsWith("# ")) {
+                CloseList(sb, ref inList);
+                sb.Append("<h1 style='margin-top: 0.8rem; margin-bottom: 0.8rem; font-weight: 800; color: var(--accent, #cba6f7); font-size: 1.6rem;'>")
+                  .Append(FormatInline(trimmed[2..]))
+                  .Append("</h1>\n");
+                continue;
+            }
+
+            // Horizontal rule
+            if (trimmed == "---" || trimmed == "***" || trimmed == "___") {
+                CloseList(sb, ref inList);
+                sb.Append("<hr style='border: 0; border-top: 1px solid var(--border-dark, #313244); margin: 1.5rem 0;' />\n");
+                continue;
+            }
+
+            // Callout alerts (GitHub style: > [!NOTE], etc.)
+            if (trimmed.StartsWith("> [!")) {
+                CloseList(sb, ref inList);
+                string alertType = trimmed[4..trimmed.IndexOf(']')].ToUpperInvariant();
+                sb.Append("<div class='pa-3 my-2' style='background: rgba(137, 180, 250, 0.08); border-left: 4px solid var(--accent, #cba6f7); border-radius: 4px;'><b>")
+                  .Append(alertType)
+                  .Append(":</b> ");
+                continue;
+            }
+            if (trimmed.StartsWith("> ")) {
+                sb.Append(FormatInline(trimmed[2..])).Append("</div>\n");
+                continue;
+            }
+
+            // Unordered list items
+            if (trimmed.StartsWith("- ") || trimmed.StartsWith("* ")) {
+                if (!inList) {
+                    inList = true;
+                    sb.Append("<ul style='padding-left: 1.5rem; margin-bottom: 0.8rem;'>\n");
+                }
+                sb.Append("<li style='margin-bottom: 4px;'>").Append(FormatInline(trimmed[2..])).Append("</li>\n");
+                continue;
+            }
+
+            // Numbered list items
+            var numMatch = Regex.Match(trimmed, @"^(\d+)\.\s+(.*)$");
+            if (numMatch.Success) {
+                if (!inList) {
+                    inList = true;
+                    sb.Append("<ol style='padding-left: 1.5rem; margin-bottom: 0.8rem;'>\n");
+                }
+                sb.Append("<li style='margin-bottom: 4px;'>").Append(FormatInline(numMatch.Groups[2].Value)).Append("</li>\n");
+                continue;
+            }
+
+            // Blank line
+            if (string.IsNullOrWhiteSpace(trimmed)) {
+                CloseList(sb, ref inList);
+                continue;
+            }
+
+            // Regular paragraph
+            CloseList(sb, ref inList);
+            sb.Append("<p style='margin-bottom: 0.8rem;'>").Append(FormatInline(trimmed)).Append("</p>\n");
+        }
+
+        CloseList(sb, ref inList);
+        return sb.ToString();
+    }
+
+    private static void CloseList(StringBuilder sb, ref bool inList) {
+        if (inList) {
+            inList = false;
+            sb.Append("</ul>\n");
+        }
+    }
+
+    private static string FormatInline(string text) {
+        if (string.IsNullOrEmpty(text)) {
+            return string.Empty;
+        }
+
+        string result = System.Net.WebUtility.HtmlEncode(text);
+
+        // Bold (**text** or __text__)
+        result = Regex.Replace(result, @"\*\*(.+?)\*\*", "<strong style='color: var(--text-primary); font-weight: 700;'>$1</strong>");
+        result = Regex.Replace(result, @"\b__(.+?)__\b", "<strong style='color: var(--text-primary); font-weight: 700;'>$1</strong>");
+
+        // Inline code (`code`)
+        result = Regex.Replace(result, @"`([^`]+)`", "<code style='background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.88em; color: var(--accent, #cba6f7);'>$1</code>");
+
+        // Markdown links [text](url)
+        result = Regex.Replace(result, @"\[([^\]]+)\]\(([^)]+)\)", "<span style='color: var(--accent, #cba6f7); text-decoration: underline;'>$1</span>");
+
+        return result;
+    }
+}
