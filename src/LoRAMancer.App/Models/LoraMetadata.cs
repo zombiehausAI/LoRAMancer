@@ -25,6 +25,12 @@ public sealed class LoraMetadata {
     public CivitaiModelVersionInfo? CivitaiInfo { get; set; }
     public List<string> TrainedWords { get; set; } = new();
 
+    // User Customization & Persistence
+    public bool IsFavorite { get; set; }
+    public string? UserBaseModel { get; set; }
+    public DateTime? LastModifiedUtc { get; set; }
+
+    public string EffectiveBaseModel => !string.IsNullOrWhiteSpace(UserBaseModel) ? UserBaseModel : BaseModel;
     public string FormattedSize => (FileSizeBytes / (1024.0 * 1024.0)).ToString("0.0") + " MB";
 }
 
