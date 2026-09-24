@@ -16,7 +16,7 @@
     <div>
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Library & Visual Browser</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Browse local models with embedded/Civitai thumbnails and right-click to train using donor recipes
+            Instant SQLite-backed model library with quick favorites, base model assignment, and Civitai metadata
         </MudText>
     </div>
     <div class="d-flex align-center flex-wrap gap-2">
@@ -26,6 +26,19 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
             Add File...
         </MudButton>
+        
+        <MudMenu Label="Rescan / Sync" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(string.IsNullOrWhiteSpace(LibraryService.RootFolder) || LibraryService.IsScanning)">
+            <MudMenuItem Icon="@Icons.Material.Filled.Sync" OnClick="RescanDeltaAsync">
+                Rescan Library (Fast Delta)
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.FolderZip" OnClick="RescanCurrentFolderAsync">
+                Rescan Current Folder
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.RestartAlt" OnClick="ForceFullRescanAsync">
+                Force Full Re-index
+            </MudMenuItem>
+        </MudMenu>
+
         @if (LibraryService.Items.Count > 0) {
             <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="_isEnrichingAll" OnClick="EnrichAllCivitaiAsync">
                 @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{LibraryService.Items.Count})..." : "Fetch Civitai Info")
@@ -45,8 +58,9 @@
                 <MudTextField @bind-Value="SearchQuery" Placeholder="Search by file name, model title, trigger word, or path..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Library" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
                     <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
+                    <MudSelectItem Value="@("favorites")">❤️ Favorites Only</MudSelectItem>
                     <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
                     <MudSelectItem Value="@("SDXL")">SDXL / Pony / Illustrious</MudSelectItem>
                     <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
@@ -161,11 +175,19 @@
             <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
             <MudText Typo="Typo.h6" Style="color: var(--text-primary);">No LoRAs found</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-                @(string.IsNullOrWhiteSpace(LibraryService.RootFolder) ? "Click \"Browse Folder...\" to point to your LoRA storage directory." : "No models or subfolders found in this directory.")
+                @(string.IsNullOrWhiteSpace(LibraryService.RootFolder) 
+                    ? "Click \"Browse Folder...\" to point to your LoRA storage directory." 
+                    : (LibraryService.Items.Count == 0 
+                        ? "Your library database is empty. Click \"Rescan / Sync\" to index your local LoRAs into SQLite." 
+                        : "No models or subfolders match the current filter."))
             </MudText>
             @if (string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
                     Select LoRA Folder
+                </MudButton>
+            } else if (LibraryService.Items.Count == 0) {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" OnClick="RescanDeltaAsync">
+                    Scan Library Now
                 </MudButton>
             }
         </MudCard>
@@ -186,7 +208,9 @@
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.LoraCount LoRA@((sub.LoraCount == 1 ? "" : "s"))</MudText>
                                 </div>
                             </div>
-                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Secondary" />
+                            <MudTooltip Text="Rescan Subfolder">
+                                <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Color="Color.Tertiary" OnClick="@((e) => RescanSubfolder(sub.FullPath))" />
+                            </MudTooltip>
                         </div>
                         <div class="d-flex align-center justify-space-between mt-3">
                             <MudText Typo="Typo.caption" Style="color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">
@@ -220,11 +244,36 @@
                             </div>
                         }
 
-                        <!-- Base Model Overlay Badge -->
-                        <div style="position: absolute; top: 10px; left: 10px;">
-                            <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(lora.BaseModel)" Variant="Variant.Filled" Style="font-weight: 600; font-size: 0.7rem;">
-                                @lora.BaseModel
-                            </MudChip>
+                        <!-- Base Model Overlay Selector Badge -->
+                        <div style="position: absolute; top: 10px; left: 10px; z-index: 2;">
+                            <MudMenu Dense="true" Size="Size.Small">
+                                <ActivatorContent>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(lora.EffectiveBaseModel)" Variant="Variant.Filled" Style="font-weight: 600; font-size: 0.7rem; cursor: pointer;">
+                                        @lora.EffectiveBaseModel
+                                    </MudChip>
+                                </ActivatorContent>
+                                <ChildContent>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "FLUX.1"))">FLUX.1</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "SDXL"))">SDXL</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Pony"))">Pony</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Illustrious"))">Illustrious</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Chroma"))">Chroma</MudMenuItem>
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "SD 1.5"))">SD 1.5</MudMenuItem>
+                                    <MudDivider />
+                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, null))">Reset to Auto (@lora.BaseModel)</MudMenuItem>
+                                </ChildContent>
+                            </MudMenu>
+                        </div>
+
+                        <!-- Favorite Toggle Button -->
+                        <div style="position: absolute; top: 8px; right: 8px; z-index: 2;">
+                            <MudTooltip Text="@(lora.IsFavorite ? "Remove from Favorites" : "Mark as Favorite")">
+                                <MudIconButton Icon="@(lora.IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)" 
+                                               Color="@(lora.IsFavorite ? Color.Error : Color.Default)" 
+                                               Size="Size.Small" 
+                                               Style="@(lora.IsFavorite ? "background: rgba(0,0,0,0.5);" : "background: rgba(0,0,0,0.3);")"
+                                               OnClick="@(() => ToggleFavoriteAsync(lora))" />
+                            </MudTooltip>
                         </div>
 
                         <!-- Size Badge -->
@@ -284,6 +333,9 @@
                             Use Settings
                         </MudButton>
                         <div class="d-flex gap-1">
+                            <MudTooltip Text="Refresh from Disk">
+                                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Color="Color.Info" OnClick="@(() => RefreshLoraAsync(lora))" />
+                            </MudTooltip>
                             <MudTooltip Text="Inspect Header">
                                 <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => InspectLora(lora))" />
                             </MudTooltip>
@@ -328,6 +380,7 @@
 
     <MudTable Items="_filteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" RowsPerPage="25" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <HeaderContent>
+            <MudTh Style="width: 48px;">Fav</MudTh>
             <MudTh>File Name</MudTh>
             <MudTh>Base Model</MudTh>
             <MudTh>Rank (Dim)</MudTh>
@@ -338,6 +391,12 @@
             <MudTh Style="text-align: right;">Actions</MudTh>
         </HeaderContent>
         <RowTemplate>
+            <MudTd DataLabel="Fav">
+                <MudIconButton Icon="@(context.IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)" 
+                               Color="@(context.IsFavorite ? Color.Error : Color.Default)" 
+                               Size="Size.Small" 
+                               OnClick="@(() => ToggleFavoriteAsync(context))" />
+            </MudTd>
             <MudTd DataLabel="File Name">
                 <div class="d-flex align-center">
                     <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
@@ -348,7 +407,23 @@
                 </div>
             </MudTd>
             <MudTd DataLabel="Base Model">
-                <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(context.BaseModel)" Variant="Variant.Outlined">@context.BaseModel</MudChip>
+                <MudMenu Dense="true" Size="Size.Small">
+                    <ActivatorContent>
+                        <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(context.EffectiveBaseModel)" Variant="Variant.Outlined" Style="cursor: pointer;">
+                            @context.EffectiveBaseModel
+                        </MudChip>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "FLUX.1"))">FLUX.1</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "SDXL"))">SDXL</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Pony"))">Pony</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Illustrious"))">Illustrious</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Chroma"))">Chroma</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "SD 1.5"))">SD 1.5</MudMenuItem>
+                        <MudDivider />
+                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, null))">Reset to Auto (@context.BaseModel)</MudMenuItem>
+                    </ChildContent>
+                </MudMenu>
             </MudTd>
             <MudTd DataLabel="Rank (Dim)">@(context.NetworkDim?.ToString() ?? "-")</MudTd>
             <MudTd DataLabel="Alpha">@(context.NetworkAlpha?.ToString() ?? "-")</MudTd>
@@ -359,6 +434,9 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
                     Use Settings
                 </MudButton>
+                <MudTooltip Text="Refresh from Disk">
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Info" Size="Size.Small" OnClick="@(() => RefreshLoraAsync(context))" />
+                </MudTooltip>
                 <MudTooltip Text="Inspect Metadata">
                     <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => InspectLora(context))" />
                 </MudTooltip>
@@ -471,9 +549,14 @@
                     }
                 }
 
-                // Architecture matching
-                if (!string.Equals(arch, "all", StringComparison.OrdinalIgnoreCase)) {
-                    if (string.IsNullOrWhiteSpace(l.BaseModel) || !l.BaseModel.Contains(arch, StringComparison.OrdinalIgnoreCase)) {
+                // Architecture or Favorite matching
+                if (string.Equals(arch, "favorites", StringComparison.OrdinalIgnoreCase)) {
+                    if (!l.IsFavorite) {
+                        return false;
+                    }
+                } else if (!string.Equals(arch, "all", StringComparison.OrdinalIgnoreCase)) {
+                    string effective = l.EffectiveBaseModel;
+                    if (string.IsNullOrWhiteSpace(effective) || !effective.Contains(arch, StringComparison.OrdinalIgnoreCase)) {
                         return false;
                     }
                 }
@@ -517,6 +600,55 @@
     private void OnPageChanged(int page) {
         _currentPage = page;
         StateHasChanged();
+    }
+
+    private async Task ToggleFavoriteAsync(LoraMetadata lora) {
+        await LibraryService.ToggleFavoriteAsync(lora);
+        UpdateFilteredList();
+        StateHasChanged();
+    }
+
+    private async Task SetBaseModelAsync(LoraMetadata lora, string? baseModel) {
+        await LibraryService.SetUserBaseModelAsync(lora, baseModel);
+        UpdateFilteredList();
+        Snackbar.Add(baseModel != null ? $"Assigned '{baseModel}' to {lora.FileName}" : $"Reset {lora.FileName} to detected base model", Severity.Info);
+        StateHasChanged();
+    }
+
+    private async Task RefreshLoraAsync(LoraMetadata lora) {
+        await LibraryService.RefreshSingleLoraAsync(lora);
+        UpdateFilteredList();
+        Snackbar.Add($"Refreshed {lora.FileName}", Severity.Success);
+        StateHasChanged();
+    }
+
+    private void RescanDeltaAsync() {
+        if (!string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
+            LibraryService.StartScan(LibraryService.RootFolder, forceClear: false);
+            Snackbar.Add("Rescanning library for new or modified models...", Severity.Info);
+        }
+    }
+
+    private void RescanCurrentFolderAsync() {
+        string target = !string.IsNullOrWhiteSpace(LibraryService.CurrentFolder) ? LibraryService.CurrentFolder : LibraryService.RootFolder;
+        if (!string.IsNullOrWhiteSpace(target)) {
+            LibraryService.StartScan(target, forceClear: false);
+            Snackbar.Add($"Rescanning {Path.GetFileName(target)}...", Severity.Info);
+        }
+    }
+
+    private void ForceFullRescanAsync() {
+        if (!string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
+            LibraryService.StartScan(LibraryService.RootFolder, forceClear: true);
+            Snackbar.Add("Initiated full library re-index...", Severity.Info);
+        }
+    }
+
+    private void RescanSubfolder(string subfolderPath) {
+        if (Directory.Exists(subfolderPath)) {
+            LibraryService.StartScan(subfolderPath, forceClear: false);
+            Snackbar.Add($"Rescanning {Path.GetFileName(subfolderPath)}...", Severity.Info);
+        }
     }
 
     private List<CrumbItem> GetBreadcrumbs() {
@@ -608,9 +740,9 @@
         if (!string.IsNullOrEmpty(folder)) {
             _showAllFlat = false;
             _currentPage = 1;
-            LibraryService.StartScan(folder, forceClear: true);
+            LibraryService.StartScan(folder, forceClear: false);
             UpdateFilteredList();
-            Snackbar.Add($"Scanning {Path.GetFileName(folder)} in background...", Severity.Info);
+            Snackbar.Add($"Indexing {Path.GetFileName(folder)} in background...", Severity.Info);
         }
     }
 
@@ -799,7 +931,7 @@
         var dialog = await DialogService.ShowAsync<LoraUpdaterDialog>("Lora Updater", parameters, options);
         var result = await dialog.Result;
         if (result != null && !result.Canceled && !string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
-            LibraryService.StartScan(LibraryService.RootFolder, forceClear: true);
+            LibraryService.StartScan(LibraryService.RootFolder, forceClear: false);
         }
     }
 }
