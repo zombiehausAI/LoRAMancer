@@ -49,7 +49,11 @@
         @if (!_ollamaReachable && !_isCheckingOllama) {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="font-size: 0.8rem;">
                 <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Class="mr-1" />
-                Could not connect to Ollama at <code>@_ollamaUrl</code>. Ensure Ollama is running or verify your network address/token.
+                @if (!string.IsNullOrEmpty(_errorMessage)) {
+                    <span>@_errorMessage</span>
+                } else {
+                    <span>Could not connect to Ollama at <code>@_ollamaUrl</code>. Ensure Ollama is running or verify your network address/token.</span>
+                }
             </MudAlert>
         }
 
@@ -183,6 +187,7 @@
 
     private bool _isCheckingOllama = true;
     private bool _ollamaReachable = false;
+    private string _errorMessage = string.Empty;
     private readonly List<string> _visionModels = new();
 
     private bool _isProcessing = false;
@@ -207,6 +212,7 @@
 
     private async Task CheckOllamaStatusAsync() {
         _isCheckingOllama = true;
+        _errorMessage = string.Empty;
         StateHasChanged();
 
         try {
@@ -215,11 +221,21 @@
                 ["api_key"] = _apiKey.Trim()
             });
 
+            if (!result.Success) {
+                _ollamaReachable = false;
+                _errorMessage = result.Message;
+                return;
+            }
+
             string dataStr = result.Data?.ToString() ?? string.Empty;
-            if (result.Success && !string.IsNullOrEmpty(dataStr)) {
+            if (!string.IsNullOrEmpty(dataStr)) {
                 using JsonDocument doc = JsonDocument.Parse(dataStr);
                 JsonElement root = doc.RootElement;
                 _ollamaReachable = root.TryGetProperty("reachable", out var reachElem) && reachElem.GetBoolean();
+
+                if (!_ollamaReachable && root.TryGetProperty("error", out var errElem)) {
+                    _errorMessage = errElem.GetString() ?? string.Empty;
+                }
 
                 _visionModels.Clear();
                 if (root.TryGetProperty("vision_models", out var vElem) && vElem.ValueKind == JsonValueKind.Array) {
@@ -238,8 +254,9 @@
                     }
                 }
             }
-        } catch {
+        } catch (Exception ex) {
             _ollamaReachable = false;
+            _errorMessage = ex.Message;
         } finally {
             _isCheckingOllama = false;
             StateHasChanged();

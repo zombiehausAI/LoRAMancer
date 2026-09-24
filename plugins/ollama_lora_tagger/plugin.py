@@ -37,38 +37,41 @@ DEFAULT_NATURAL_PROMPT = (
 
 def ping_ollama(url: str = "http://localhost:11434", api_key: str = "") -> dict:
     url = url.rstrip("/")
-    try:
-        headers = {"User-Agent": "LoRAMancer-Tagger/1.0"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        req = urllib.request.Request(f"{url}/api/tags", headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode("utf-8"))
-                models = [m.get("name", "") for m in data.get("models", [])]
-                vision_models = [
-                    m for m in models if any(hint in m.lower() for hint in VISION_MODEL_HINTS)
-                ]
-                return {
-                    "reachable": True,
-                    "url": url,
-                    "all_models": models,
-                    "vision_models": vision_models,
-                    "default_model": vision_models[0] if vision_models else (models[0] if models else "llama3.2-vision")
-                }
-    except Exception as e:
-        return {
-            "reachable": False,
-            "url": url,
-            "error": str(e),
-            "all_models": [],
-            "vision_models": [],
-            "default_model": "llama3.2-vision"
-        }
+    candidates = [url]
+    if "localhost" in url:
+        candidates.append(url.replace("localhost", "127.0.0.1"))
+    elif "127.0.0.1" in url:
+        candidates.append(url.replace("127.0.0.1", "localhost"))
+
+    last_err = ""
+    for candidate in candidates:
+        try:
+            headers = {"User-Agent": "LoRAMancer-Tagger/1.0"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            req = urllib.request.Request(f"{candidate}/api/tags", headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    models = [m.get("name", "") for m in data.get("models", [])]
+                    vision_models = [
+                        m for m in models if any(hint in m.lower() for hint in VISION_MODEL_HINTS)
+                    ]
+                    return {
+                        "reachable": True,
+                        "url": candidate,
+                        "all_models": models,
+                        "vision_models": vision_models,
+                        "default_model": vision_models[0] if vision_models else (models[0] if models else "llama3.2-vision")
+                    }
+        except Exception as e:
+            last_err = str(e)
+            continue
+
     return {
         "reachable": False,
         "url": url,
-        "error": "Unknown connection state",
+        "error": last_err or "Unknown connection state",
         "all_models": [],
         "vision_models": [],
         "default_model": "llama3.2-vision"
@@ -83,9 +86,13 @@ def query_ollama_vision(
     api_key: str = "",
     timeout: int = 120
 ) -> str:
-    url = f"{ollama_url.rstrip('/')}/api/generate"
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    candidates = [ollama_url.rstrip("/")]
+    if "localhost" in ollama_url:
+        candidates.append(ollama_url.rstrip("/").replace("localhost", "127.0.0.1"))
+    elif "127.0.0.1" in ollama_url:
+        candidates.append(ollama_url.rstrip("/").replace("127.0.0.1", "localhost"))
 
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
     payload = {
         "model": model,
         "prompt": prompt,
@@ -96,24 +103,27 @@ def query_ollama_vision(
             "num_predict": 256
         }
     }
-
     req_data = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "User-Agent": "LoRAMancer-Tagger/1.0"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    req = urllib.request.Request(
-        url,
-        data=req_data,
-        headers=headers
-    )
+    last_ex = None
+    for cand in candidates:
+        try:
+            url = f"{cand}/api/generate"
+            req = urllib.request.Request(url, data=req_data, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    result = json.loads(resp.read().decode("utf-8"))
+                    return result.get("response", "").strip()
+                else:
+                    raise RuntimeError(f"Ollama returned HTTP {resp.status}")
+        except Exception as ex:
+            last_ex = ex
+            continue
 
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        if resp.status == 200:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("response", "").strip()
-        else:
-            raise RuntimeError(f"Ollama returned HTTP {resp.status}")
+    raise last_ex or RuntimeError("Failed to query Ollama vision endpoint")
 
 
 def sanitize_and_format_caption(
@@ -334,13 +344,22 @@ def main():
     parser = argparse.ArgumentParser(description="Ollama Vision LoRA Tagger Plugin")
     parser.add_argument("--cmd", type=str, required=True, help="Command to execute")
     parser.add_argument("--data", type=str, default="{}", help="JSON payload")
+    parser.add_argument("--data-file", type=str, default="", help="Path to JSON payload file")
 
     args = parser.parse_args()
 
-    try:
-        data = json.loads(args.data)
-    except Exception:
-        data = {}
+    data = {}
+    if args.data_file and os.path.isfile(args.data_file):
+        try:
+            with open(args.data_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    elif args.data:
+        try:
+            data = json.loads(args.data)
+        except Exception:
+            data = {}
 
     api_key = data.get("api_key", "").strip()
     ollama_url = data.get("ollama_url", "http://localhost:11434").strip()
