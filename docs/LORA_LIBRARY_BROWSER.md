@@ -38,11 +38,12 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
   - `<model_name>.jpg`
   - `<model_name>.preview.jpg`
   - `<model_name>.webp`
-- **Civitai Token & Cloudflare Anti-Bot Compatibility**:
-  - If a model does not have a local thumbnail, clicking **"Find on Civitai"** (or **"Fetch Civitai Info"** in bulk) hashes the file with SHA256 and queries the Civitai API (`/api/v1/model-versions/by-hash/{hash}`).
-  - **Civitai API Key Support**: If configured under **Settings** (`CivitaiApiKey`), your API token is automatically supplied both in the HTTP `Authorization: Bearer <key>` header and as the `?token=<key>` query parameter. This enables fetching metadata and downloading thumbnails for private, early-access, or member-only models.
-  - **Cloudflare Bypass**: HTTP requests specify standard browser `User-Agent` headers to prevent HTTP 403 Forbidden errors when fetching data from Civitai CDN endpoints.
-  - Retrieved metadata includes the official model title, version name, high-resolution preview image (cached locally), and trained trigger words with a 1-click **Copy Trigger** button.
+- **Non-Blocking Background Civitai Enrichment**:
+  - Bulk and single-item Civitai metadata fetching execute entirely on background worker threads via `LoraLibraryService`, allowing full app usage, folder navigation, configuration cloning, and training wizard workflows while metadata is gathered.
+  - A real-time background status banner displays the current file being inspected, completed count, and progress bar with a 1-click **"Stop"** button.
+  - Individual LoRA cards and table rows feature direct 1-click **"Fetch Civitai Info"** actions that perform non-blocking lookups and push live desktop notifications upon identification.
+  - **Civitai API Key & Cloudflare Bypass**: Automated fallback between HTTP `Authorization: Bearer <key>` headers and `?token=<key>` query parameters with desktop browser `User-Agent` emulation, enabling lookup of private, early-access, or member-only models.
+  - **Local & SQLite Caching**: All retrieved Civitai model versions, trigger tags, descriptions, download URLs, and companion thumbnails are persisted to `~/.LoRAMancer/loras.db` and cached to `~/.LoRAMancer/lora_cache/`.
 - **Persistent SQLite Library (`~/.LoRAMancer/loras.db`)**: All indexed LoRA models, computed hashes, SafeTensors metadata, Civitai payloads, user favorites, and base model overrides are stored in an ACID SQLite database. When navigating to the LoRA Manager, the gallery loads instantly (0ms) from SQLite with zero background scan overhead.
 - **On-Demand Differential Rescan**:
   - Scanning is strictly user-initiated via the **"Rescan / Sync"** menu or folder refresh buttons.
