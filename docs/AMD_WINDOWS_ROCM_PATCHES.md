@@ -220,3 +220,21 @@ Triton is a Linux-native compiler that has limited, experimental support on Wind
 - **Parameters**: ~8.9B (~17–18 GB base model weights)
 - **First-run download**: Downloaded to HuggingFace hub cache (`~/.cache/huggingface/hub/models--lodestones--Chroma1-HD/`).
 - **Telemetry note**: Because weights are ~17 GB, download may take several minutes before step telemetry starts. LoRAMancer outputs diagnostic notices to inform the user that the process is downloading and not hung.
+
+---
+
+## 8. Chroma Model Path: UI Label vs. Local `.safetensors`
+
+### The Problem
+```text
+ValueError: Model path ChromaHD-1 does not exist
+```
+
+### The Cause
+1. In AI-Toolkit, `chroma_model.py` loads weights directly using `safetensors.torch.load_file(model_path)` rather than a Hugging Face Diffusers pipeline. It checks `if not os.path.exists(model_path): raise ValueError(...)`.
+2. The UI dropdown previously emitted the raw display name (`ChromaHD-1`) into `name_or_path`.
+
+### The Solution
+1. `AiToolkitConfigBuilder.ResolveModelPath` maps display names back to canonical paths.
+2. The Training Wizard UI includes a dedicated **Custom Base Checkpoint File** browser to select local `.safetensors` files directly.
+3. Both the **History & Vault** cards and the **Training Console** failure banner include an **Edit in Wizard** button to reopen any failed or past training run with all hyperparameters and paths pre-filled for instant modification.

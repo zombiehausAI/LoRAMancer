@@ -30,6 +30,10 @@
             <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
                 <b>Cloned Recipe:</b> Using hyperparameters from donor <code>@DonorLora.FileName</code> (Rank: @_networkDim, Alpha: @_networkAlpha, LR: @_learningRate.ToString("0.#####e+00")). Please provide your unique run name, dataset, and trigger word below.
             </MudAlert>
+        } else if (HistoryRecord != null) {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(249, 226, 175, 0.15); color: #f9e2af;">
+                <b>Editing Training Run:</b> Populated from history record <code>@HistoryRecord.Name</code> (Status: @HistoryRecord.Status). You can adjust any parameters, local model paths, or dataset options and re-run.
+            </MudAlert>
         }
 
         <!-- Step 1: Subject Type & Architecture Selection -->
@@ -73,6 +77,12 @@
                 <MudTooltip Text="The activation keyword prompt to recall your trained subject (e.g. 'ohwx woman', 'sk_artstyle').">
                     <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" HelperText="Keyword to activate subject" />
                 </MudTooltip>
+            </MudItem>
+            <MudItem xs="12">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_customBaseModelPath" Label="Custom Base Checkpoint File (Optional - required for standalone models like Chroma)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. C:\AI\Models\Chroma1-HD.safetensors or leave blank for default HuggingFace hub" FullWidth="true" HelperText="Direct path to .safetensors base model" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickCustomBaseModelAsync">Browse</MudButton>
+                </div>
             </MudItem>
         </MudGrid>
 
@@ -240,9 +250,13 @@
     [Parameter]
     public LoraMetadata? DonorLora { get; set; }
 
+    [Parameter]
+    public LoraHistoryRecord? HistoryRecord { get; set; }
+
     private IReadOnlyList<SubjectPreset> _presets = Array.Empty<SubjectPreset>();
     private TrainingSubjectType _selectedSubject = TrainingSubjectType.Character;
     private string _targetBaseModel = "FLUX.1 Dev";
+    private string _customBaseModelPath = string.Empty;
     private string _runName = "my_lora_run";
     private string _triggerWord = string.Empty;
     private string _datasetDirectory = string.Empty;
@@ -285,9 +299,65 @@
                 _epochs = DonorLora.Epochs.Value;
             }
             _runName = $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_fork";
+        } else if (HistoryRecord != null) {
+            _selectedSubject = TrainingSubjectType.Custom;
+            _isProMode = true;
+            _runName = HistoryRecord.Name;
+            _networkDim = HistoryRecord.Dim;
+            _networkAlpha = HistoryRecord.Alpha;
+            _learningRate = HistoryRecord.LearningRate;
+            _epochs = HistoryRecord.Epochs;
+            _triggerWord = HistoryRecord.TriggerWord;
+
+            var matchedArch = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
+                string.Equals(a.Family, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a.Id, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a.DisplayName, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase));
+            if (matchedArch != null) {
+                _targetBaseModel = matchedArch.DisplayName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(HistoryRecord.DatasetPath)) {
+                _datasetDirectory = HistoryRecord.DatasetPath;
+            }
+
+            if (!string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath)) {
+                _outputDirectory = Path.GetDirectoryName(HistoryRecord.ConfigYamlPath) ?? string.Empty;
+            }
+
+            if (HistoryRecord.SamplePrompts != null && HistoryRecord.SamplePrompts.Count > 0) {
+                _samplePrompt = HistoryRecord.SamplePrompts[0];
+            }
+
+            string yamlSource = HistoryRecord.ConfigYamlContent;
+            if (string.IsNullOrWhiteSpace(yamlSource) && !string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath) && File.Exists(HistoryRecord.ConfigYamlPath)) {
+                try {
+                    yamlSource = File.ReadAllText(HistoryRecord.ConfigYamlPath);
+                } catch { }
+            }
+
+            if (!string.IsNullOrWhiteSpace(yamlSource)) {
+                foreach (string line in yamlSource.Split('\n')) {
+                    string trimmed = line.Trim();
+                    if (trimmed.StartsWith("name_or_path:")) {
+                        string val = trimmed.Substring("name_or_path:".Length).Trim().Trim('"', '\'');
+                        if (File.Exists(val) || val.Contains('/') || val.Contains('\\')) {
+                            _customBaseModelPath = val;
+                        }
+                    }
+                }
+            }
         }
 
         RecalculateEstimates();
+    }
+
+    private async Task PickCustomBaseModelAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrEmpty(file)) {
+            _customBaseModelPath = file;
+            StateHasChanged();
+        }
     }
 
     private void SelectSubject(SubjectPreset preset) {
@@ -410,9 +480,10 @@
 
     private TrainingConfig BuildConfig() {
         string effectivePrompt = _samplePrompt.Replace("{trigger}", string.IsNullOrWhiteSpace(_triggerWord) ? "subject" : _triggerWord);
+        string modelTarget = !string.IsNullOrWhiteSpace(_customBaseModelPath) ? _customBaseModelPath.Trim() : _targetBaseModel;
         return new TrainingConfig {
             RunName = _runName,
-            TargetBaseModel = _targetBaseModel,
+            TargetBaseModel = modelTarget,
             DatasetDirectory = _datasetDirectory,
             OutputDirectory = _outputDirectory,
             TriggerWord = _triggerWord,

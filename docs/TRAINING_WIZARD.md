@@ -36,3 +36,13 @@ Prior to initiating training, the pre-flight advisor validates:
 2. **VRAM Safety**: Alerts if estimated memory usage approaches or exceeds physical VRAM, recommending disk latent caching.
 3. **Storage Buffer**: Confirms at least 10 GB of free disk space on the target output drive for weights, optimizer states, and latents.
 4. **Attention & Precision Guards**: Automatically mandates `sdpa` attention and `bf16` precision to prevent Windows ROCm driver panics or NaN loss spikes.
+
+## 5. Reopening & Editing Past or Failed Runs in Wizard
+
+Failed or past training runs can be reopened directly in the visual Training Wizard with one click:
+- **From Training Console**: When training encounters an error or fails, the failure banner displays an **Edit in Wizard** button alongside **Retry Training**, allowing instant adjustments.
+- **From History & Vault**: Every card on the `/history` page includes an **Edit in Wizard** action, pre-populating all hyperparameters, datasets, run names, trigger words, and custom checkpoint paths.
+
+## 6. Standalone & Custom Base Model Checkpoint Support
+
+While standard models (FLUX.1, SDXL, SD 1.5) download their pipeline from Hugging Face automatically, standalone models (such as **Chroma1-HD**) require a local `.safetensors` file. The Training Wizard includes a dedicated **Custom Base Checkpoint File** browser to select local model files directly from disk.

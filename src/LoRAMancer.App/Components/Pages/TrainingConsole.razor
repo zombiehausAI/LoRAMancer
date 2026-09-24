@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject SettingsService Settings
 @inject RemoteTrainingClientService RemoteClient
+@inject LoraHistoryService HistoryService
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -66,13 +67,18 @@
 
 @if (!TrainingRunner.IsRunning && TrainingRunner.CurrentProgress.Status == TrainingStatus.Failed) {
     <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-4">
-        <div class="d-flex align-center justify-space-between w-100">
+        <div class="d-flex align-center justify-space-between w-100 flex-wrap gap-2">
             <div>
-                <b>Training Failed:</b> The previous training run encountered an error or crashed. Click <b>Retry Training</b> to resubmit with the active configuration.
+                <b>Training Failed:</b> The previous training run encountered an error or crashed. Click <b>Edit in Wizard</b> to adjust parameters or model path, or <b>Retry Training</b> to resubmit.
             </div>
-            <MudButton Variant="Variant.Filled" Color="Color.Surface" Size="Size.Small" StartIcon="@Icons.Material.Filled.Replay" OnClick="RetryTrainingAsync">
-                Retry Training
-            </MudButton>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Outlined" Color="Color.Surface" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune" OnClick="EditFailedRunInWizardAsync">
+                    Edit in Wizard
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Surface" Size="Size.Small" StartIcon="@Icons.Material.Filled.Replay" OnClick="RetryTrainingAsync">
+                    Retry Training
+                </MudButton>
+            </div>
         </div>
     </MudAlert>
 }
@@ -325,6 +331,34 @@
             FullWidth = true
         };
         await DialogService.ShowAsync<TrainingWizardDialog>("New Training Wizard", options);
+    }
+
+    private async Task EditFailedRunInWizardAsync() {
+        LoraHistoryRecord? record = null;
+        if (!string.IsNullOrWhiteSpace(_configYamlPath)) {
+            var history = await HistoryService.GetHistoryAsync();
+            record = history.FirstOrDefault(h => string.Equals(h.ConfigYamlPath, _configYamlPath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (record == null && !string.IsNullOrWhiteSpace(_configYamlPath)) {
+            record = new LoraHistoryRecord {
+                Name = Path.GetFileNameWithoutExtension(_configYamlPath).Replace("_aitoolkit", string.Empty),
+                ConfigYamlPath = _configYamlPath,
+                Status = "Failed"
+            };
+        }
+
+        DialogParameters<TrainingWizardDialog> parameters = new();
+        if (record != null) {
+            parameters.Add(x => x.HistoryRecord, record);
+        }
+
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        };
+        await DialogService.ShowAsync<TrainingWizardDialog>("Edit Training Run in Wizard", parameters, options);
     }
 
     private static Color GetStatusColor(TrainingStatus status) => status switch {
