@@ -11,7 +11,7 @@
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Training Orchestrator & Live Console</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">Training Orchestrator & Live Console</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">Execute AI-Toolkit runs with live hardware acceleration telemetry and log streaming</MudText>
     </div>
     <div class="d-flex align-center flex-wrap gap-2">
@@ -60,7 +60,7 @@
 }
 
 <!-- Configuration Bar -->
-<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+<MudCard Elevation="1" Class="mb-4" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
             <MudItem xs="12" md="6">
@@ -82,7 +82,7 @@
 <!-- Metrics & Telemetry Grid -->
 <MudGrid Class="mb-4">
     <MudItem xs="6" sm="3">
-        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+        <MudCard Elevation="0" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); padding: 12px; border-radius: 8px;">
             <MudText Typo="Typo.caption" Color="Color.Secondary">Status</MudText>
             <div class="d-flex align-center mt-1">
                 <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(TrainingRunner.CurrentProgress.Status)">
@@ -92,25 +92,25 @@
         </MudCard>
     </MudItem>
     <MudItem xs="6" sm="3">
-        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+        <MudCard Elevation="0" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); padding: 12px; border-radius: 8px;">
             <MudText Typo="Typo.caption" Color="Color.Secondary">Step Progress</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: var(--accent-blue);">
                 @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
             </MudText>
         </MudCard>
     </MudItem>
     <MudItem xs="6" sm="3">
-        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+        <MudCard Elevation="0" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); padding: 12px; border-radius: 8px;">
             <MudText Typo="Typo.caption" Color="Color.Secondary">Current Loss</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #a6e3a1;">
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: var(--accent-green);">
                 @(TrainingRunner.CurrentProgress.CurrentLoss > 0 ? TrainingRunner.CurrentProgress.CurrentLoss.ToString("0.0000") : "-")
             </MudText>
         </MudCard>
     </MudItem>
     <MudItem xs="6" sm="3">
-        <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+        <MudCard Elevation="0" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); padding: 12px; border-radius: 8px;">
             <MudText Typo="Typo.caption" Color="Color.Secondary">Elapsed / ETA</MudText>
-            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: var(--accent-purple);">
                 @TrainingRunner.CurrentProgress.Elapsed.ToString(@"hh\:mm\:ss") / @TrainingRunner.CurrentProgress.EstimatedRemaining.ToString(@"hh\:mm\:ss")
             </MudText>
         </MudCard>

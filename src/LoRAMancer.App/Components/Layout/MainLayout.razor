@@ -16,6 +16,8 @@
         --bg-dark-overlay: @ThemeManager.CurrentTheme.Overlay;
         --border-dark: @ThemeManager.CurrentTheme.Border;
         --accent-purple: @ThemeManager.CurrentTheme.Primary;
+        --accent-blue: @ThemeManager.CurrentTheme.Secondary;
+        --accent-green: @ThemeManager.CurrentTheme.Tertiary;
         --text-primary: @ThemeManager.CurrentTheme.TextPrimary;
         --text-secondary: @ThemeManager.CurrentTheme.TextSecondary;
     }
@@ -23,10 +25,75 @@
         background-color: @ThemeManager.CurrentTheme.Background !important;
         color: @ThemeManager.CurrentTheme.TextPrimary !important;
     }
+
+    /* Global Dynamic Theming: Override hardcoded dark/Catppuccin color declarations */
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color: #181825"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color:#181825"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color: #11111b"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color:#11111b"] {
+        background-color: var(--bg-dark-surface) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color: #1e1e2e"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background-color:#1e1e2e"] {
+        background-color: var(--bg-dark-overlay) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background: linear-gradient(145deg, #1e1e2e, #181825)"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background:linear-gradient(145deg, #1e1e2e, #181825)"] {
+        background: var(--bg-dark-surface) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background: rgba(17, 17, 27"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="background:rgba(17, 17, 27"] {
+        background: var(--bg-dark-base) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border: 1px solid #313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border: 1px solid #45475a"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border: 1px dashed #313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border: 1px dashed #45475a"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border:1px solid #313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border:1px solid #45475a"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border:1px dashed #313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border:1px dashed #45475a"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border-color: #313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border-color:#313244"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="border-left: 1px solid #313244"] {
+        border-color: var(--border-dark) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color: #cdd6f4"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color:#cdd6f4"] {
+        color: var(--text-primary) !important;
+    }
+
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color: #a6adc8"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color:#a6adc8"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color: #6c7086"],
+    :not(.theme-preview-card):not(.theme-preview-card *)[style*="color:#6c7086"] {
+        color: var(--text-secondary) !important;
+    }
+
+    /* MudBlazor Paper, Card, Dialog, Drawer theme bindings */
+    .mud-card, .mud-paper {
+        background-color: var(--bg-dark-surface);
+        color: var(--text-primary);
+    }
+
+    .mud-dialog {
+        background-color: var(--bg-dark-surface) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-dark) !important;
+    }
+
+    .mud-input-outlined-border {
+        border-color: var(--border-dark) !important;
+    }
 </style>
 
 <MudLayout>
-    <MudAppBar Elevation="1" Dense="true" Class="px-2" Style="@($"background-color: {ThemeManager.CurrentTheme.AppbarBackground}; border-bottom: 1px solid {ThemeManager.CurrentTheme.Border}; padding-right: 14px;")">
+    <MudAppBar Elevation="1" Dense="true" Class="px-2" Style="@($"background-color: {ThemeManager.CurrentTheme.AppbarBackground}; color: {ThemeManager.CurrentTheme.TextPrimary}; border-bottom: 1px solid {ThemeManager.CurrentTheme.Border}; padding-right: 14px;")">
         <div class="d-flex align-center flex-shrink-0">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
             <img src="favicon.png" alt="LoRAMancer" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 10px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
@@ -38,7 +105,7 @@
 
         <MudSpacer />
 
-        <div class="d-flex align-center flex-shrink-0 gap-1">
+        <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
             @if (TrainingRunner.IsRunning) {
                 <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
                     Training Active: @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
@@ -64,7 +131,7 @@
         <NavMenu />
     </MudDrawer>
 
-    <MudMainContent Style="@($"background-color: {ThemeManager.CurrentTheme.Background}; min-height: 100vh; padding: 1.5rem;")">
+    <MudMainContent Style="@($"background-color: {ThemeManager.CurrentTheme.Background}; min-height: 100vh; padding-top: calc(var(--mud-appbar-height, 48px) + 1.25rem) !important; padding-left: 1.5rem; padding-right: 1.5rem; padding-bottom: 2rem;")">
         @Body
     </MudMainContent>
 </MudLayout>

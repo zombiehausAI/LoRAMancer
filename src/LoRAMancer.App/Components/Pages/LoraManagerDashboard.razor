@@ -12,7 +12,7 @@
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">LoRA Library & Visual Browser</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Library & Visual Browser</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             Browse local models with embedded/Civitai thumbnails and right-click to train using donor recipes
         </MudText>
@@ -36,7 +36,7 @@
 </div>
 
 <!-- Search, Filter & View Toggle Bar -->
-<MudCard Elevation="1" Class="mb-3" Style="background-color: #181825; border: 1px solid #313244;">
+<MudCard Elevation="1" Class="mb-3" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
             <MudItem xs="12" md="6">
@@ -66,7 +66,7 @@
 
 <!-- Subfolder Navigation & Breadcrumbs Bar -->
 @if (!string.IsNullOrWhiteSpace(_rootFolder)) {
-    <MudCard Elevation="1" Class="pa-2 px-3 mb-3 d-flex align-center justify-space-between flex-wrap gap-2" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <MudCard Elevation="1" Class="pa-2 px-3 mb-3 d-flex align-center justify-space-between flex-wrap gap-2" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <div class="d-flex align-center gap-1 flex-wrap">
             <MudTooltip Text="Up one level">
                 <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Color="Color.Primary" Disabled="@(string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase) || _showAllFlat)" OnClick="NavigateUp" />
@@ -147,17 +147,17 @@
 
 @if (FilteredLoras.Count == 0 && CurrentSubfolders.Count == 0) {
     @if (_isScanning) {
-        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudProgressCircular Size="Size.Large" Color="Color.Tertiary" Indeterminate="true" Class="mb-3" />
-            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">Scanning Directory in Background...</MudText>
+            <MudText Typo="Typo.h6" Style="color: var(--text-primary);">Scanning Directory in Background...</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
                 Reading model headers and local preview thumbnails. Discovered models will appear here in real time.
             </MudText>
         </MudCard>
     } else {
-        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs found</MudText>
+            <MudText Typo="Typo.h6" Style="color: var(--text-primary);">No LoRAs found</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
                 @(string.IsNullOrWhiteSpace(_rootFolder) ? "Click \"Browse Folder...\" to point to your LoRA storage directory." : "No models or subfolders found in this directory.")
             </MudText>
@@ -175,12 +175,12 @@
         @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
             @foreach (var sub in CurrentSubfolders) {
                 <MudItem xs="12" sm="6" md="4" lg="3">
-                    <MudCard Elevation="1" Style="background: linear-gradient(145deg, #1e1e2e, #181825); border: 1px solid #45475a; border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
+                    <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
                         <div class="d-flex align-center justify-space-between mb-2">
                             <div class="d-flex align-center gap-3">
                                 <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" Color="Color.Tertiary" />
                                 <div>
-                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4; line-height: 1.2;">@sub.Name</MudText>
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); line-height: 1.2;">@sub.Name</MudText>
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.LoraCount LoRA@((sub.LoraCount == 1 ? "" : "s"))</MudText>
                                 </div>
                             </div>
@@ -200,15 +200,15 @@
         <!-- LoRA Model Cards -->
         @foreach (var lora in FilteredLoras) {
             <MudItem xs="12" sm="6" md="4" lg="3">
-                <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
+                <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
                     <!-- Thumbnail Container -->
-                    <div style="position: relative; width: 100%; height: 220px; background-color: #11111b; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                    <div style="position: relative; width: 100%; height: 220px; background-color: var(--bg-dark-base); display: flex; align-items: center; justify-content: center; overflow: hidden;">
                         @if (!string.IsNullOrWhiteSpace(lora.ThumbnailPath) && File.Exists(lora.ThumbnailPath)) {
                             <img src="@GetImageSrc(lora.ThumbnailPath)" alt="@lora.FileName" style="width: 100%; height: 100%; object-fit: cover;" />
                         } else {
                             <div class="d-flex flex-column align-center justify-center p-4 text-center" style="width: 100%; height: 100%; background: linear-gradient(135deg, rgba(203,166,247,0.1), rgba(137,180,250,0.05));">
                                 <MudIcon Icon="@Icons.Material.Filled.Layers" Size="Size.Large" Color="Color.Secondary" Style="opacity: 0.4;" Class="mb-1" />
-                                <MudText Typo="Typo.caption" Style="color: #6c7086;">No Preview Thumbnail</MudText>
+                                <MudText Typo="Typo.caption" Style="color: var(--text-secondary);">No Preview Thumbnail</MudText>
                                 <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" OnClick="@(() => FetchSingleCivitaiAsync(lora))" Class="mt-1" Style="font-size: 0.7rem;">
                                     Find on Civitai
                                 </MudButton>
@@ -223,14 +223,14 @@
                         </div>
 
                         <!-- Size Badge -->
-                        <div style="position: absolute; bottom: 8px; right: 10px; background: rgba(17,17,27,0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: #cdd6f4;">
+                        <div style="position: absolute; bottom: 8px; right: 10px; background: var(--bg-dark-overlay); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: var(--text-primary);">
                             @lora.FormattedSize
                         </div>
                     </div>
 
                     <MudCardContent Class="py-3 px-3" Style="flex: 1;">
                         <MudTooltip Text="@lora.FileName">
-                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #fff; line-height: 1.2; word-break: break-all;">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary); line-height: 1.2; word-break: break-all;">
                                 @(lora.CivitaiInfo != null ? lora.CivitaiInfo.ModelName : lora.FileName)
                             </MudText>
                         </MudTooltip>
@@ -246,8 +246,8 @@
 
                         <!-- Trigger Word Badge -->
                         @if (GetPrimaryTrigger(lora) is string trigger && !string.IsNullOrWhiteSpace(trigger)) {
-                            <div class="d-flex align-center justify-space-between p-1 px-2 my-2" style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
-                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #cba6f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">
+                            <div class="d-flex align-center justify-space-between p-1 px-2 my-2" style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); border-radius: 6px;">
+                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-purple); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">
                                     @trigger
                                 </div>
                                 <MudTooltip Text="Copy trigger word">
@@ -258,23 +258,23 @@
 
                         <!-- Hyperparameters Quick Matrix -->
                         <div class="d-grid mt-2" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center;">
-                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
-                                <div style="font-size: 0.6rem; color: #a6adc8;">DIM/ALPHA</div>
-                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.NetworkDim?.ToString() ?? "-")/@(lora.NetworkAlpha?.ToString() ?? "-")</div>
+                            <div style="background-color: var(--bg-dark-base); padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: var(--text-secondary);">DIM/ALPHA</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: var(--text-primary);">@(lora.NetworkDim?.ToString() ?? "-")/@(lora.NetworkAlpha?.ToString() ?? "-")</div>
                             </div>
-                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
-                                <div style="font-size: 0.6rem; color: #a6adc8;">LR</div>
-                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.LearningRate?.ToString("0.e+0") ?? "-")</div>
+                            <div style="background-color: var(--bg-dark-base); padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: var(--text-secondary);">LR</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: var(--text-primary);">@(lora.LearningRate?.ToString("0.e+0") ?? "-")</div>
                             </div>
-                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
-                                <div style="font-size: 0.6rem; color: #a6adc8;">STEPS</div>
-                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.TotalSteps?.ToString() ?? "-")</div>
+                            <div style="background-color: var(--bg-dark-base); padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: var(--text-secondary);">STEPS</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: var(--text-primary);">@(lora.TotalSteps?.ToString() ?? "-")</div>
                             </div>
                         </div>
                     </MudCardContent>
 
                     <!-- Card Actions -->
-                    <MudCardActions Class="px-3 py-2 d-flex justify-space-between align-center" Style="border-top: 1px solid #313244;">
+                    <MudCardActions Class="px-3 py-2 d-flex justify-space-between align-center" Style="border-top: 1px solid var(--border-dark);">
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(lora))">
                             Use Settings
                         </MudButton>
@@ -293,7 +293,7 @@
     </MudGrid>
 
     @if (FilteredLoras.Count == 0 && CurrentSubfolders.Count > 0) {
-        <div class="pa-4 text-center mt-4" style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+        <div class="pa-4 text-center mt-4" style="background-color: var(--bg-dark-surface); border: 1px dashed var(--border-dark); border-radius: 8px;">
             <MudText Typo="Typo.body2" Color="Color.Secondary">
                 No direct LoRA files in this folder. Click any subfolder card above to view contained models.
             </MudText>
@@ -303,7 +303,7 @@
     <!-- Table View -->
     @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
         <div class="d-flex flex-wrap gap-2 mb-3 align-center">
-            <MudText Typo="Typo.body2" Style="color: #a6adc8; font-weight: 600;">Subfolders:</MudText>
+            <MudText Typo="Typo.body2" Style="color: var(--text-secondary); font-weight: 600;">Subfolders:</MudText>
             @foreach (var sub in CurrentSubfolders) {
                 <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
                     @sub.Name (@sub.LoraCount)
@@ -312,7 +312,7 @@
         </div>
     }
 
-    <MudTable Items="FilteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <MudTable Items="FilteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <HeaderContent>
             <MudTh>File Name</MudTh>
             <MudTh>Base Model</MudTh>

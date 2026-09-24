@@ -13,7 +13,7 @@
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">System Settings & Admin Console</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">System Settings & Admin Console</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">Configure GPU PyTorch wheels (AMD / NVIDIA / Intel), appearance themes, AI-Toolkit, and API keys</MudText>
     </div>
     <div class="d-flex gap-2 flex-wrap">
@@ -26,7 +26,7 @@
     </div>
 </div>
 
-<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+<MudTabs Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
     <!-- GPU & PyTorch Wheels Tab -->
     <MudTabPanel Text="GPU & PyTorch Wheels" Icon="@Icons.Material.Filled.Memory">
         <div class="px-4 pb-4">
@@ -34,7 +34,7 @@
                 LoRAMancer supports AMD, NVIDIA, and Intel GPUs. Each card profile defaults to optimal vendor wheels, with full support for custom wheel URLs and index repositories.
             </MudAlert>
 
-            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" Style="background: rgba(17, 17, 27, 0.6); border: 1px solid #313244; border-radius: 8px;">
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-3" Style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); border-radius: 8px;">
                 <!-- AMD Radeon (ROCm) Sub-Tab -->
                 <MudTabPanel Text="AMD Radeon (ROCm)" Icon="@Icons.Material.Filled.Memory">
                     <div class="pa-3">
@@ -567,7 +567,7 @@
                 @foreach (var theme in ThemeService.AvailableThemes) {
                     bool isActive = string.Equals(ThemeManager.CurrentThemeId, theme.Id, StringComparison.OrdinalIgnoreCase);
                     <MudItem xs="12" sm="6" md="4">
-                        <MudCard Elevation="isActive ? 4 : 1" Class="pa-3 h-100 d-flex flex-column justify-space-between" Style="@($"background-color: {theme.Surface}; border: {(isActive ? "2px solid " + theme.Primary : "1px solid " + theme.Border)}; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;")" @onclick="@(() => SelectTheme(theme.Id))">
+                        <MudCard Elevation="isActive ? 4 : 1" Class="theme-preview-card pa-3 h-100 d-flex flex-column justify-space-between" Style="@($"background-color: {theme.Surface}; border: {(isActive ? "2px solid " + theme.Primary : "1px solid " + theme.Border)}; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;")" @onclick="@(() => SelectTheme(theme.Id))">
                             <div>
                                 <div class="d-flex align-center justify-space-between mb-2">
                                     <MudText Typo="Typo.subtitle1" Style="@($"font-weight: 700; color: {theme.TextPrimary};")">

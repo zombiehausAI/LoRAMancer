@@ -178,15 +178,19 @@ public sealed class ThemeService {
                     Background = current.Background,
                     Surface = current.Surface,
                     AppbarBackground = current.AppbarBackground,
+                    AppbarText = current.TextPrimary,
                     DrawerBackground = current.DrawerBackground,
+                    DrawerIcon = current.Primary,
+                    DrawerText = current.TextPrimary,
                     TextPrimary = current.TextPrimary,
                     TextSecondary = current.TextSecondary,
                     ActionDefault = current.TextPrimary,
-                    DrawerIcon = current.Primary,
-                    DrawerText = current.TextPrimary,
                     Divider = current.Border,
                     LinesDefault = current.Border,
+                    LinesInputs = current.Border,
                     TableLines = current.Border,
+                    TableHover = "rgba(255, 255, 255, 0.04)",
+                    TableStriped = "rgba(255, 255, 255, 0.02)",
                     OverlayDark = "rgba(17, 17, 27, 0.8)"
                 }
             };
@@ -200,15 +204,19 @@ public sealed class ThemeService {
                 Background = current.Background,
                 Surface = current.Surface,
                 AppbarBackground = current.AppbarBackground,
+                AppbarText = current.TextPrimary,
                 DrawerBackground = current.DrawerBackground,
+                DrawerIcon = current.Primary,
+                DrawerText = current.TextPrimary,
                 TextPrimary = current.TextPrimary,
                 TextSecondary = current.TextSecondary,
                 ActionDefault = current.TextPrimary,
-                DrawerIcon = current.Primary,
-                DrawerText = current.TextPrimary,
                 Divider = current.Border,
                 LinesDefault = current.Border,
-                TableLines = current.Border
+                LinesInputs = current.Border,
+                TableLines = current.Border,
+                TableHover = "rgba(0, 0, 0, 0.04)",
+                TableStriped = "rgba(0, 0, 0, 0.02)"
             }
         };
     }
