@@ -1,48 +1,70 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
 @inject TrainingRunnerService TrainingRunner
+@inject ThemeService ThemeManager
+@implements IDisposable
 
-<MudThemeProvider IsDarkMode="true" Theme="_customTheme" />
+<MudThemeProvider IsDarkMode="@ThemeManager.CurrentTheme.IsDark" Theme="@ThemeManager.GetMudTheme()" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
+<style>
+    :root {
+        --bg-dark-base: @ThemeManager.CurrentTheme.Background;
+        --bg-dark-surface: @ThemeManager.CurrentTheme.Surface;
+        --bg-dark-overlay: @ThemeManager.CurrentTheme.Overlay;
+        --border-dark: @ThemeManager.CurrentTheme.Border;
+        --accent-purple: @ThemeManager.CurrentTheme.Primary;
+        --text-primary: @ThemeManager.CurrentTheme.TextPrimary;
+        --text-secondary: @ThemeManager.CurrentTheme.TextSecondary;
+    }
+    body {
+        background-color: @ThemeManager.CurrentTheme.Background !important;
+        color: @ThemeManager.CurrentTheme.TextPrimary !important;
+    }
+</style>
+
 <MudLayout>
-    <MudAppBar Elevation="1" Dense="true" Style="background-color: #181825; border-bottom: 1px solid #313244;">
-        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
-        <img src="favicon.png" alt="LoRAMancer" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 10px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
-        <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7; letter-spacing: 0.5px;">LoRAMancer</MudText>
-        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Class="ml-3" Style="border-color: #45475a; color: #a6adc8;">
-            Universal GPU Ready
-        </MudChip>
+    <MudAppBar Elevation="1" Dense="true" Class="px-2" Style="@($"background-color: {ThemeManager.CurrentTheme.AppbarBackground}; border-bottom: 1px solid {ThemeManager.CurrentTheme.Border}; padding-right: 14px;")">
+        <div class="d-flex align-center flex-shrink-0">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+            <img src="favicon.png" alt="LoRAMancer" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 10px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
+            <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {ThemeManager.CurrentTheme.Primary}; letter-spacing: 0.5px;")">LoRAMancer</MudText>
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Class="ml-3 d-none d-md-inline-flex" Style="@($"border-color: {ThemeManager.CurrentTheme.Border}; color: {ThemeManager.CurrentTheme.TextSecondary};")">
+                Universal GPU Ready
+            </MudChip>
+        </div>
 
         <MudSpacer />
 
-        @if (TrainingRunner.IsRunning) {
-            <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
-                Training Active: @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
-            </MudChip>
-        }
+        <div class="d-flex align-center flex-shrink-0 gap-1">
+            @if (TrainingRunner.IsRunning) {
+                <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
+                    Training Active: @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
+                </MudChip>
+            }
 
-        <MudTooltip Text="Auto-Updates">
-            <MudIconButton Icon="@Icons.Material.Filled.SystemUpdate" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("updates"))" />
-        </MudTooltip>
-        <MudTooltip Text="Plugins">
-            <MudIconButton Icon="@Icons.Material.Filled.Extension" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("plugins"))" />
-        </MudTooltip>
-        <MudTooltip Text="Compute Environment Setup">
-            <MudIconButton Icon="@Icons.Material.Filled.Memory" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("environment"))" />
-        </MudTooltip>
-        <MudTooltip Text="Settings & Admin">
-            <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("settings"))" />
-        </MudTooltip>
+            <MudTooltip Text="Auto-Updates">
+                <MudIconButton Icon="@Icons.Material.Filled.SystemUpdate" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("updates"))" />
+            </MudTooltip>
+            <MudTooltip Text="Plugins">
+                <MudIconButton Icon="@Icons.Material.Filled.Extension" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("plugins"))" />
+            </MudTooltip>
+            <MudTooltip Text="Compute Environment Setup">
+                <MudIconButton Icon="@Icons.Material.Filled.Memory" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("environment"))" />
+            </MudTooltip>
+            <MudTooltip Text="Settings & Themes">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("settings"))" />
+            </MudTooltip>
+        </div>
     </MudAppBar>
 
-    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2" Style="background-color: #11111b; border-right: 1px solid #313244;">
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2" Style="@($"background-color: {ThemeManager.CurrentTheme.DrawerBackground}; border-right: 1px solid {ThemeManager.CurrentTheme.Border};")">
         <NavMenu />
     </MudDrawer>
 
-    <MudMainContent Style="background-color: #11111b; min-height: 100vh; padding: 1.5rem;">
+    <MudMainContent Style="@($"background-color: {ThemeManager.CurrentTheme.Background}; min-height: 100vh; padding: 1.5rem;")">
         @Body
     </MudMainContent>
 </MudLayout>
@@ -50,28 +72,21 @@
 @code {
     private bool _drawerOpen = true;
 
-    private readonly MudTheme _customTheme = new() {
-        PaletteDark = new PaletteDark {
-            Primary = "#cba6f7",
-            Secondary = "#89b4fa",
-            Tertiary = "#a6e3a1",
-            Background = "#11111b",
-            Surface = "#181825",
-            AppbarBackground = "#181825",
-            DrawerBackground = "#11111b",
-            TextPrimary = "#cdd6f4",
-            TextSecondary = "#a6adc8",
-            ActionDefault = "#cdd6f4",
-            DrawerIcon = "#cba6f7",
-            DrawerText = "#cdd6f4",
-            Divider = "#313244",
-            LinesDefault = "#313244",
-            TableLines = "#313244",
-            OverlayDark = "rgba(17, 17, 27, 0.8)"
-        }
-    };
-
     protected override void OnInitialized() {
-        TrainingRunner.OnProgressUpdated += _ => InvokeAsync(StateHasChanged);
+        TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
+        ThemeManager.OnThemeChanged += HandleThemeChanged;
+    }
+
+    private void HandleProgressUpdated(TrainingProgress progress) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleThemeChanged() {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() {
+        TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+        ThemeManager.OnThemeChanged -= HandleThemeChanged;
     }
 }

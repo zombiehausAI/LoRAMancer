@@ -8,14 +8,15 @@
 @inject PublicTunnelService PublicTunnel
 @inject RemoteTrainingClientService RemoteClient
 @inject AuthTokenManagerService TokenManager
+@inject ThemeService ThemeManager
 @inject ISnackbar Snackbar
 
-<div class="d-flex align-center justify-space-between mb-4">
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">System Settings & Admin Console</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Configure GPU PyTorch wheels (AMD / NVIDIA / Intel), AI-Toolkit auto-setup, and API keys (HuggingFace & Civitai)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Configure GPU PyTorch wheels (AMD / NVIDIA / Intel), appearance themes, AI-Toolkit, and API keys</MudText>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetDefaultsAsync">
             Reset Defaults
         </MudButton>
@@ -555,6 +556,51 @@
         </div>
     </MudTabPanel>
 
+    <!-- Appearance & Themes Tab -->
+    <MudTabPanel Text="Appearance & Themes" Icon="@Icons.Material.Filled.Palette">
+        <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+                Select your preferred color theme below. Themes update the entire application interface dynamically without requiring a restart.
+            </MudAlert>
+
+            <MudGrid>
+                @foreach (var theme in ThemeService.AvailableThemes) {
+                    bool isActive = string.Equals(ThemeManager.CurrentThemeId, theme.Id, StringComparison.OrdinalIgnoreCase);
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudCard Elevation="isActive ? 4 : 1" Class="pa-3 h-100 d-flex flex-column justify-space-between" Style="@($"background-color: {theme.Surface}; border: {(isActive ? "2px solid " + theme.Primary : "1px solid " + theme.Border)}; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;")" @onclick="@(() => SelectTheme(theme.Id))">
+                            <div>
+                                <div class="d-flex align-center justify-space-between mb-2">
+                                    <MudText Typo="Typo.subtitle1" Style="@($"font-weight: 700; color: {theme.TextPrimary};")">
+                                        @theme.Name
+                                    </MudText>
+                                    @if (isActive) {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">Active</MudChip>
+                                    }
+                                </div>
+                                <MudText Typo="Typo.caption" Style="@($"color: {theme.TextSecondary};")" Class="mb-3 d-block">
+                                    @theme.Description
+                                </MudText>
+
+                                <!-- Color Swatches Preview -->
+                                <div class="d-flex align-center gap-2 mb-3">
+                                    <div style="@($"width: 22px; height: 22px; border-radius: 6px; background-color: {theme.Primary}; border: 1px solid rgba(255,255,255,0.2);")" title="Primary Accent"></div>
+                                    <div style="@($"width: 22px; height: 22px; border-radius: 6px; background-color: {theme.Secondary}; border: 1px solid rgba(255,255,255,0.2);")" title="Secondary Accent"></div>
+                                    <div style="@($"width: 22px; height: 22px; border-radius: 6px; background-color: {theme.Tertiary}; border: 1px solid rgba(255,255,255,0.2);")" title="Tertiary Accent"></div>
+                                    <div style="@($"width: 22px; height: 22px; border-radius: 6px; background-color: {theme.Background}; border: 1px solid {theme.Border};")" title="Background"></div>
+                                    <div style="@($"width: 22px; height: 22px; border-radius: 6px; background-color: {theme.Surface}; border: 1px solid {theme.Border};")" title="Surface"></div>
+                                </div>
+                            </div>
+
+                            <MudButton Variant="@(isActive ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" Size="Size.Small" FullWidth="true" OnClick="@(() => SelectTheme(theme.Id))">
+                                @(isActive ? "Current Theme" : "Apply Theme")
+                            </MudButton>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        </div>
+    </MudTabPanel>
+
     <!-- Auth Token Manager Tab -->
     <MudTabPanel Text="Auth Tokens" Icon="@Icons.Material.Filled.VpnKey">
         <div class="px-4 pb-4">
@@ -896,6 +942,12 @@
         Snackbar.Add("Reset CPU settings to official defaults.", Severity.Info);
     }
 
+    private void SelectTheme(string themeId) {
+        ThemeManager.SetTheme(themeId);
+        _settings.ThemePreset = themeId;
+        Snackbar.Add($"Theme switched to '{ThemeManager.CurrentTheme.Name}'!", Severity.Success);
+    }
+
     private void AutoGenerateUrls() {
         _settings.UpdateFromBaseUrl(_settings.RocmBaseUrl, _settings.PyTorchVersion);
         Snackbar.Add("Updated wheel URLs from Base URL & Version!", Severity.Success);
@@ -997,6 +1049,7 @@
 
     private async Task SaveSettingsAsync() {
         try {
+            _settings.ThemePreset = ThemeManager.CurrentThemeId;
             await Settings.SaveSettingsAsync(_settings);
             Snackbar.Add("Settings saved successfully!", Severity.Success);
         } catch (Exception ex) {
@@ -1006,6 +1059,7 @@
 
     private async Task ResetDefaultsAsync() {
         _settings = await Settings.ResetToDefaultsAsync();
+        ThemeManager.SetTheme("dark-purple");
         _urlStatuses.Clear();
         _hfValidationMessage = string.Empty;
         Snackbar.Add("Settings reset to factory defaults.", Severity.Warning);

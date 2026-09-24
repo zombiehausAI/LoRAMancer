@@ -206,5 +206,58 @@ public sealed class SettingsServiceTests {
         settings.ResetAmdToDefault();
         Assert.Equal("https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1", settings.RocmBaseUrl);
     }
+
+    [Fact]
+    public async Task ThemeService_SupportsMultipleThemes_AndPersistsSelection() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"theme_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService settingsService = new(null, tempFile);
+            ThemeService themeService = new(settingsService);
+
+            // Verify available themes exist (Light, Dark Greys, Crimson, Emerald, Cobalt, Amber, Catppuccin)
+            Assert.True(ThemeService.AvailableThemes.Count >= 7);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "light" && !t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-grey" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-red" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-green" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-blue" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-amber" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-purple" && t.IsDark);
+
+            // Default is dark-purple
+            Assert.Equal("dark-purple", themeService.CurrentThemeId);
+            Assert.True(themeService.CurrentTheme.IsDark);
+
+            // Switch to dark-grey
+            bool eventFired = false;
+            themeService.OnThemeChanged += () => eventFired = true;
+
+            themeService.SetTheme("dark-grey");
+            Assert.True(eventFired);
+            Assert.Equal("dark-grey", themeService.CurrentThemeId);
+            Assert.Equal("Slate Greys (Dark)", themeService.CurrentTheme.Name);
+
+            // Verify MudTheme palette generated properly
+            var mudTheme = themeService.GetMudTheme();
+            Assert.NotNull(mudTheme.PaletteDark);
+
+            // Switch to light
+            themeService.SetTheme("light");
+            Assert.Equal("light", themeService.CurrentThemeId);
+            Assert.False(themeService.CurrentTheme.IsDark);
+            var lightMudTheme = themeService.GetMudTheme();
+            Assert.NotNull(lightMudTheme.PaletteLight);
+
+            // Save and reload
+            await settingsService.SaveSettingsAsync(settingsService.Current);
+            SettingsService reloaded = new(null, tempFile);
+            Assert.Equal("light", reloaded.Current.ThemePreset);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }
 

@@ -47,6 +47,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<ProcessRunner>();
         builder.Services.AddSingleton<ModelArchitectureRegistry>();
         builder.Services.AddSingleton<SettingsService>();
+        builder.Services.AddSingleton<ThemeService>();
         builder.Services.AddSingleton<AuthTokenManagerService>();
         builder.Services.AddSingleton<AiToolkitSetupService>();
         builder.Services.AddSingleton<CivitaiService>();

@@ -9,12 +9,12 @@
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<div class="d-flex align-center justify-space-between mb-4">
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Training Orchestrator & Live Console</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Execute AI-Toolkit or Kohya runs with live AMD ROCm telemetry and log streaming</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Execute AI-Toolkit runs with live hardware acceleration telemetry and log streaming</MudText>
     </div>
-    <div class="d-flex align-center gap-2">
+    <div class="d-flex align-center flex-wrap gap-2">
         <MudButton Variant="Variant.Filled" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenTrainingWizardAsync">
             Training Wizard
         </MudButton>
