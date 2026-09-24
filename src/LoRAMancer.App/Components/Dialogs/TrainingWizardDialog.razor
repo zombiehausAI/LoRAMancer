@@ -18,6 +18,9 @@
                 </div>
             </div>
             <div class="d-flex align-center gap-3">
+                <MudButton Variant="Variant.Text" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.HelpOutline" OnClick="OpenHyperparameterGuide">
+                    Docs & Options Guide
+                </MudButton>
                 <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
             </div>
         </div>
@@ -51,19 +54,25 @@
         <!-- Base Model & Run Identifiers -->
         <MudGrid Class="mb-3">
             <MudItem xs="12" md="6">
-                <MudSelect T="string" Value="_targetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model" Variant="Variant.Outlined" Dense="true">
-                    @foreach (var arch in ArchitectureRegistry.GetAll()) {
-                        <MudSelectItem Value="@arch.DisplayName">
-                            @arch.DisplayName (@arch.Family)
-                        </MudSelectItem>
-                    }
-                </MudSelect>
+                <MudTooltip Text="The foundation diffusion or flow-matching checkpoint family (FLUX.1, SDXL, Pony, etc.).">
+                    <MudSelect T="string" Value="_targetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model" Variant="Variant.Outlined" Dense="true" HelperText="Architecture family for this LoRA">
+                        @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                            <MudSelectItem Value="@arch.DisplayName">
+                                @arch.DisplayName (@arch.Family)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudTooltip>
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudTextField @bind-Value="_runName" Label="Run Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+                <MudTooltip Text="Unique project identifier for saved checkpoints and config files.">
+                    <MudTextField @bind-Value="_runName" Label="Run Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" HelperText="Unique checkpoint name" />
+                </MudTooltip>
             </MudItem>
             <MudItem xs="12" md="3">
-                <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" />
+                <MudTooltip Text="The activation keyword prompt to recall your trained subject (e.g. 'ohwx woman', 'sk_artstyle').">
+                    <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" HelperText="Keyword to activate subject" />
+                </MudTooltip>
             </MudItem>
         </MudGrid>
 
@@ -164,28 +173,50 @@
 
         <!-- Pro Mode Hyperparameter Accordion -->
         <MudExpansionPanels Class="mb-3">
-            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" @bind-Expanded="_isProMode" MaxHeight="400">
+            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" @bind-Expanded="_isProMode" MaxHeight="450">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Customize or adjust mathematical settings imported from donor LoRA or preset. Hover fields for explanations.
+                    </MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.MenuBook" OnClick="OpenHyperparameterGuide">
+                        Read Full Hyperparameter Guide
+                    </MudButton>
+                </div>
                 <MudGrid>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" />
+                        <MudTooltip Text="Network Rank (Dim): Low-rank decomposition matrix capacity. Higher ranks (32-64+) allow more complex concepts but increase checkpoint file size and VRAM. 16 is recommended for FLUX/SDXL.">
+                            <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" HelperText="Capacity (16-32 standard)" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_networkAlpha" Label="Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" />
+                        <MudTooltip Text="Network Alpha: Scaling multiplier for weight updates (Alpha/Dim). Usually set equal to Rank (1:1 ratio) or half Rank (1:2 ratio) for softer updates.">
+                            <MudNumericField @bind-Value="_networkAlpha" Label="Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" HelperText="Scaling factor (usually = Rank)" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_learningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" />
+                        <MudTooltip Text="Learning Rate: Gradient descent step size. 1e-4 (0.0001) is standard for AdamW. Lower (5e-5) for delicate fine-tuning; higher (2e-4) for fast convergence.">
+                            <MudNumericField @bind-Value="_learningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" HelperText="Step size (1e-4 standard)" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Min="1" Max="8" TextChanged="RecalculateEstimates" />
+                        <MudTooltip Text="Batch Size: Number of images processed per gradient update. 1 uses the least VRAM (ideal for 8-16GB GPUs). Higher values require 24GB+ GPUs.">
+                            <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Min="1" Max="8" TextChanged="RecalculateEstimates" HelperText="1 for lowest VRAM usage" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_epochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="100" TextChanged="RecalculateEstimates" />
+                        <MudTooltip Text="Epochs: Number of complete cycles through your entire dataset. Typical range is 5-20 epochs depending on image count.">
+                            <MudNumericField @bind-Value="_epochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="100" TextChanged="RecalculateEstimates" HelperText="Full dataset cycles (5-20 typical)" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="6" sm="3">
-                        <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" />
+                        <MudTooltip Text="Repeats per Image: How many times each image in your dataset is presented to the network in a single epoch. 5-10 is standard.">
+                            <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" HelperText="Per-image epoch multiplier" />
+                        </MudTooltip>
                     </MudItem>
                     <MudItem xs="12" sm="6">
-                        <MudTextField @bind-Value="_samplePrompt" Label="Periodic Sample Generation Prompt" Variant="Variant.Outlined" Placeholder="Prompt used for in-training test images..." />
+                        <MudTooltip Text="Periodic Test Prompt: Generates test images during training to visually inspect learning progress without interrupting the run. Use {trigger}.">
+                            <MudTextField @bind-Value="_samplePrompt" Label="Periodic Sample Generation Prompt" Variant="Variant.Outlined" Placeholder="e.g. a photo of {trigger}, cinematic lighting..." HelperText="Test prompt with {trigger} token" />
+                        </MudTooltip>
                     </MudItem>
                 </MudGrid>
             </MudExpansionPanel>
@@ -263,6 +294,11 @@
         _selectedSubject = preset.SubjectType;
         ApplyPreset(preset);
         RecalculateEstimates();
+    }
+
+    private void OpenHyperparameterGuide() {
+        MudDialog.Cancel();
+        NavManager.NavigateTo("docs");
     }
 
     private void ApplyPreset(SubjectPreset preset) {
