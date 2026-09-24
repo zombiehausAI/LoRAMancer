@@ -107,7 +107,7 @@ public sealed class AiToolkitConfigBuilder {
                             ["quantize"] = sanitized.Quantize
                         },
                         ["model"] = new Dictionary<string, object> {
-                            ["name_or_path"] = string.IsNullOrWhiteSpace(sanitized.TargetBaseModel) || sanitized.TargetBaseModel.Contains(' ') ? archInfo.PretrainedModelPath : sanitized.TargetBaseModel,
+                            ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
                             ["is_flux"] = archInfo.IsFlux,
                             ["quantize"] = false,
                             ["arch"] = archInfo.Family.ToLowerInvariant()
@@ -190,6 +190,22 @@ public sealed class AiToolkitConfigBuilder {
             GradientAccumulationSteps = config.GradientAccumulationSteps,
             SaveEveryNEpochs = config.SaveEveryNEpochs
         };
+    }
+
+    public static string ResolveModelPath(string? targetBaseModel, ModelArchitectureInfo archInfo) {
+        if (string.IsNullOrWhiteSpace(targetBaseModel)) {
+            return archInfo.PretrainedModelPath;
+        }
+
+        string trimmed = targetBaseModel.Trim();
+        if (string.Equals(trimmed, archInfo.DisplayName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, archInfo.Id, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, archInfo.Family, StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains(' ')) {
+            return archInfo.PretrainedModelPath;
+        }
+
+        return trimmed;
     }
 
     public static string SanitizeOptimizer(string? rawOptimizer) {
