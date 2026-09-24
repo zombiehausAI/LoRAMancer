@@ -116,6 +116,19 @@ public sealed class AiToolkitSetupService {
                 line => onProgress?.Invoke($"[pip err] {line}"),
                 cancellationToken
             );
+
+            // Windows ROCm builds do not package torch._C._distributed_c10d.
+            // torchao tries to import distributed_c10d during diffusers loading, crashing execution.
+            // Removing torchao restores full diffusers compatibility.
+            await _processRunner.RunAsync(
+                pythonExe,
+                "-m pip uninstall -y torchao",
+                installDir,
+                null,
+                _ => { },
+                _ => { },
+                cancellationToken
+            );
         }
 
         onProgress?.Invoke("[AI-Toolkit] AI-Toolkit successfully updated to latest version!");
@@ -189,6 +202,19 @@ public sealed class AiToolkitSetupService {
             if (pipExit != 0) {
                 onProgress?.Invoke("[AI-Toolkit] Note: Pip reported warnings during dependency resolution, validating run.py...");
             }
+
+            // Windows ROCm builds do not package torch._C._distributed_c10d.
+            // torchao tries to import distributed_c10d during diffusers loading, crashing execution.
+            // Removing torchao restores full diffusers compatibility.
+            await _processRunner.RunAsync(
+                pythonExe,
+                "-m pip uninstall -y torchao",
+                installDir,
+                null,
+                _ => { },
+                _ => { },
+                cancellationToken
+            );
         }
 
         if (IsInstalled()) {
