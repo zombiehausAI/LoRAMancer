@@ -136,5 +136,10 @@ LoRAMancer ships with a built-in Python plugin for automated Civitai model versi
 - **Civitai Authentication & Cloudflare Bypass**:
   - Transmits Civitai API keys both via Bearer authorization headers and URL query parameters to unlock private, early-access, or member-only models.
   - Employs desktop browser `User-Agent` headers to prevent Cloudflare HTTP 403 Forbidden responses.
+- **Non-Blocking Background Execution & Productivity Protection**:
+  - Operates completely asynchronously via `LoraUpdaterService` without locking or freezing the UI thread.
+  - Creators can click **"Run in Background"** inside the dialog to dismiss the modal and continue working anywhere in LoRAMancer (e.g. creating training configs, auditing datasets, or inspecting models) while updates proceed in the background.
+  - A persistent background banner on the main dashboard displays real-time operation status, current file progress, and 1-click controls to reopen details or cancel execution at any time.
 - **Interactive UI**: Launched directly from the LoRA Library Browser toolbar (**"Lora Updater"**) or via the Plugin Manager.
+
 

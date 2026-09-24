@@ -159,8 +159,9 @@ def check_updates_for_files(
 ) -> Dict[str, Any]:
     """Checks Civitai for updates across a list of files without downloading (Dry Run)."""
     results: List[Dict[str, Any]] = []
+    total = len(lora_files)
     summary = {
-        "total_files": len(lora_files),
+        "total_files": total,
         "updates_available": 0,
         "up_to_date": 0,
         "not_found": 0,
@@ -169,8 +170,9 @@ def check_updates_for_files(
     }
 
     with requests.Session() as session:
-        for lora_path in lora_files:
+        for idx, lora_path in enumerate(lora_files):
             filename = os.path.basename(lora_path)
+            print(f"[STATUS] Checking Civitai: {filename} ({idx + 1}/{total})", flush=True)
             local_hash = calculate_sha256(lora_path)
             if not local_hash:
                 continue
@@ -264,6 +266,7 @@ def check_updates_for_files(
                 continue
 
             summary["updates_available"] += 1
+            print(f"[UPDATE_FOUND] {filename} -> {latest_version_name}", flush=True)
             results.append({
                 "file_path": lora_path,
                 "file_name": filename,
@@ -378,10 +381,12 @@ def scan_and_update_loras(
     skipped_type_count = 0
     skipped_mismatch_count = 0
     updates_log: List[Dict[str, Any]] = []
+    total = len(lora_files)
 
     with requests.Session() as session:
-        for lora_path in lora_files:
+        for idx, lora_path in enumerate(lora_files):
             filename = os.path.basename(lora_path)
+            print(f"[STATUS] Scanning {filename} ({idx + 1}/{total})...", flush=True)
             local_hash = calculate_sha256(lora_path)
             if not local_hash:
                 continue
@@ -421,6 +426,7 @@ def scan_and_update_loras(
             if not latest_file:
                 continue
 
+            print(f"[STATUS] Downloading update for {filename} -> {latest_file.get('name')}...", flush=True)
             result = update_lora_file(
                 lora_path,
                 latest_file,
@@ -432,6 +438,7 @@ def scan_and_update_loras(
 
             if result["success"]:
                 updated_count += 1
+                print(f"[UPDATED] {filename} -> {latest_file.get('name')}", flush=True)
                 updates_log.append({
                     "model_name": info.get("model", {}).get("name", filename),
                     "old_file": filename,
@@ -480,13 +487,23 @@ def main():
     parser = argparse.ArgumentParser(description="Lora Updater Plugin")
     parser.add_argument("--cmd", type=str, required=True, help="Command to execute")
     parser.add_argument("--data", type=str, default="{}", help="JSON payload")
+    parser.add_argument("--data-file", type=str, default="", help="Path to JSON payload file")
 
     args = parser.parse_args()
 
-    try:
-        data = json.loads(args.data)
-    except Exception:
-        data = {}
+    data = {}
+    if args.data_file and os.path.isfile(args.data_file):
+        try:
+            with open(args.data_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to read data file {args.data_file}: {e}")
+            data = {}
+    elif args.data:
+        try:
+            data = json.loads(args.data)
+        except Exception:
+            data = {}
 
     cmd = args.cmd
     api_key = data.get("api_key", "").strip()

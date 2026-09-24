@@ -38,6 +38,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<RemoteTrainingClientService>();
         builder.Services.AddSingleton<LoraHistoryService>();
         builder.Services.AddSingleton<LoraLibraryService>();
+        builder.Services.AddSingleton<LoraUpdaterService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

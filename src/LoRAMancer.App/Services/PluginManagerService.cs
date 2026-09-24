@@ -401,6 +401,8 @@ public sealed class PluginManagerService {
         string pluginId,
         string command,
         IDictionary<string, object?> parameters,
+        Action<string>? onOutputLine = null,
+        Action<string>? onErrorLine = null,
         CancellationToken cancellationToken = default
     ) {
         if (!_registeredPlugins.TryGetValue(pluginId, out PluginManifest? manifest)) {
@@ -431,23 +433,41 @@ public sealed class PluginManagerService {
         }
 
         string paramJson = JsonSerializer.Serialize(parameters);
+        string tempParamFile = Path.Combine(Path.GetTempPath(), $"loramancer_plugin_{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(tempParamFile, paramJson, cancellationToken);
+
         string outputData = string.Empty;
 
-        int exitCode = await _processRunner.RunAsync(
-            pythonExe,
-            $"\"{scriptPath}\" --cmd \"{command}\" --data '{paramJson}'",
-            manifest.DirectoryPath,
-            null,
-            line => outputData += line + "\n",
-            _ => { },
-            cancellationToken
-        );
+        try {
+            int exitCode = await _processRunner.RunAsync(
+                pythonExe,
+                $"\"{scriptPath}\" --cmd \"{command}\" --data-file \"{tempParamFile}\"",
+                manifest.DirectoryPath,
+                null,
+                line => {
+                    outputData += line + "\n";
+                    onOutputLine?.Invoke(line);
+                },
+                errLine => {
+                    onErrorLine?.Invoke(errLine);
+                },
+                cancellationToken
+            );
 
-        if (exitCode == 0) {
-            return PluginResult.Ok("Plugin executed successfully", outputData.Trim());
+            if (exitCode == 0) {
+                return PluginResult.Ok("Plugin executed successfully", outputData.Trim());
+            }
+
+            return PluginResult.Fail($"Python plugin exited with error code {exitCode}: {outputData.Trim()}");
+        } finally {
+            try {
+                if (File.Exists(tempParamFile)) {
+                    File.Delete(tempParamFile);
+                }
+            } catch {
+                // Ignore cleanup errors
+            }
         }
-
-        return PluginResult.Fail($"Python plugin exited with error code {exitCode}: {outputData.Trim()}");
     }
 
     private sealed class PluginContext : IPluginContext {

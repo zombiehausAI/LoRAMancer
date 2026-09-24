@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
+@inject LoraUpdaterService UpdaterService
 @using LoRAMancer.App.Components.Dialogs
 
 <div class="d-flex align-center justify-space-between mb-4">
@@ -117,6 +118,30 @@
             </MudButton>
         </div>
         <MudProgressLinear Color="Color.Tertiary" Value="@(_totalFiles > 0 ? (double)_scannedCount / _totalFiles * 100 : 0)" Class="my-1" />
+    </MudCard>
+}
+
+@if (UpdaterService.IsRunning) {
+    <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: rgba(137, 180, 250, 0.08); border: 1px solid #89b4fa; border-radius: 8px;">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div class="d-flex align-center gap-2">
+                <MudProgressCircular Size="Size.Small" Color="Color.Info" Indeterminate="@(UpdaterService.TotalFiles == 0)" />
+                <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
+                    Lora Updater running in background: @UpdaterService.CurrentStatus
+                </MudText>
+            </div>
+            <div class="d-flex gap-2">
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInNew" OnClick="OpenLoraUpdaterAsync">
+                    View Details
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="@(() => UpdaterService.Cancel())">
+                    Stop
+                </MudButton>
+            </div>
+        </div>
+        @if (UpdaterService.TotalFiles > 0) {
+            <MudProgressLinear Color="Color.Info" Value="@((double)UpdaterService.ProcessedFiles / UpdaterService.TotalFiles * 100)" Class="my-1" />
+        }
     </MudCard>
 }
 
@@ -578,7 +603,16 @@
         _scanCts?.Cancel();
     }
 
+    protected override void OnInitialized() {
+        UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
+    }
+
+    private async void HandleUpdaterStateChanged() {
+        await InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose() {
+        UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
         _scanCts?.Cancel();
         _scanCts?.Dispose();
     }

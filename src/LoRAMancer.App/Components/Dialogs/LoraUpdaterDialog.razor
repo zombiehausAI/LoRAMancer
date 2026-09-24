@@ -1,7 +1,8 @@
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @using System.Text.Json
-@inject PluginManagerService PluginManager
+@implements IDisposable
+@inject LoraUpdaterService UpdaterService
 @inject SettingsService Settings
 @inject NativeFileDialogService FileDialogService
 @inject ISnackbar Snackbar
@@ -25,39 +26,54 @@
                 <!-- Target Directory -->
                 <MudItem xs="12" md="8">
                     <div class="d-flex align-center gap-2">
-                        <MudTextField @bind-Value="_targetFolder" Label="LoRA Directory to Check" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="D:\models\loras" FullWidth="true" Disabled="_isBusy" />
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseFolderAsync" Disabled="_isBusy">Browse</MudButton>
+                        <MudTextField @bind-Value="_targetFolder" Label="LoRA Directory to Check" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="D:\models\loras" FullWidth="true" Disabled="UpdaterService.IsRunning" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseFolderAsync" Disabled="UpdaterService.IsRunning">Browse</MudButton>
                     </div>
                 </MudItem>
 
                 <!-- Civitai API Key -->
                 <MudItem xs="12" md="4">
-                    <MudTextField @bind-Value="_apiKey" Label="Civitai API Key (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" Placeholder="Bearer key for private/early models" Disabled="_isBusy" />
+                    <MudTextField @bind-Value="_apiKey" Label="Civitai API Key (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" Placeholder="Bearer key for private/early models" Disabled="UpdaterService.IsRunning" />
                 </MudItem>
 
                 <!-- Backup Directory -->
                 <MudItem xs="12" md="8">
                     <div class="d-flex align-center gap-2">
-                        <MudTextField @bind-Value="_backupFolder" Label="Backup Directory (Optional - leaves .bak if empty)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="D:\models\loras_backup" FullWidth="true" Disabled="_isBusy" />
-                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseBackupFolderAsync" Disabled="_isBusy">Browse</MudButton>
+                        <MudTextField @bind-Value="_backupFolder" Label="Backup Directory (Optional - leaves .bak if empty)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="D:\models\loras_backup" FullWidth="true" Disabled="UpdaterService.IsRunning" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseBackupFolderAsync" Disabled="UpdaterService.IsRunning">Browse</MudButton>
                     </div>
                 </MudItem>
 
                 <!-- Options -->
                 <MudItem xs="12" md="4" Class="d-flex align-center gap-3">
-                    <MudCheckBox @bind-Value="_recursive" Label="Scan Subfolders" Color="Color.Tertiary" Dense="true" Disabled="_isBusy" />
-                    <MudCheckBox @bind-Value="_allowMismatch" Label="Allow Base Mismatch" Color="Color.Warning" Dense="true" Disabled="_isBusy" />
+                    <MudCheckBox @bind-Value="_recursive" Label="Scan Subfolders" Color="Color.Tertiary" Dense="true" Disabled="UpdaterService.IsRunning" />
+                    <MudCheckBox @bind-Value="_allowMismatch" Label="Allow Base Mismatch" Color="Color.Warning" Dense="true" Disabled="UpdaterService.IsRunning" />
                 </MudItem>
             </MudGrid>
         </MudCard>
 
         <!-- Progress Indicator -->
-        @if (_isBusy) {
+        @if (UpdaterService.IsRunning) {
             <MudCard Elevation="0" Class="pa-3 mb-3" Style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid #cba6f7; border-radius: 8px;">
-                <div class="d-flex align-center gap-2">
-                    <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="true" />
-                    <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">@_statusMessage</MudText>
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="@(UpdaterService.TotalFiles == 0)" />
+                        <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
+                            @UpdaterService.CurrentStatus
+                        </MudText>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.ArrowDownward" OnClick="RunInBackground">
+                            Run in Background
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelOperation">
+                            Cancel
+                        </MudButton>
+                    </div>
                 </div>
+                @if (UpdaterService.TotalFiles > 0) {
+                    <MudProgressLinear Color="Color.Tertiary" Value="@((double)UpdaterService.ProcessedFiles / UpdaterService.TotalFiles * 100)" Class="my-1" />
+                }
             </MudCard>
         }
 
@@ -74,8 +90,8 @@
                             <MudChip T="string" Size="Size.Small" Color="Color.Error">Base Mismatches: @_summary.SkippedBaseMismatch</MudChip>
                         }
                     </div>
-                    @if (_summary.UpdatesAvailable > 0) {
-                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" OnClick="PerformUpdateAllAsync" Disabled="_isBusy">
+                    @if (_summary.UpdatesAvailable > 0 && !UpdaterService.IsRunning) {
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" OnClick="PerformUpdateAllAsync">
                             Update Available (@_summary.UpdatesAvailable)
                         </MudButton>
                     }
@@ -85,7 +101,7 @@
 
         <!-- Results Table -->
         @if (_items.Count > 0) {
-            <MudTable Items="_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px; max-height: 380px; overflow-y: auto;">
+            <MudTable Items="_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px; max-height: 340px; overflow-y: auto;">
                 <HeaderContent>
                     <MudTh>File</MudTh>
                     <MudTh>Model on Civitai</MudTh>
@@ -134,7 +150,7 @@
                     </MudTd>
                     <MudTd DataLabel="Action" Style="text-align: right;">
                         @if (context.Status == "update_available") {
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="@(() => UpdateSingleFileAsync(context))" Disabled="_isBusy">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="@(() => UpdateSingleFileAsync(context))" Disabled="UpdaterService.IsRunning">
                                 Update
                             </MudButton>
                         } else if (context.Status == "updated") {
@@ -146,11 +162,11 @@
         }
 
         <!-- Operation Log Output -->
-        @if (_logLines.Count > 0) {
+        @if (UpdaterService.LiveLogs.Count > 0) {
             <MudExpansionPanels Class="mt-3">
-                <MudExpansionPanel Text="Execution Log Details" Style="background-color: #11111b; border: 1px solid #313244;">
+                <MudExpansionPanel Text="@($"Live Output Log ({UpdaterService.LiveLogs.Count} lines)")" Style="background-color: #11111b; border: 1px solid #313244;">
                     <div style="max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #a6adc8;">
-                        @foreach (var log in _logLines) {
+                        @foreach (var log in UpdaterService.LiveLogs) {
                             <div>@log</div>
                         }
                     </div>
@@ -159,13 +175,18 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="CheckUpdatesAsync" Disabled="_isBusy || string.IsNullOrWhiteSpace(_targetFolder)" StartIcon="@Icons.Material.Filled.Search">
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="CheckUpdatesAsync" Disabled="UpdaterService.IsRunning || string.IsNullOrWhiteSpace(_targetFolder)" StartIcon="@Icons.Material.Filled.Search">
             Check for Updates (Dry Run)
         </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" OnClick="PerformUpdateAllAsync" Disabled="_isBusy || string.IsNullOrWhiteSpace(_targetFolder)" StartIcon="@Icons.Material.Filled.SystemUpdateAlt">
+        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" OnClick="PerformUpdateAllAsync" Disabled="UpdaterService.IsRunning || string.IsNullOrWhiteSpace(_targetFolder)" StartIcon="@Icons.Material.Filled.SystemUpdateAlt">
             Scan & Update All
         </MudButton>
-        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog" Disabled="_isBusy">
+        @if (UpdaterService.IsRunning) {
+            <MudButton Variant="Variant.Filled" Color="Color.Info" OnClick="RunInBackground" StartIcon="@Icons.Material.Filled.ArrowDownward">
+                Run in Background
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog">
             Close
         </MudButton>
     </DialogActions>
@@ -183,10 +204,6 @@
     private string _backupFolder = string.Empty;
     private bool _recursive = true;
     private bool _allowMismatch;
-
-    private bool _isBusy;
-    private string _statusMessage = string.Empty;
-    private readonly List<string> _logLines = new();
 
     private UpdaterSummary? _summary;
     private readonly List<LoraItemModel> _items = new();
@@ -214,8 +231,23 @@
     }
 
     protected override void OnInitialized() {
-        _targetFolder = InitialFolder;
+        UpdaterService.OnStateChanged += HandleStateChanged;
+
+        _targetFolder = !string.IsNullOrWhiteSpace(UpdaterService.TargetFolder) ? UpdaterService.TargetFolder : InitialFolder;
         _apiKey = Settings.Current.CivitaiApiKey;
+
+        if (!string.IsNullOrWhiteSpace(UpdaterService.LastResultJson)) {
+            ParseResults(UpdaterService.LastResultJson);
+        }
+    }
+
+    private async void HandleStateChanged() {
+        await InvokeAsync(() => {
+            if (!string.IsNullOrWhiteSpace(UpdaterService.LastResultJson)) {
+                ParseResults(UpdaterService.LastResultJson);
+            }
+            StateHasChanged();
+        });
     }
 
     private async Task BrowseFolderAsync() {
@@ -238,36 +270,14 @@
             return;
         }
 
-        _isBusy = true;
-        _statusMessage = "Checking Civitai for updates across files...";
         _items.Clear();
         _summary = null;
-        _logLines.Add($"[{DateTime.Now:T}] Starting update check on: {_targetFolder} (Recursive: {_recursive})");
-        StateHasChanged();
 
         try {
-            var parameters = new Dictionary<string, object?> {
-                ["folder"] = _targetFolder,
-                ["recursive"] = _recursive,
-                ["api_key"] = _apiKey
-            };
-
-            var result = await PluginManager.ExecutePluginAsync("lora-updater", "check_updates", parameters);
-            if (!result.Success) {
-                Snackbar.Add($"Update check failed: {result.Message}", Severity.Error);
-                _logLines.Add($"[Error] {result.Message}");
-                return;
-            }
-
-            ParseResults(result.Data?.ToString());
-            Snackbar.Add($"Check complete! Found {_summary?.UpdatesAvailable ?? 0} updates available.", Severity.Info);
+            await UpdaterService.StartCheckUpdatesAsync(_targetFolder, _recursive, _apiKey);
+            Snackbar.Add("Checking Civitai in background...", Severity.Info);
         } catch (Exception ex) {
-            Snackbar.Add($"Failed to execute plugin: {ex.Message}", Severity.Error);
-            _logLines.Add($"[Exception] {ex.Message}");
-        } finally {
-            _isBusy = false;
-            _statusMessage = string.Empty;
-            StateHasChanged();
+            Snackbar.Add($"Failed to start check: {ex.Message}", Severity.Error);
         }
     }
 
@@ -277,80 +287,31 @@
             return;
         }
 
-        _isBusy = true;
-        _statusMessage = "Downloading updates and backing up old versions...";
-        _logLines.Add($"[{DateTime.Now:T}] Starting scan & update on: {_targetFolder}");
-        StateHasChanged();
-
         try {
-            var parameters = new Dictionary<string, object?> {
-                ["folder"] = _targetFolder,
-                ["recursive"] = _recursive,
-                ["backup_folder"] = _backupFolder,
-                ["api_key"] = _apiKey,
-                ["allow_base_mismatch"] = _allowMismatch
-            };
-
-            var result = await PluginManager.ExecutePluginAsync("lora-updater", "scan_and_update", parameters);
-            if (!result.Success) {
-                Snackbar.Add($"Update failed: {result.Message}", Severity.Error);
-                _logLines.Add($"[Error] {result.Message}");
-                return;
-            }
-
-            string? jsonStr = result.Data?.ToString();
-            if (!string.IsNullOrWhiteSpace(jsonStr)) {
-                using var doc = JsonDocument.Parse(jsonStr);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("summary", out var sumEl)) {
-                    int updated = sumEl.GetProperty("updated").GetInt32();
-                    Snackbar.Add($"Successfully updated {updated} LoRA model(s)!", Severity.Success);
-                    _logLines.Add($"[Success] Updated {updated} models. Re-checking folder status...");
-                }
-            }
-
-            // Refresh check
-            await CheckUpdatesAsync();
+            await UpdaterService.StartScanAndUpdateAsync(_targetFolder, _recursive, _backupFolder, _apiKey, _allowMismatch);
+            Snackbar.Add("Starting background update & backup...", Severity.Info);
         } catch (Exception ex) {
-            Snackbar.Add($"Failed to execute update: {ex.Message}", Severity.Error);
-            _logLines.Add($"[Exception] {ex.Message}");
-        } finally {
-            _isBusy = false;
-            _statusMessage = string.Empty;
-            StateHasChanged();
+            Snackbar.Add($"Failed to start update: {ex.Message}", Severity.Error);
         }
     }
 
     private async Task UpdateSingleFileAsync(LoraItemModel item) {
-        _isBusy = true;
-        _statusMessage = $"Updating {item.FileName}...";
-        _logLines.Add($"[{DateTime.Now:T}] Updating single file: {item.FileName}");
-        StateHasChanged();
-
         try {
-            var parameters = new Dictionary<string, object?> {
-                ["file_path"] = item.FilePath,
-                ["backup_folder"] = _backupFolder,
-                ["api_key"] = _apiKey
-            };
-
-            var result = await PluginManager.ExecutePluginAsync("lora-updater", "update_single", parameters);
-            if (!result.Success) {
-                Snackbar.Add($"Failed to update {item.FileName}: {result.Message}", Severity.Error);
-                _logLines.Add($"[Error] {result.Message}");
-                return;
-            }
-
-            item.Status = "updated";
-            Snackbar.Add($"Updated {item.FileName} successfully!", Severity.Success);
-            _logLines.Add($"[Success] Updated {item.FileName}");
+            await UpdaterService.StartUpdateSingleAsync(item.FilePath, _backupFolder, _apiKey);
+            Snackbar.Add($"Updating {item.FileName} in background...", Severity.Info);
         } catch (Exception ex) {
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
-        } finally {
-            _isBusy = false;
-            _statusMessage = string.Empty;
-            StateHasChanged();
         }
+    }
+
+    private void CancelOperation() {
+        UpdaterService.Cancel();
+        Snackbar.Add("Stopping Lora Updater...", Severity.Warning);
+    }
+
+    private void RunInBackground() {
+        MudDialog.Close(DialogResult.Ok(false));
+        Snackbar.Add("Lora Updater is continuing in the background.", Severity.Info);
     }
 
     private void ParseResults(string? json) {
@@ -362,12 +323,12 @@
 
             if (root.TryGetProperty("summary", out var sumEl)) {
                 _summary = new UpdaterSummary {
-                    TotalFiles = sumEl.GetProperty("total_files").GetInt32(),
-                    UpdatesAvailable = sumEl.GetProperty("updates_available").GetInt32(),
-                    UpToDate = sumEl.GetProperty("up_to_date").GetInt32(),
-                    NotFound = sumEl.GetProperty("not_found").GetInt32(),
-                    SkippedWrongType = sumEl.GetProperty("skipped_wrong_type").GetInt32(),
-                    SkippedBaseMismatch = sumEl.GetProperty("skipped_base_mismatch").GetInt32()
+                    TotalFiles = sumEl.TryGetProperty("total_files", out var tf) ? tf.GetInt32() : 0,
+                    UpdatesAvailable = sumEl.TryGetProperty("updates_available", out var ua) ? ua.GetInt32() : 0,
+                    UpToDate = sumEl.TryGetProperty("up_to_date", out var utd) ? utd.GetInt32() : 0,
+                    NotFound = sumEl.TryGetProperty("not_found", out var nf) ? nf.GetInt32() : 0,
+                    SkippedWrongType = sumEl.TryGetProperty("skipped_wrong_type", out var swt) ? swt.GetInt32() : 0,
+                    SkippedBaseMismatch = sumEl.TryGetProperty("skipped_base_mismatch", out var sbm) ? sbm.GetInt32() : 0
                 };
             }
 
@@ -392,12 +353,16 @@
                     _items.Add(item);
                 }
             }
-        } catch (Exception ex) {
-            _logLines.Add($"[Parse Error] {ex.Message}");
+        } catch {
+            // Ignore parse errors
         }
     }
 
     private void CloseDialog() {
         MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        UpdaterService.OnStateChanged -= HandleStateChanged;
     }
 }

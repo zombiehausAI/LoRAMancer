@@ -151,5 +151,23 @@ public class PluginManagerServiceTests : IDisposable {
             Assert.Equal("plugin.py", parsed.EntryPoint);
         }
     }
+
+    [Fact]
+    public void LoraUpdaterService_InitialStateAndCancellation_WorkCorrectly() {
+        // Arrange
+        ProcessRunner runner = new();
+        PluginManagerService pluginManager = new(runner);
+        using LoraUpdaterService updaterService = new(pluginManager);
+
+        // Assert initial state
+        Assert.False(updaterService.IsRunning);
+        Assert.Equal("Idle", updaterService.CurrentOperation);
+        Assert.Equal("Ready", updaterService.CurrentStatus);
+        Assert.Empty(updaterService.LiveLogs);
+
+        // Cancel should not throw when not running
+        updaterService.Cancel();
+        Assert.False(updaterService.IsRunning);
+    }
 }
 
