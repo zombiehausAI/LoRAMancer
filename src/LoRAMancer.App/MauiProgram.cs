@@ -8,6 +8,19 @@ namespace LoRAMancer.App;
 
 public static class MauiProgram {
     public static MauiApp CreateMauiApp() {
+#if WINDOWS
+        // Unpackaged apps installed to Program Files fail WebView2 initialization if user data folder
+        // defaults to application directory (Access Denied / E_ACCESSDENIED), causing a blank window.
+        try {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string webView2Folder = Path.Combine(localAppData, "LoRAMancer", "WebView2");
+            Directory.CreateDirectory(webView2Folder);
+            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", webView2Folder);
+        } catch {
+            // Fallback gracefully
+        }
+#endif
+
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
@@ -27,6 +40,7 @@ public static class MauiProgram {
 #endif
 
         builder.Services.AddMauiBlazorWebView();
+        builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Services.AddMudServices();
 
         builder.Services.AddSingleton<HttpClient>();
