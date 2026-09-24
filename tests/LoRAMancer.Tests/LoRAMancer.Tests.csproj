@@ -34,6 +34,7 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\DatasetInspectorService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\AmdVenvProvisioner.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\PluginManagerService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\AiToolkitSetupService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>

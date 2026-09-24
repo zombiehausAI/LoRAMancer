@@ -23,7 +23,7 @@ LoRAMancer supports dynamic, script-free wheel updates via the **Admin & Setting
 - **Base Repository URL**: Define or update the AMD release URL (e.g., `https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1` or newer 7.3+ releases).
 - **Auto-Generation & Custom Overrides**: Automatically generate wheel paths from the base URL and version tag, or override individual wheel URLs for `torch`, `torchvision`, and `torchaudio`.
 - **Live URL Reachability Probing**: Built-in HTTP probe verifies wheel links and reports HTTP status and file sizes before attempting provisioning.
-- **Persistence**: Saved to `%LOCALAPPDATA%\LoRAMancer\settings.json`, allowing upgrades without editing source files or PowerShell scripts.
+- **Persistence**: Saved securely to the user profile under `~/.loramancer/settings.json` (outside the repository), allowing upgrades without editing source files or repository configs.
 
 ## Default Wheel Sourcing
 

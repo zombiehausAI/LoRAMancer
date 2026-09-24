@@ -31,6 +31,96 @@ public sealed class AiToolkitSetupService {
         return File.Exists(runScript);
     }
 
+    public bool IsGitRepository() {
+        string installDir = GetInstallDirectory();
+        return Directory.Exists(Path.Combine(installDir, ".git"));
+    }
+
+    public async Task<string> GetCurrentCommitAsync(CancellationToken cancellationToken = default) {
+        string installDir = GetInstallDirectory();
+        if (!IsGitRepository()) {
+            return "Not a Git repository";
+        }
+
+        string commit = string.Empty;
+        int exit = await _processRunner.RunAsync(
+            "git.exe",
+            "log -1 --format=\"%h (%cd) - %s\" --date=short",
+            installDir,
+            null,
+            line => {
+                if (string.IsNullOrEmpty(commit)) {
+                    commit = line.Trim();
+                }
+            },
+            _ => { },
+            cancellationToken
+        );
+
+        return exit == 0 && !string.IsNullOrWhiteSpace(commit) ? commit : "Git repository detected";
+    }
+
+    public async Task UpdateAiToolkitAsync(
+        string venvPath,
+        Action<string>? onProgress = null,
+        CancellationToken cancellationToken = default
+    ) {
+        string installDir = GetInstallDirectory();
+
+        if (!Directory.Exists(installDir) || !IsGitRepository()) {
+            onProgress?.Invoke("[AI-Toolkit] Repository not found. Performing full setup instead...");
+            await SetupAiToolkitAsync(venvPath, onProgress, cancellationToken);
+            return;
+        }
+
+        onProgress?.Invoke($"[AI-Toolkit] Pulling latest changes in {installDir}...");
+        int pullExit = await _processRunner.RunAsync(
+            "git.exe",
+            "pull --recurse-submodules",
+            installDir,
+            null,
+            line => onProgress?.Invoke($"[git] {line}"),
+            line => onProgress?.Invoke($"[git err] {line}"),
+            cancellationToken
+        );
+
+        if (pullExit != 0) {
+            throw new InvalidOperationException("Failed to pull latest AI-Toolkit updates via Git.");
+        }
+
+        onProgress?.Invoke("[AI-Toolkit] Synchronizing submodules...");
+        await _processRunner.RunAsync(
+            "git.exe",
+            "submodule update --init --recursive",
+            installDir,
+            null,
+            line => onProgress?.Invoke($"[git] {line}"),
+            _ => { },
+            cancellationToken
+        );
+
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        if (!File.Exists(pythonExe)) {
+            pythonExe = "python.exe";
+        }
+
+        string reqFile = Path.Combine(installDir, "requirements.txt");
+        if (File.Exists(reqFile)) {
+            onProgress?.Invoke("[AI-Toolkit] Updating dependencies in .venv (protecting PyTorch wheels)...");
+            await _processRunner.RunAsync(
+                pythonExe,
+                $"-m pip install --no-cache-dir -r \"{reqFile}\" --no-deps",
+                installDir,
+                null,
+                line => onProgress?.Invoke($"[pip] {line}"),
+                line => onProgress?.Invoke($"[pip err] {line}"),
+                cancellationToken
+            );
+        }
+
+        onProgress?.Invoke("[AI-Toolkit] AI-Toolkit successfully updated to latest version!");
+    }
+
     public async Task SetupAiToolkitAsync(
         string venvPath,
         Action<string>? onProgress = null,

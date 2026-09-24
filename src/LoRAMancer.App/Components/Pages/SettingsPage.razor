@@ -112,31 +112,51 @@
         </div>
     </MudTabPanel>
 
-    <!-- AI-Toolkit Auto-Setup Tab -->
-    <MudTabPanel Text="AI-Toolkit Auto-Setup" Icon="@Icons.Material.Filled.Build">
+    <!-- AI-Toolkit Engine & Updates Tab -->
+    <MudTabPanel Text="AI-Toolkit Engine" Icon="@Icons.Material.Filled.Build">
         <div class="px-4 pb-4">
             <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(137, 180, 250, 0.15); color: #89b4fa;">
-                AI-Toolkit is LoRAMancer's primary training orchestrator engine. You can clone and provision it into your isolated AMD ROCm .venv automatically below.
+                AI-Toolkit is LoRAMancer's primary training engine. You can clone, provision, and update it via Git into your isolated AMD ROCm/PyTorch .venv automatically below.
             </MudAlert>
 
             <MudGrid>
                 <MudItem xs="12" md="6">
                     <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
-                        <MudText Typo="Typo.subtitle1" Style="font-weight:700;">Engine Status</MudText>
-                        <div class="d-flex align-center gap-2 my-2">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <MudText Typo="Typo.subtitle1" Style="font-weight:700;">Engine Status</MudText>
                             @if (ToolkitSetup.IsInstalled()) {
-                                <MudChip T="string" Color="Color.Success" Size="Size.Small">AI-Toolkit Installed & Ready</MudChip>
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">Installed & Ready</MudChip>
                             } else {
-                                <MudChip T="string" Color="Color.Warning" Size="Size.Small">Not Installed</MudChip>
+                                <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled">Not Installed</MudChip>
                             }
                         </div>
-                        <div style="font-size:0.8rem; color:#a6adc8;" class="mb-3">
+
+                        <div style="font-size:0.8rem; color:#a6adc8;" class="mb-1">
                             Path: <code>@ToolkitSetup.GetInstallDirectory()</code>
                         </div>
 
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="_isSettingUpToolkit" OnClick="AutoSetupAiToolkitAsync">
-                            @(_isSettingUpToolkit ? "Setting Up AI-Toolkit..." : "Auto-Setup / Clone AI-Toolkit")
-                        </MudButton>
+                        @if (!string.IsNullOrEmpty(_toolkitCommit)) {
+                            <div style="font-size:0.75rem; color:#89b4fa;" class="mb-3">
+                                Commit: <code>@_toolkitCommit</code>
+                            </div>
+                        } else {
+                            <div class="mb-3"></div>
+                        }
+
+                        <div class="d-flex gap-2">
+                            @if (ToolkitSetup.IsInstalled()) {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="UpdateAiToolkitAsync">
+                                    @(_isUpdatingToolkit ? "Updating AI-Toolkit..." : "Update AI-Toolkit (git pull)")
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                    Reinstall / Clean Setup
+                                </MudButton>
+                            } else {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                    @(_isSettingUpToolkit ? "Setting Up AI-Toolkit..." : "Auto-Setup / Clone AI-Toolkit")
+                                </MudButton>
+                            }
+                        </div>
                     </MudCard>
                 </MudItem>
 
@@ -147,7 +167,10 @@
 
                 @if (_toolkitLogs.Count > 0) {
                     <MudItem xs="12">
-                        <MudText Typo="Typo.subtitle2" Class="mb-1">Setup Telemetry Log</MudText>
+                        <div class="d-flex align-center justify-space-between mb-1">
+                            <MudText Typo="Typo.subtitle2">Setup & Update Telemetry Log</MudText>
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => _toolkitLogs.Clear())">Clear Log</MudButton>
+                        </div>
                         <div class="terminal-window p-3" style="height: 240px; overflow-y: auto;">
                             @foreach (var log in _toolkitLogs) {
                                 <div class="terminal-line">@log</div>
@@ -159,10 +182,33 @@
         </div>
     </MudTabPanel>
 
-    <!-- API Keys Tab (HuggingFace & Civitai) -->
-    <MudTabPanel Text="API Keys & Integrations" Icon="@Icons.Material.Filled.VpnKey">
+    <!-- User Profile & API Keys Tab -->
+    <MudTabPanel Text="User Profile & API Keys" Icon="@Icons.Material.Filled.Person">
         <div class="px-4 pb-4">
+            <MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Dense="true" Class="mb-4" Style="background-color: rgba(137, 180, 250, 0.1); border-color: #89b4fa; color: #cdd6f4;">
+                <MudIcon Icon="@Icons.Material.Filled.FolderShared" Size="Size.Small" Class="mr-2" />
+                All profile data, API keys, and application configurations are saved in your user profile: <code>@Settings.SettingsFilePath</code>. Nothing is committed or stored in the repository.
+            </MudAlert>
+
             <MudGrid>
+                <!-- User Profile Info -->
+                <MudItem xs="12">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Badge" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">User Profile Information</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Personalize your local instance and training metadata. Stored locally in <code>~/.loramancer/</code>.
+                        </MudText>
+
+                        <div class="d-flex gap-4">
+                            <MudTextField @bind-Value="_settings.UserDisplayName" Label="Display Name / Author" Placeholder="e.g. PromptAlchemist" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+                            <MudTextField @bind-Value="_settings.UserEmail" Label="User Email Address" Placeholder="e.g. user@example.com" Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex: 1;" />
+                        </div>
+                    </MudCard>
+                </MudItem>
+
                 <!-- HuggingFace Token -->
                 <MudItem xs="12" md="6">
                     <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
@@ -247,14 +293,19 @@
     private readonly Dictionary<string, (bool Reachable, string Message)> _urlStatuses = new();
 
     private bool _isSettingUpToolkit;
+    private bool _isUpdatingToolkit;
+    private string _toolkitCommit = string.Empty;
     private readonly List<string> _toolkitLogs = new();
 
     private bool _isValidatingHf;
     private bool _hfTokenValid;
     private string _hfValidationMessage = string.Empty;
 
-    protected override void OnInitialized() {
+    protected override async Task OnInitializedAsync() {
         _settings = Settings.Current;
+        if (ToolkitSetup.IsInstalled()) {
+            _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
+        }
     }
 
     private void AutoGenerateUrls() {
@@ -291,6 +342,29 @@
         }
     }
 
+    private async Task UpdateAiToolkitAsync() {
+        _isUpdatingToolkit = true;
+        _toolkitLogs.Clear();
+        _toolkitLogs.Add("[LoRAMancer] Updating AI-Toolkit via Git...");
+
+        try {
+            string venvPath = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
+            await ToolkitSetup.UpdateAiToolkitAsync(venvPath, line => {
+                InvokeAsync(() => {
+                    _toolkitLogs.Add(line);
+                    StateHasChanged();
+                });
+            });
+            _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
+            Snackbar.Add("AI-Toolkit updated to latest version!", Severity.Success);
+        } catch (Exception ex) {
+            _toolkitLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"AI-Toolkit update failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isUpdatingToolkit = false;
+        }
+    }
+
     private async Task AutoSetupAiToolkitAsync() {
         _isSettingUpToolkit = true;
         _toolkitLogs.Clear();
@@ -304,6 +378,7 @@
                     StateHasChanged();
                 });
             });
+            _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
             Snackbar.Add("AI-Toolkit setup completed successfully!", Severity.Success);
         } catch (Exception ex) {
             _toolkitLogs.Add($"[ERROR] {ex.Message}");

@@ -25,6 +25,10 @@ public sealed class AppSettings {
     public string AiToolkitPath { get; set; } = string.Empty;
     public string HfHomeCachePath { get; set; } = string.Empty;
 
+    // User Profile & Identifiable Information
+    public string UserEmail { get; set; } = string.Empty;
+    public string UserDisplayName { get; set; } = string.Empty;
+
     // API Keys
     public string HuggingFaceToken { get; set; } = string.Empty;
     public string CivitaiApiKey { get; set; } = string.Empty;

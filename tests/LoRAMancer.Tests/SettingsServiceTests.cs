@@ -41,4 +41,44 @@ public sealed class SettingsServiceTests {
         Assert.Contains("torch-3.0.0+rocm8.0.0-cp312-cp312-win_amd64.whl", settings.TorchWheelUrl);
         Assert.Contains("torchaudio-3.0.0+rocm8.0.0-cp312-cp312-win_amd64.whl", settings.TorchAudioWheelUrl);
     }
+
+    [Fact]
+    public void SettingsService_DefaultPath_IsUnderUserProfileLoramancer() {
+        SettingsService service = new();
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string expectedDir = Path.Combine(userProfile, ".loramancer");
+        string expectedFile = Path.Combine(expectedDir, "settings.json");
+
+        Assert.Equal(expectedDir, service.SettingsDirectory);
+        Assert.Equal(expectedFile, service.SettingsFilePath);
+    }
+
+    [Fact]
+    public async Task SaveAndLoadSettingsAsync_PersistsUserIdentifiableInfoAndApiKeys() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"credentials_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService service = new(null, tempFile);
+            AppSettings settings = new() {
+                UserEmail = "creator@loramancer.ai",
+                UserDisplayName = "WizardDev",
+                HuggingFaceToken = "hf_secret_token_12345",
+                CivitaiApiKey = "civitai_secret_key_67890"
+            };
+
+            await service.SaveSettingsAsync(settings);
+
+            SettingsService reloaded = new(null, tempFile);
+            AppSettings loaded = reloaded.LoadSettings();
+
+            Assert.Equal("creator@loramancer.ai", loaded.UserEmail);
+            Assert.Equal("WizardDev", loaded.UserDisplayName);
+            Assert.Equal("hf_secret_token_12345", loaded.HuggingFaceToken);
+            Assert.Equal("civitai_secret_key_67890", loaded.CivitaiApiKey);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }

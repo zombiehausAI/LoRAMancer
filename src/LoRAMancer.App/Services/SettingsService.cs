@@ -8,6 +8,9 @@ public sealed class SettingsService {
     private readonly HttpClient _httpClient;
     private AppSettings _currentSettings;
 
+    public string SettingsDirectory { get; }
+    public string SettingsFilePath => _settingsFilePath;
+
     public event Action<AppSettings>? OnSettingsChanged;
 
     public AppSettings Current => _currentSettings;
@@ -17,11 +20,25 @@ public sealed class SettingsService {
 
         if (!string.IsNullOrWhiteSpace(customSettingsPath)) {
             _settingsFilePath = customSettingsPath;
+            SettingsDirectory = Path.GetDirectoryName(customSettingsPath) ?? string.Empty;
         } else {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string appFolder = Path.Combine(appData, "LoRAMancer");
-            Directory.CreateDirectory(appFolder);
-            _settingsFilePath = Path.Combine(appFolder, "settings.json");
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            SettingsDirectory = Path.Combine(userProfile, ".loramancer");
+            if (!Directory.Exists(SettingsDirectory)) {
+                Directory.CreateDirectory(SettingsDirectory);
+            }
+            _settingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
+
+            // Migration: If .loramancer/settings.json does not exist yet, check and migrate legacy path
+            string legacyDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LoRAMancer");
+            string legacyFile = Path.Combine(legacyDir, "settings.json");
+            if (!File.Exists(_settingsFilePath) && File.Exists(legacyFile)) {
+                try {
+                    File.Copy(legacyFile, _settingsFilePath, overwrite: false);
+                } catch {
+                    // Fall back to clean default if legacy copy fails
+                }
+            }
         }
 
         _currentSettings = LoadSettings();
