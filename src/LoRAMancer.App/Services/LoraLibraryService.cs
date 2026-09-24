@@ -8,6 +8,7 @@ public sealed class LoraLibraryService {
     private readonly SafeTensorsMetadataReader _metadataReader;
     private readonly CivitaiService _civitaiService;
     private readonly SettingsService _settingsService;
+    private readonly LoraDatabaseService _databaseService;
     private readonly HttpClient _httpClient;
     private readonly string _cacheDirectory;
     private readonly List<LoraMetadata> _items = new();
@@ -38,24 +39,41 @@ public sealed class LoraLibraryService {
         SafeTensorsMetadataReader metadataReader,
         CivitaiService civitaiService,
         SettingsService settingsService,
+        LoraDatabaseService? databaseService = null,
         HttpClient? httpClient = null
     ) {
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _civitaiService = civitaiService ?? throw new ArgumentNullException(nameof(civitaiService));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+        _databaseService = databaseService ?? new LoraDatabaseService();
         _httpClient = httpClient ?? new HttpClient();
 
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _cacheDirectory = Path.Combine(userProfile, ".loramancer", "lora_cache");
         Directory.CreateDirectory(_cacheDirectory);
 
-        // Restore previously selected folder across sessions
+        // Restore previously selected folder paths across sessions
         string savedRoot = _settingsService.Current.LoraStorageDirectory;
         if (!string.IsNullOrWhiteSpace(savedRoot) && Directory.Exists(savedRoot)) {
             RootFolder = savedRoot;
             string savedCurrent = _settingsService.Current.LastSubfolderPath;
             CurrentFolder = (!string.IsNullOrWhiteSpace(savedCurrent) && Directory.Exists(savedCurrent)) ? savedCurrent : savedRoot;
-            StartScan(savedRoot, forceClear: false);
+        }
+
+        // Instant initialization from persistent SQLite library - no automatic rescanning!
+        _ = LoadFromDatabaseAsync();
+    }
+
+    public async Task LoadFromDatabaseAsync() {
+        try {
+            var dbItems = await _databaseService.GetAllAsync();
+            lock (_lock) {
+                _items.Clear();
+                _items.AddRange(dbItems);
+            }
+            OnLibraryUpdated?.Invoke();
+        } catch {
+            // Non-critical fallback
         }
     }
 
@@ -79,10 +97,44 @@ public sealed class LoraLibraryService {
             _items.RemoveAll(x => x.FilePath.Equals(meta.FilePath, StringComparison.OrdinalIgnoreCase));
             _items.Insert(0, meta);
         }
+        _ = _databaseService.UpsertSingleAsync(meta);
         OnLibraryUpdated?.Invoke();
     }
 
-    public void StartScan(string directoryPath, bool forceClear = true) {
+    public async Task ToggleFavoriteAsync(LoraMetadata meta) {
+        ArgumentNullException.ThrowIfNull(meta);
+        meta.IsFavorite = !meta.IsFavorite;
+        await _databaseService.SetFavoriteAsync(meta.FilePath, meta.IsFavorite);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task SetUserBaseModelAsync(LoraMetadata meta, string? baseModel) {
+        ArgumentNullException.ThrowIfNull(meta);
+        meta.UserBaseModel = string.IsNullOrWhiteSpace(baseModel) ? null : baseModel.Trim();
+        await _databaseService.SetUserBaseModelAsync(meta.FilePath, meta.UserBaseModel);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task RefreshSingleLoraAsync(LoraMetadata meta) {
+        ArgumentNullException.ThrowIfNull(meta);
+        if (File.Exists(meta.FilePath)) {
+            try {
+                LoraMetadata updated = await _metadataReader.ReadMetadataAsync(meta.FilePath);
+                updated.IsFavorite = meta.IsFavorite;
+                updated.UserBaseModel = meta.UserBaseModel;
+                updated.CivitaiInfo = meta.CivitaiInfo;
+                updated.LastModifiedUtc = File.GetLastWriteTimeUtc(meta.FilePath);
+                FindLocalThumbnail(updated);
+                LoadCachedCivitaiInfo(updated);
+                await _databaseService.UpsertSingleAsync(updated);
+                AddOrUpdateLora(updated);
+            } catch {
+                // Ignore single file parse errors
+            }
+        }
+    }
+
+    public void StartScan(string directoryPath, bool forceClear = false) {
         ArgumentException.ThrowIfNullOrWhiteSpace(directoryPath);
         if (!Directory.Exists(directoryPath)) {
             return;
@@ -105,14 +157,64 @@ public sealed class LoraLibraryService {
         IsScanning = true;
         ScannedCount = 0;
         TotalFiles = 0;
-        CurrentScanningFile = "Discovering files recursively...";
+        CurrentScanningFile = "Indexing directory files...";
         OnScanStateChanged?.Invoke(true);
 
         _ = Task.Run(async () => {
             try {
-                await ScanDirectoryStreamAsync(
-                    directoryPath,
-                    meta => {
+                var signatures = await _databaseService.GetFileSignaturesAsync();
+                string[] files = Directory.GetFiles(directoryPath, "*.safetensors", SearchOption.AllDirectories);
+                TotalFiles = files.Length;
+
+                List<LoraMetadata> batchToSave = new();
+
+                for (int i = 0; i < files.Length; i++) {
+                    if (token.IsCancellationRequested) {
+                        break;
+                    }
+
+                    string file = files[i];
+                    CurrentScanningFile = Path.GetFileName(file);
+                    ScannedCount = i + 1;
+                    OnScanProgress?.Invoke(CurrentScanningFile, ScannedCount, TotalFiles);
+
+                    try {
+                        DateTime diskTime = File.GetLastWriteTimeUtc(file);
+                        long diskSize = new FileInfo(file).Length;
+
+                        // Smart Differential Scan: Skip disk header parsing if already indexed & unchanged
+                        if (signatures.TryGetValue(file, out var sig) && sig.LastModified == diskTime && sig.Size == diskSize) {
+                            lock (_lock) {
+                                if (!_items.Any(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase))) {
+                                    // Item in DB but not yet in memory
+                                    var existing = _items.FirstOrDefault(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase));
+                                    if (existing == null) {
+                                        // Will be populated from DB reload at completion
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
+                        LoraMetadata meta = await _metadataReader.ReadMetadataAsync(file, token);
+                        meta.LastModifiedUtc = diskTime;
+                        FindLocalThumbnail(meta);
+                        LoadCachedCivitaiInfo(meta);
+
+                        // Preserve existing user customizations if present
+                        lock (_lock) {
+                            var prev = _items.FirstOrDefault(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase));
+                            if (prev != null) {
+                                meta.IsFavorite = prev.IsFavorite;
+                                meta.UserBaseModel = prev.UserBaseModel;
+                                if (meta.CivitaiInfo == null && prev.CivitaiInfo != null) {
+                                    meta.CivitaiInfo = prev.CivitaiInfo;
+                                }
+                            }
+                        }
+
+                        batchToSave.Add(meta);
+
                         lock (_lock) {
                             int existingIndex = _items.FindIndex(x => x.FilePath.Equals(meta.FilePath, StringComparison.OrdinalIgnoreCase));
                             if (existingIndex >= 0) {
@@ -121,17 +223,25 @@ public sealed class LoraLibraryService {
                                 _items.Add(meta);
                             }
                         }
-                        OnLibraryUpdated?.Invoke();
-                        return Task.CompletedTask;
-                    },
-                    (file, current, total) => {
-                        CurrentScanningFile = file;
-                        ScannedCount = current;
-                        TotalFiles = total;
-                        OnScanProgress?.Invoke(file, current, total);
-                    },
-                    token
-                );
+
+                        if (batchToSave.Count >= 25) {
+                            await _databaseService.UpsertBatchAsync(batchToSave);
+                            batchToSave.Clear();
+                            OnLibraryUpdated?.Invoke();
+                        }
+                    } catch {
+                        // Ignore corrupt or non-LoRA safetensors
+                    }
+                }
+
+                if (batchToSave.Count > 0) {
+                    await _databaseService.UpsertBatchAsync(batchToSave);
+                    batchToSave.Clear();
+                }
+
+                // Clean up any files that were deleted from disk
+                await _databaseService.DeleteMissingInFolderAsync(directoryPath, files);
+                await LoadFromDatabaseAsync();
             } catch (OperationCanceledException) {
                 // Background scan stopped
             } catch {
@@ -139,6 +249,7 @@ public sealed class LoraLibraryService {
             } finally {
                 IsScanning = false;
                 OnScanStateChanged?.Invoke(false);
+                OnLibraryUpdated?.Invoke();
             }
         }, token);
     }
@@ -170,6 +281,7 @@ public sealed class LoraLibraryService {
 
             try {
                 LoraMetadata meta = await _metadataReader.ReadMetadataAsync(file, cancellationToken);
+                meta.LastModifiedUtc = File.GetLastWriteTimeUtc(file);
                 FindLocalThumbnail(meta);
                 LoadCachedCivitaiInfo(meta);
                 discoveredCount++;
@@ -246,6 +358,7 @@ public sealed class LoraLibraryService {
                         meta.TrainedWords = cached.TrainedWords;
                     }
                     ApplyCachedThumbnail(meta);
+                    await _databaseService.UpsertSingleAsync(meta);
                     OnLoraEnriched?.Invoke(meta);
                     return cached;
                 }
@@ -258,7 +371,7 @@ public sealed class LoraLibraryService {
                     meta.TrainedWords = info.TrainedWords;
                 }
 
-                // Cache metadata
+                // Cache metadata on disk and in SQLite
                 await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(info), cancellationToken);
 
                 // Download & cache remote thumbnail if no local image exists
@@ -266,6 +379,7 @@ public sealed class LoraLibraryService {
                     await DownloadAndCacheThumbnailAsync(meta, info.PreviewImageUrl, cancellationToken);
                 }
 
+                await _databaseService.UpsertSingleAsync(meta);
                 OnLoraEnriched?.Invoke(meta);
                 return info;
             }
