@@ -28,6 +28,16 @@ public sealed class LoraLibraryService {
     public int EnrichTotal { get; private set; }
     public string CurrentEnrichingFile { get; private set; } = string.Empty;
 
+    private readonly List<LoraLibrary> _libraries = new();
+    public IReadOnlyList<LoraLibrary> Libraries {
+        get {
+            lock (_lock) {
+                return _libraries.ToList();
+            }
+        }
+    }
+    public LoraLibrary? ActiveLibrary { get; private set; }
+
     public IReadOnlyList<LoraMetadata> Items {
         get {
             lock (_lock) {
@@ -37,6 +47,7 @@ public sealed class LoraLibraryService {
     }
 
     public event Action? OnLibraryUpdated;
+    public event Action? OnLibrariesChanged;
     public event Action<string, int, int>? OnScanProgress;
     public event Action<bool>? OnScanStateChanged;
     public event Action<bool>? OnEnrichStateChanged;
@@ -72,13 +83,142 @@ public sealed class LoraLibraryService {
             CurrentFolder = (!string.IsNullOrWhiteSpace(savedCurrent) && Directory.Exists(savedCurrent)) ? savedCurrent : savedRoot;
         }
 
-        // Instant initialization from persistent SQLite library - no automatic rescanning!
-        _ = LoadFromDatabaseAsync();
+        // Instant initialization of libraries from persistent SQLite library - no automatic rescanning!
+        _ = InitializeLibrariesAsync();
+    }
+
+    public async Task InitializeLibrariesAsync() {
+        try {
+            var dbLibs = await _databaseService.GetLibrariesAsync();
+            lock (_lock) {
+                _libraries.Clear();
+                _libraries.AddRange(dbLibs);
+            }
+
+            if (_libraries.Count == 0) {
+                string defaultPath = !string.IsNullOrWhiteSpace(RootFolder) && Directory.Exists(RootFolder)
+                    ? RootFolder
+                    : (!string.IsNullOrWhiteSpace(_settingsService.Current.LoraStorageDirectory) && Directory.Exists(_settingsService.Current.LoraStorageDirectory)
+                        ? _settingsService.Current.LoraStorageDirectory
+                        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "models", "loras"));
+
+                var defaultLib = new LoraLibrary {
+                    Id = "default",
+                    Name = "Main Library",
+                    FolderPath = defaultPath,
+                    Description = "Primary LoRA collection",
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow
+                };
+                await _databaseService.UpsertLibraryAsync(defaultLib);
+                lock (_lock) {
+                    _libraries.Add(defaultLib);
+                }
+            }
+
+            string savedActiveId = _settingsService.Current.LastActiveLibraryId;
+            var targetLib = _libraries.FirstOrDefault(l => string.Equals(l.Id, savedActiveId, StringComparison.OrdinalIgnoreCase))
+                ?? _libraries[0];
+
+            await SwitchLibraryAsync(targetLib.Id);
+        } catch {
+            await LoadFromDatabaseAsync();
+        }
+    }
+
+    public async Task SwitchLibraryAsync(string libraryId) {
+        LoraLibrary? target;
+        lock (_lock) {
+            target = _libraries.FirstOrDefault(l => string.Equals(l.Id, libraryId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (target == null) {
+            return;
+        }
+
+        ActiveLibrary = target;
+        RootFolder = target.FolderPath;
+        CurrentFolder = target.FolderPath;
+        _settingsService.Current.LastActiveLibraryId = target.Id;
+        _settingsService.Current.LoraStorageDirectory = target.FolderPath;
+        _settingsService.Current.LastSubfolderPath = target.FolderPath;
+        _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
+
+        await LoadFromDatabaseAsync();
+        OnLibrariesChanged?.Invoke();
+    }
+
+    public async Task<LoraLibrary> CreateLibraryAsync(string name, string folderPath, string? description = null) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+
+        var lib = new LoraLibrary {
+            Id = "lib-" + Guid.NewGuid().ToString("N")[..8],
+            Name = name.Trim(),
+            FolderPath = folderPath.Trim(),
+            Description = description?.Trim(),
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        await _databaseService.UpsertLibraryAsync(lib);
+        lock (_lock) {
+            _libraries.RemoveAll(l => string.Equals(l.Id, lib.Id, StringComparison.OrdinalIgnoreCase));
+            _libraries.Add(lib);
+        }
+
+        OnLibrariesChanged?.Invoke();
+        return lib;
+    }
+
+    public async Task UpdateLibraryAsync(LoraLibrary library) {
+        ArgumentNullException.ThrowIfNull(library);
+        library.UpdatedAtUtc = DateTime.UtcNow;
+        await _databaseService.UpsertLibraryAsync(library);
+        lock (_lock) {
+            int idx = _libraries.FindIndex(l => string.Equals(l.Id, library.Id, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) {
+                _libraries[idx] = library;
+            } else {
+                _libraries.Add(library);
+            }
+        }
+        if (ActiveLibrary != null && string.Equals(ActiveLibrary.Id, library.Id, StringComparison.OrdinalIgnoreCase)) {
+            ActiveLibrary = library;
+            RootFolder = library.FolderPath;
+        }
+        OnLibrariesChanged?.Invoke();
+    }
+
+    public async Task DeleteLibraryAsync(string libraryId) {
+        await _databaseService.DeleteLibraryAsync(libraryId);
+        lock (_lock) {
+            _libraries.RemoveAll(l => string.Equals(l.Id, libraryId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (ActiveLibrary != null && string.Equals(ActiveLibrary.Id, libraryId, StringComparison.OrdinalIgnoreCase)) {
+            var fallback = _libraries.FirstOrDefault();
+            if (fallback != null) {
+                await SwitchLibraryAsync(fallback.Id);
+            } else {
+                ActiveLibrary = null;
+                await LoadFromDatabaseAsync();
+            }
+        }
+        OnLibrariesChanged?.Invoke();
     }
 
     public async Task LoadFromDatabaseAsync() {
         try {
-            var dbItems = await _databaseService.GetAllAsync();
+            List<LoraMetadata> dbItems;
+            if (ActiveLibrary != null) {
+                dbItems = await _databaseService.GetByLibraryAsync(ActiveLibrary.Id, ActiveLibrary.FolderPath);
+            } else if (!string.IsNullOrWhiteSpace(RootFolder)) {
+                dbItems = await _databaseService.GetByLibraryAsync(null, RootFolder);
+            } else {
+                dbItems = await _databaseService.GetAllAsync();
+            }
+
             lock (_lock) {
                 _items.Clear();
                 _items.AddRange(dbItems);
@@ -105,6 +245,9 @@ public sealed class LoraLibraryService {
     }
 
     public void AddOrUpdateLora(LoraMetadata meta) {
+        if (string.IsNullOrWhiteSpace(meta.LibraryId) && ActiveLibrary != null) {
+            meta.LibraryId = ActiveLibrary.Id;
+        }
         lock (_lock) {
             _items.RemoveAll(x => x.FilePath.Equals(meta.FilePath, StringComparison.OrdinalIgnoreCase));
             _items.Insert(0, meta);
@@ -132,6 +275,7 @@ public sealed class LoraLibraryService {
         if (File.Exists(meta.FilePath)) {
             try {
                 LoraMetadata updated = await _metadataReader.ReadMetadataAsync(meta.FilePath);
+                updated.LibraryId = meta.LibraryId ?? ActiveLibrary?.Id;
                 updated.IsFavorite = meta.IsFavorite;
                 updated.UserBaseModel = meta.UserBaseModel;
                 updated.CivitaiInfo = meta.CivitaiInfo;
@@ -210,6 +354,7 @@ public sealed class LoraLibraryService {
 
                         LoraMetadata meta = await _metadataReader.ReadMetadataAsync(file, token);
                         meta.LastModifiedUtc = diskTime;
+                        meta.LibraryId = ActiveLibrary?.Id;
                         FindLocalThumbnail(meta);
                         LoadCachedCivitaiInfo(meta);
 
