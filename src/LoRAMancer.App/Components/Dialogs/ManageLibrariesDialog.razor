@@ -232,7 +232,7 @@
         }
 
         try {
-            var subDirs = Directory.GetDirectories(root);
+            var subDirs = await Task.Run(() => Directory.GetDirectories(root));
             int created = 0;
             foreach (var dir in subDirs) {
                 string name = Path.GetFileName(dir);
