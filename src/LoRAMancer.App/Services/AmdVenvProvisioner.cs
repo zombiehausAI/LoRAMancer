@@ -346,6 +346,15 @@ public sealed class AmdVenvProvisioner {
         }
 
         string content = File.ReadAllText(distInfoPath);
+
+        // Auto-repair any previously applied malformed patch with leading indentation
+        if (content.Contains("    LibraryEntry(")) {
+            content = content.Replace("    LibraryEntry(", "LibraryEntry(");
+            File.WriteAllText(distInfoPath, content);
+            onProgress?.Invoke("[Patch] Corrected rocm_sdk _dist_info.py indentation.");
+            return;
+        }
+
         if (content.Contains("# [loramancer] windows-missing-libs")) {
             onProgress?.Invoke("[Patch] rocm_sdk _dist_info.py already contains patch.");
             return;
@@ -353,13 +362,13 @@ public sealed class AmdVenvProvisioner {
 
         List<string> missing = new();
         if (!content.Contains("\"hipsparselt\"")) {
-            missing.Add("    LibraryEntry(\"hipsparselt\", \"core\", \"libhipsparselt.so.0\", \"\"),");
+            missing.Add("LibraryEntry(\"hipsparselt\", \"core\", \"libhipsparselt.so.0\", \"\", optional=True)");
         }
         if (!content.Contains("\"hipdnn\"")) {
-            missing.Add("    LibraryEntry(\"hipdnn\", \"core\", \"libhipdnn.so.0\", \"\"),");
+            missing.Add("LibraryEntry(\"hipdnn\", \"core\", \"libhipdnn.so.0\", \"\", optional=True)");
         }
         if (!content.Contains("\"rocm-openblas\"")) {
-            missing.Add("    LibraryEntry(\"rocm-openblas\", \"core\", \"librocm-openblas.so.0\", \"\"),");
+            missing.Add("LibraryEntry(\"rocm-openblas\", \"core\", \"librocm-openblas.so.0\", \"\", optional=True)");
         }
 
         if (missing.Count > 0) {

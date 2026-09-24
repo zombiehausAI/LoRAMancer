@@ -81,6 +81,10 @@ public sealed class TrainingRunnerService {
             WorkingDirectory = Path.GetDirectoryName(configYamlPath) ?? Directory.GetCurrentDirectory()
         };
 
+        // Force unbuffered stdout/stderr streaming so logs and downloads appear immediately
+        startInfo.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
+        startInfo.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+
         // Inject GPU hardware environment flags based on detected accelerator
         var envInfo = new AmdEnvironmentInfo();
         new AmdVenvProvisioner(new Engines.ProcessRunner()).DetectGpuHardware(envInfo);
@@ -132,6 +136,8 @@ public sealed class TrainingRunnerService {
 
             CurrentProgress.Status = TrainingStatus.Training;
             OnProgressUpdated?.Invoke(CurrentProgress);
+
+            OnLogReceived?.Invoke($"[HOST] Process started (PID: {_currentProcess.Id}). If running this architecture for the first time, foundation model weights are currently downloading to your HuggingFace cache...");
 
             _currentProcess.BeginOutputReadLine();
             _currentProcess.BeginErrorReadLine();

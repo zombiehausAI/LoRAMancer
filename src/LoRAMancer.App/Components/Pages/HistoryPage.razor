@@ -164,9 +164,20 @@
                     </MudCardContent>
 
                     <MudCardActions Class="px-4 pb-3 pt-1 d-flex justify-space-between align-center" Style="border-top: 1px solid #313244;">
-                        <MudButton Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CloneToWizard(lora))">
-                            Clone Config
-                        </MudButton>
+                        <div class="d-flex gap-2 align-center">
+                            @if (lora.Status == "Failed" || lora.Status == "Cancelled") {
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" Size="Size.Small" OnClick="@(() => RetryTrainingFromHistory(lora))">
+                                    Retry Training
+                                </MudButton>
+                            } else {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" OnClick="@(() => RetryTrainingFromHistory(lora))">
+                                    Train Again
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CloneToWizard(lora))">
+                                Clone Config
+                            </MudButton>
+                        </div>
                         <div class="d-flex gap-1">
                             <MudTooltip Text="Open containing folder">
                                 <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => OpenFolder(lora.OutputFilePath))" />
@@ -228,6 +239,14 @@
         if (!string.IsNullOrWhiteSpace(text)) {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
             Snackbar.Add($"Copied '{text}' to clipboard!", Severity.Success);
+        }
+    }
+
+    private void RetryTrainingFromHistory(LoraHistoryRecord record) {
+        if (!string.IsNullOrWhiteSpace(record.ConfigYamlPath) && File.Exists(record.ConfigYamlPath)) {
+            NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(record.ConfigYamlPath)}&autostart=true");
+        } else {
+            Snackbar.Add("Training config file not found for this record.", Severity.Warning);
         }
     }
 
