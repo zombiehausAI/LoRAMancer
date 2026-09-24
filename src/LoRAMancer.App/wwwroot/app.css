@@ -10,6 +10,16 @@
     --text-primary: #cdd6f4;
     --text-secondary: #a6adc8;
     --text-muted: #6c7086;
+    
+    /* Modern UI Tokens */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+    --radius-pill: 9999px;
+    --shadow-subtle: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-elevated: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --shadow-glow: 0 0 16px -2px rgba(203, 166, 247, 0.35);
 }
 
 html, body {
@@ -21,6 +31,7 @@ html, body {
     color: var(--text-primary);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
 }
 
 /* Custom modern scrollbars */
@@ -30,23 +41,218 @@ html, body {
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--bg-dark-base);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
     background: var(--border-dark);
-    border-radius: 4px;
+    border-radius: var(--radius-pill);
+    border: 2px solid transparent;
+    background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
+/* ========================================================
+   MODERN COMPONENT OVERRIDES & ROUNDED EDGES
+   ======================================================== */
+
+/* Cards & Surfaces: Rounded, Inset Top Specular Highlight & Soft Shadow */
+.mud-card, .mud-paper {
+    border-radius: var(--radius-lg) !important;
+    border: 1px solid var(--border-dark);
+    box-shadow: var(--shadow-subtle) !important;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), 
+                box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1), 
+                border-color 0.22s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Interactive Card Elevation & Glow on Hover */
+.mud-card:hover {
+    border-color: rgba(203, 166, 247, 0.4);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 
+                0 8px 26px rgba(0, 0, 0, 0.28), 
+                0 0 14px -3px rgba(203, 166, 247, 0.25) !important;
+}
+
+/* Modern Rounded Buttons with Tactile Hover & Bloom */
+.mud-button {
+    border-radius: var(--radius-md) !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.3px;
+    text-transform: none !important;
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
+                box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
+                background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.mud-button:hover {
+    transform: translateY(-1.5px);
+}
+
+.mud-button:active {
+    transform: translateY(0.5px) scale(0.985);
+}
+
+/* Filled Buttons Hover Bloom */
+.mud-button-filled {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.mud-button-filled:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 14px -2px rgba(203, 166, 247, 0.4) !important;
+    filter: brightness(1.08);
+}
+
+.mud-button-filled.mud-button-filled-primary:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-purple) !important;
+}
+
+.mud-button-filled.mud-button-filled-secondary:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-blue) !important;
+}
+
+.mud-button-filled.mud-button-filled-info:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px #89b4fa !important;
+}
+
+.mud-button-filled.mud-button-filled-success:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 0 16px -2px var(--accent-green) !important;
+}
+
+/* Outlined Buttons Soft Background Hover */
+.mud-button-outlined {
+    border-width: 1.5px !important;
+}
+
+.mud-button-outlined:hover {
+    background-color: rgba(203, 166, 247, 0.08) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18), 0 0 10px -2px rgba(203, 166, 247, 0.25) !important;
+}
+
+/* Text Buttons */
+.mud-button-text:hover {
+    background-color: rgba(203, 166, 247, 0.1) !important;
+}
+
+/* Icon Buttons: Smooth Squircle Hover */
+.mud-icon-button {
+    border-radius: var(--radius-md) !important;
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
+                background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
+                box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.mud-icon-button:hover {
+    transform: translateY(-1.5px) scale(1.06);
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.mud-icon-button:active {
+    transform: translateY(0) scale(0.96);
+}
+
+/* Chips: Sleek Modern Rounded Pills */
+.mud-chip {
+    border-radius: var(--radius-pill) !important;
+    font-weight: 600;
+    transition: transform 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.mud-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Modern Input Controls & Selects */
+.mud-input-control {
+    border-radius: var(--radius-md);
+}
+
+.mud-input-outlined-border {
+    border-radius: var(--radius-md) !important;
+    border-color: var(--border-dark) !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Input Focus Glow Highlight */
+.mud-input-control:focus-within .mud-input-outlined-border {
+    border-color: var(--accent-purple) !important;
+    box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.22) !important;
+}
+
+/* Dialogs: Rounded Modern Glassmorphism Aesthetic */
+.mud-dialog {
+    border-radius: var(--radius-xl) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid var(--border-dark) !important;
+    overflow: hidden;
+}
+
+.mud-dialog-title {
+    padding: 1.25rem 1.5rem !important;
+    border-bottom: 1px solid var(--border-dark);
+}
+
+.mud-dialog-actions {
+    padding: 1rem 1.5rem !important;
+    border-top: 1px solid var(--border-dark);
+}
+
+/* Popover & Menus: Rounded with Depth */
+.mud-popover, .mud-menu {
+    border-radius: var(--radius-md) !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45) !important;
+    border: 1px solid var(--border-dark);
+}
+
+/* Navigation Drawer Links */
+.mud-nav-link {
+    border-radius: var(--radius-md) !important;
+    margin: 3px 8px !important;
+    transition: transform 0.18s ease, background-color 0.18s ease, color 0.18s ease !important;
+}
+
+.mud-nav-link:hover {
+    background-color: rgba(203, 166, 247, 0.1) !important;
+    color: var(--accent-purple) !important;
+    transform: translateX(3px);
+}
+
+.mud-nav-link.active {
+    background: linear-gradient(90deg, rgba(203, 166, 247, 0.2), rgba(137, 180, 250, 0.06)) !important;
+    border-left: 3px solid var(--accent-purple) !important;
+    color: var(--accent-purple) !important;
+    font-weight: 600;
+}
+
+/* Modern Tables */
+.mud-table {
+    border-radius: var(--radius-lg) !important;
+    overflow: hidden;
+}
+
+.mud-table-row {
+    transition: background-color 0.15s ease !important;
+}
+
+.mud-table-row:hover {
+    background-color: rgba(203, 166, 247, 0.06) !important;
+}
+
+/* ========================================================
+   CUSTOM UTILITIES & SPECIAL COMPONENTS
+   ======================================================== */
+
 /* Terminal Console Log Styles */
 .terminal-window {
     background-color: #0b0b10 !important;
     border: 1px solid var(--border-dark);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 0.85rem;
     line-height: 1.45;
@@ -78,25 +284,29 @@ html, body {
 /* Drag and Drop Zone */
 .drop-zone {
     border: 2px dashed var(--border-dark);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     padding: 2.5rem 1.5rem;
     text-align: center;
     background-color: var(--bg-dark-surface);
-    transition: all 0.2s ease-in-out;
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
 }
 
 .drop-zone:hover, .drop-zone.dragover {
     border-color: var(--accent-purple);
     background-color: var(--bg-dark-overlay);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 0 12px rgba(203, 166, 247, 0.2);
 }
 
 /* Glassmorphism Cards */
 .glass-panel {
     background: var(--bg-dark-surface);
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border-dark);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-subtle);
 }
 
 #blazor-error-ui {
