@@ -19,6 +19,7 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 Comprehensive guides and architectural specifications are located in the [`docs/`](docs/) folder and can also be viewed directly inside the application under the **Documentation** tab:
 
 - 📖 [Comprehensive Features & Subsystems Reference](docs/FEATURES_OVERVIEW.md)
+- 🎛️ [LoRA Training Hyperparameters & Options Guide](docs/HYPERPARAMETER_GUIDE.md)
 - 📚 [LoRA Library & Multi-Library Browser Guide](docs/LORA_LIBRARY_BROWSER.md)
 - 🧙 [Civitai-Style Training Wizard & Estimators](docs/TRAINING_WIZARD.md)
 - ⚡ [Universal GPU & Environment Provisioning (ROCm / CUDA / Intel / CPU)](docs/GPU_AND_ENVIRONMENT_SETUP.md)
