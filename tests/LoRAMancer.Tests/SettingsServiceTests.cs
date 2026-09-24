@@ -81,4 +81,31 @@ public sealed class SettingsServiceTests {
             }
         }
     }
+
+    [Fact]
+    public async Task SaveAndLoadSettingsAsync_PersistsOllamaEndpointAndCredentials() {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"ollama_settings_test_{Guid.NewGuid():N}.json");
+
+        try {
+            SettingsService service = new(null, tempFile);
+            AppSettings settings = new() {
+                OllamaEndpointUrl = "https://ollama.internal.datacenter.net:11434",
+                OllamaApiKey = "datacenter_bearer_token_xyz",
+                OllamaDefaultModel = "llava:34b"
+            };
+
+            await service.SaveSettingsAsync(settings);
+
+            SettingsService reloaded = new(null, tempFile);
+            AppSettings loaded = reloaded.LoadSettings();
+
+            Assert.Equal("https://ollama.internal.datacenter.net:11434", loaded.OllamaEndpointUrl);
+            Assert.Equal("datacenter_bearer_token_xyz", loaded.OllamaApiKey);
+            Assert.Equal("llava:34b", loaded.OllamaDefaultModel);
+        } finally {
+            if (File.Exists(tempFile)) {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }

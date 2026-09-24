@@ -102,7 +102,14 @@ LoRAMancer includes full Git integration in the UI for effortless plugin discove
 ## Default Included Plugins
 
 ### Ollama Vision LoRA Tagger & Captioner (`plugins/ollama_lora_tagger/`)
-LoRAMancer ships with a built-in Python plugin for automated AI image tagging and caption generation powered by local Ollama vision models (`llama3.2-vision`, `llava`, `minicpm-v`, `qwen2-vl`):
+LoRAMancer ships with a built-in Python plugin for automated AI image tagging and caption generation powered by Ollama vision models:
+- **Flexible Endpoints & Datacenters**:
+  - Connects to local default (`http://localhost:11434`), remote LAN host, or enterprise datacenter proxy.
+  - Supports optional Bearer Auth / API Key tokens for secured remote endpoints.
+  - Interactive "Test Connection" button in UI with auto-detection of available models on the host.
+- **Local & Cloud Model Support**:
+  - Out of the box support for popular vision models: `llama3.2-vision`, `llava`, `llava:34b`, `minicpm-v`, `qwen2-vl`.
+  - Supports custom and cloud-hosted vision models simply by entering the model identifier or tag.
 - **Flexible Inputs**: Accepts either a folder of images or a raw `.zip` archive.
 - **Auto-Extraction**: ZIP archives are automatically extracted into a managed cache directory (`~/.loramancer/extracted_datasets/`).
 - **Customizable Tagging Rules**:
@@ -110,4 +117,4 @@ LoRAMancer ships with a built-in Python plugin for automated AI image tagging an
   - **Inclusion Enforcement**: Guarantees specified mandatory terms/phrases are included.
   - **Blacklist Filtering**: Strips unwanted words, watermarks, or quality artifacts from generated captions.
   - **Caption Styles**: Supports comma-separated visual tags (ideal for SDXL, Pony, Illustrious) or natural language descriptive sentences (ideal for FLUX.1).
-- **Export Formats**: Outputs directly to a folder or generates a compressed `.zip` archive ready for training. The Training Wizard can auto-extract and verify the dataset with 1 click.
+- **Export Formats**: Outputs directly to a folder or generates a compressed `.zip` archive ready for training. The Training Wizard seamlessly accepts and auto-extracts `.zip` archives.

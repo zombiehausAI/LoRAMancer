@@ -35,11 +35,14 @@ DEFAULT_NATURAL_PROMPT = (
 )
 
 
-def ping_ollama(url: str = "http://localhost:11434") -> dict:
+def ping_ollama(url: str = "http://localhost:11434", api_key: str = "") -> dict:
     url = url.rstrip("/")
     try:
-        req = urllib.request.Request(f"{url}/api/tags", headers={"User-Agent": "LoRAMancer-Tagger/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as response:
+        headers = {"User-Agent": "LoRAMancer-Tagger/1.0"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(f"{url}/api/tags", headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
                 models = [m.get("name", "") for m in data.get("models", [])]
@@ -48,6 +51,7 @@ def ping_ollama(url: str = "http://localhost:11434") -> dict:
                 ]
                 return {
                     "reachable": True,
+                    "url": url,
                     "all_models": models,
                     "vision_models": vision_models,
                     "default_model": vision_models[0] if vision_models else (models[0] if models else "llama3.2-vision")
@@ -55,6 +59,7 @@ def ping_ollama(url: str = "http://localhost:11434") -> dict:
     except Exception as e:
         return {
             "reachable": False,
+            "url": url,
             "error": str(e),
             "all_models": [],
             "vision_models": [],
@@ -62,6 +67,7 @@ def ping_ollama(url: str = "http://localhost:11434") -> dict:
         }
     return {
         "reachable": False,
+        "url": url,
         "error": "Unknown connection state",
         "all_models": [],
         "vision_models": [],
@@ -74,7 +80,8 @@ def query_ollama_vision(
     model: str,
     prompt: str,
     ollama_url: str = "http://localhost:11434",
-    timeout: int = 60
+    api_key: str = "",
+    timeout: int = 120
 ) -> str:
     url = f"{ollama_url.rstrip('/')}/api/generate"
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
@@ -91,10 +98,14 @@ def query_ollama_vision(
     }
 
     req_data = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json", "User-Agent": "LoRAMancer-Tagger/1.0"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     req = urllib.request.Request(
         url,
         data=req_data,
-        headers={"Content-Type": "application/json", "User-Agent": "LoRAMancer-Tagger/1.0"}
+        headers=headers
     )
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -177,6 +188,7 @@ def handle_tag_dataset(data: dict) -> dict:
     output_path = data.get("output_path", "").strip()
     trigger_word = data.get("trigger_word", "").strip()
     ollama_url = data.get("ollama_url", "http://localhost:11434").strip()
+    api_key = data.get("api_key", "").strip()
     model = data.get("model", "llama3.2-vision").strip()
     caption_style = data.get("caption_style", "tags").strip()
     custom_prompt = data.get("custom_prompt", "").strip()
@@ -199,7 +211,7 @@ def handle_tag_dataset(data: dict) -> dict:
         return {"status": "error", "message": f"Input path does not exist: {input_path}"}
 
     # Verify Ollama reachability
-    ollama_status = ping_ollama(ollama_url)
+    ollama_status = ping_ollama(ollama_url, api_key=api_key)
     if not ollama_status["reachable"]:
         return {
             "status": "error",
@@ -254,7 +266,7 @@ def handle_tag_dataset(data: dict) -> dict:
             with open(img_path, "rb") as f:
                 img_data = f.read()
 
-            raw_caption = query_ollama_vision(img_data, model, prompt, ollama_url)
+            raw_caption = query_ollama_vision(img_data, model, prompt, ollama_url, api_key=api_key)
             final_caption = sanitize_and_format_caption(
                 raw_caption,
                 trigger_word=trigger_word,
@@ -330,8 +342,11 @@ def main():
     except Exception:
         data = {}
 
+    api_key = data.get("api_key", "").strip()
+    ollama_url = data.get("ollama_url", "http://localhost:11434").strip()
+
     if args.cmd == "ping":
-        ollama_info = ping_ollama(data.get("ollama_url", "http://localhost:11434"))
+        ollama_info = ping_ollama(ollama_url, api_key=api_key)
         result = {
             "status": "success",
             "message": "Ollama LoRA Tagger plugin is active",
@@ -339,7 +354,7 @@ def main():
             "ollama": ollama_info
         }
     elif args.cmd == "check_ollama":
-        result = ping_ollama(data.get("ollama_url", "http://localhost:11434"))
+        result = ping_ollama(ollama_url, api_key=api_key)
     elif args.cmd == "tag_dataset":
         result = handle_tag_dataset(data)
     else:

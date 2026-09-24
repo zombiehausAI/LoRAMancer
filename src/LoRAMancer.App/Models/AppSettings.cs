@@ -29,9 +29,12 @@ public sealed class AppSettings {
     public string UserEmail { get; set; } = string.Empty;
     public string UserDisplayName { get; set; } = string.Empty;
 
-    // API Keys
+    // API Keys & Integrations
     public string HuggingFaceToken { get; set; } = string.Empty;
     public string CivitaiApiKey { get; set; } = string.Empty;
+    public string OllamaEndpointUrl { get; set; } = "http://localhost:11434";
+    public string OllamaApiKey { get; set; } = string.Empty;
+    public string OllamaDefaultModel { get; set; } = "llama3.2-vision";
 
     public void UpdateFromBaseUrl(string newBaseUrl, string newTorchVersion, string pythonTag = "cp312-cp312") {
         if (string.IsNullOrWhiteSpace(newBaseUrl)) {

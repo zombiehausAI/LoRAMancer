@@ -2,6 +2,7 @@
 @using LoRAMancer.App.Services
 @using System.Text.Json
 @inject PluginManagerService PluginManager
+@inject SettingsService Settings
 @inject NativeFileDialogService FileDialogService
 @inject ISnackbar Snackbar
 
@@ -11,26 +12,44 @@
             <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" />
             <div>
                 <MudText Typo="Typo.h6" Style="font-weight: 700;">Ollama Vision LoRA Tagger & Captioner</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Auto-caption training images using local Ollama vision models into ready-to-train datasets or ZIPs</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Auto-caption training images using local, remote LAN, or datacenter Ollama vision models</MudText>
             </div>
         </div>
     </TitleContent>
     <DialogContent>
-        <!-- Ollama Connectivity Status Banner -->
-        @if (_isCheckingOllama) {
-            <div class="d-flex align-center gap-2 mb-3">
-                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Probing local Ollama instance on http://localhost:11434...</MudText>
+        <!-- Ollama Endpoint & Model Config -->
+        <MudCard Elevation="0" Class="p-3 mb-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+            <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Primary" Size="Size.Small" />
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Ollama Service Endpoint</MudText>
+                    @if (_isCheckingOllama) {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Probing...</MudChip>
+                    } else if (_ollamaReachable) {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Connected (@_visionModels.Count model(s))</MudChip>
+                    } else {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Unreachable</MudChip>
+                    }
+                </div>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="CheckOllamaStatusAsync" Disabled="_isProcessing || _isCheckingOllama">
+                    Test Connection
+                </MudButton>
             </div>
-        } else if (_ollamaReachable) {
-            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mb-3" Style="font-size: 0.8rem;">
-                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Class="mr-1" />
-                Ollama is active! Detected @(_visionModels.Count) vision model(s): <b>@(string.Join(", ", _visionModels.Take(3)))</b>
-            </MudAlert>
-        } else {
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_ollamaUrl" Label="Ollama URL (Local, Remote LAN, or Datacenter)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="http://localhost:11434" HelperText="Supports remote servers, LAN IPs, or datacenter Ollama proxies" Disabled="_isProcessing" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField @bind-Value="_apiKey" Label="API Key / Auth Token (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password" Placeholder="Bearer token for cloud/datacenter" Disabled="_isProcessing" />
+                </MudItem>
+            </MudGrid>
+        </MudCard>
+
+        @if (!_ollamaReachable && !_isCheckingOllama) {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="font-size: 0.8rem;">
                 <MudIcon Icon="@Icons.Material.Filled.Warning" Size="Size.Small" Class="mr-1" />
-                Ollama service not detected on localhost:11434. Please install Ollama from <code>ollama.com</code> and run a vision model (e.g. <code>ollama run llama3.2-vision</code>).
+                Could not connect to Ollama at <code>@_ollamaUrl</code>. Ensure Ollama is running or verify your network address/token.
             </MudAlert>
         }
 
@@ -58,18 +77,16 @@
                 <MudTextField @bind-Value="_triggerWord" Label="Trigger Word / Phrase" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. sks character, ohwx style" HelperText="Prepended to every generated caption" Disabled="_isProcessing" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudSelect @bind-Value="_selectedModel" Label="Ollama Vision Model" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_isProcessing">
-                    @if (_visionModels.Count > 0) {
+                <MudTextField @bind-Value="_selectedModel" Label="Vision Model (Local or Cloud)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. llama3.2-vision, llava, qwen2-vl" HelperText="Type any local or cloud vision model tag" Disabled="_isProcessing" />
+                @if (_visionModels.Count > 0) {
+                    <div class="d-flex flex-wrap gap-1 mt-1">
                         @foreach (var m in _visionModels) {
-                            <MudSelectItem Value="@m">@m</MudSelectItem>
+                            <MudChip T="string" Size="Size.Small" Variant="@(_selectedModel == m ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" OnClick="@(() => _selectedModel = m)" Style="font-size: 0.7rem; height: 22px; cursor: pointer;">
+                                @m
+                            </MudChip>
                         }
-                    } else {
-                        <MudSelectItem Value="@("llama3.2-vision")">llama3.2-vision</MudSelectItem>
-                        <MudSelectItem Value="@("llava")">llava</MudSelectItem>
-                        <MudSelectItem Value="@("minicpm-v")">minicpm-v</MudSelectItem>
-                        <MudSelectItem Value="@("qwen2-vl")">qwen2-vl</MudSelectItem>
-                    }
-                </MudSelect>
+                    </div>
+                }
             </MudItem>
 
             <MudItem xs="12" sm="6">
@@ -92,7 +109,7 @@
             <div class="mt-4 p-3 text-center" style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                 <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-2" />
                 <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Ollama Vision is analyzing and tagging your images...</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Please wait while the local neural network processes each picture.</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Targeting model: <b>@_selectedModel</b> at <b>@_ollamaUrl</b></MudText>
             </div>
         } else if (_lastResult != null) {
             <MudCard Elevation="0" Class="mt-4 p-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
@@ -153,6 +170,8 @@
     [Parameter]
     public string InitialTriggerWord { get; set; } = string.Empty;
 
+    private string _ollamaUrl = "http://localhost:11434";
+    private string _apiKey = string.Empty;
     private string _inputPath = string.Empty;
     private string _outputPath = string.Empty;
     private string _triggerWord = string.Empty;
@@ -172,6 +191,17 @@
     protected override async Task OnInitializedAsync() {
         _inputPath = InitialInputPath;
         _triggerWord = InitialTriggerWord;
+
+        if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaEndpointUrl)) {
+            _ollamaUrl = Settings.Current.OllamaEndpointUrl;
+        }
+        if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaApiKey)) {
+            _apiKey = Settings.Current.OllamaApiKey;
+        }
+        if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel)) {
+            _selectedModel = Settings.Current.OllamaDefaultModel;
+        }
+
         await CheckOllamaStatusAsync();
     }
 
@@ -181,7 +211,8 @@
 
         try {
             var result = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "check_ollama", new Dictionary<string, object?> {
-                ["ollama_url"] = "http://localhost:11434"
+                ["ollama_url"] = _ollamaUrl.Trim(),
+                ["api_key"] = _apiKey.Trim()
             });
 
             string dataStr = result.Data?.ToString() ?? string.Empty;
@@ -202,7 +233,7 @@
 
                 if (root.TryGetProperty("default_model", out var defElem)) {
                     string def = defElem.GetString() ?? string.Empty;
-                    if (!string.IsNullOrEmpty(def)) {
+                    if (!string.IsNullOrEmpty(def) && string.IsNullOrWhiteSpace(_selectedModel)) {
                         _selectedModel = def;
                     }
                 }
@@ -246,6 +277,12 @@
         _lastResult = null;
         StateHasChanged();
 
+        // Update settings in memory so user preferences persist
+        Settings.Current.OllamaEndpointUrl = _ollamaUrl.Trim();
+        Settings.Current.OllamaApiKey = _apiKey.Trim();
+        Settings.Current.OllamaDefaultModel = _selectedModel.Trim();
+        _ = Settings.SaveSettingsAsync(Settings.Current);
+
         try {
             var parameters = new Dictionary<string, object?> {
                 ["input_path"] = _inputPath,
@@ -256,7 +293,8 @@
                 ["model"] = _selectedModel,
                 ["caption_style"] = _captionStyle,
                 ["create_zip"] = _createZip,
-                ["ollama_url"] = "http://localhost:11434"
+                ["ollama_url"] = _ollamaUrl.Trim(),
+                ["api_key"] = _apiKey.Trim()
             };
 
             var pluginResult = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "tag_dataset", parameters);
