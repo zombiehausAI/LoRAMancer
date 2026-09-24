@@ -1,3 +1,5 @@
+@inject IDialogService DialogService
+
 <MudNavMenu Class="pt-4">
     <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-2" Style="font-weight: 600; text-transform: uppercase;">Workflows</MudText>
     <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderSpecial">
@@ -8,6 +10,9 @@
     </MudNavLink>
     <MudNavLink Href="history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HistoryEdu">
         History & Vault
+    </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
+        Ollama Vision Tagger
     </MudNavLink>
 
     <MudDivider Class="my-4" Style="border-color: #313244;" />
@@ -29,3 +34,10 @@
         Documentation
     </MudNavLink>
 </MudNavMenu>
+
+@code {
+    private async Task OpenOllamaTaggerAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<OllamaTaggerDialog>("Ollama Vision LoRA Tagger", options);
+    }
+}

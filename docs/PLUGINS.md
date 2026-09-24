@@ -146,4 +146,161 @@ LoRAMancer ships with a built-in Python plugin for automated Civitai model versi
   - A persistent background banner on the main dashboard displays real-time operation status, current file progress, and 1-click controls to reopen details or cancel execution at any time.
 - **Interactive UI**: Launched directly from the LoRA Library Browser toolbar (**"Lora Updater"**) or via the Plugin Manager.
 
+## Developer Guide: Building & Integrating Plugins into the UI
 
+This guide explains how external and open-source contributors can build new plugins for LoRAMancer and integrate them into the user interface.
+
+### 1. Choosing Between Python and C#
+
+| Feature | Python Plugin | C# (.NET 10) Plugin |
+| :--- | :--- | :--- |
+| **Best For** | AI/ML pipelines, vision models, dataset prep, Hugging Face / Civitai APIs | High-throughput file system parsing, native math, UI-heavy tools |
+| **Execution** | Out-of-process in an isolated virtual environment (`.venv`) | In-process in an isolated `AssemblyLoadContext` |
+| **GPU Acceleration** | Auto-provisions matching PyTorch wheels (AMD ROCm / NVIDIA CUDA / Intel XPU / CPU) | Native C# or pinvoke |
+| **Distribution** | Git repository with `plugin.json` and `requirements.txt` | Compiled `.dll` package |
+
+---
+
+### 2. Standard Command Contract & Execution
+
+Every plugin must respond to incoming commands with structured JSON:
+
+```json
+{
+  "success": true,
+  "message": "Operation completed successfully",
+  "data": { ... }
+}
+```
+
+#### Diagnostic `ping` Command
+Every plugin **must** implement a `ping` command. The Plugin Manager UI executes `ping` when users click the **Test** button to verify the environment:
+
+```python
+# plugin.py
+import sys, json
+
+def handle_ping(params):
+    return {"success": True, "message": "Pong! Plugin environment healthy.", "data": {"version": "1.0.0"}}
+
+def main():
+    if len(sys.argv) < 3:
+        print(json.dumps({"success": False, "message": "Usage: python plugin.py <command> <json_params>"}))
+        return
+    command = sys.argv[1]
+    params = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+
+    if command == "ping":
+        result = handle_ping(params)
+    elif command == "my_custom_action":
+        result = handle_custom_action(params)
+    else:
+        result = {"success": False, "message": f"Unknown command: {command}"}
+
+    print(json.dumps(result))
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+### 3. Exposing Your Plugin in the User Interface
+
+LoRAMancer provides three standard UI integration patterns depending on the plugin's workflow:
+
+#### Pattern A: Standalone Workflow (Left Navigation Bar & Dialog)
+Use this when your plugin performs a task that users want to trigger independently (e.g., dataset tagging, model conversion, Civitai syncing).
+
+1. **Create a Blazor Dialog Component** in `src/LoRAMancer.App/Components/Dialogs/MyPluginDialog.razor`:
+   ```razor
+   @using LoRAMancer.App.Services
+   @inject PluginManagerService PluginManager
+   @inject ISnackbar Snackbar
+
+   <MudDialog>
+       <TitleContent>
+           <MudText Typo="Typo.h6">My Plugin Tool</MudText>
+       </TitleContent>
+       <DialogContent>
+           <!-- Parameters & options -->
+           <MudTextField @bind-Value="_inputPath" Label="Target Path" Variant="Variant.Outlined" />
+       </DialogContent>
+       <DialogActions>
+           <MudButton OnClick="RunPluginAsync" Color="Color.Primary" Variant="Variant.Filled">Run</MudButton>
+       </DialogActions>
+   </MudDialog>
+
+   @code {
+       [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+       private string _inputPath = string.Empty;
+
+       private async Task RunPluginAsync() {
+           var parameters = new Dictionary<string, object?> { ["input_path"] = _inputPath };
+           var result = await PluginManager.ExecutePluginAsync("my-plugin-id", "my_custom_action", parameters);
+           if (result.Success) {
+               Snackbar.Add(result.Message, Severity.Success);
+               MudDialog.Close(DialogResult.Ok(result));
+           } else {
+               Snackbar.Add(result.Message, Severity.Error);
+           }
+       }
+   }
+   ```
+
+2. **Register a Link in the Navigation Bar** (`src/LoRAMancer.App/Components/Layout/NavMenu.razor`):
+   ```razor
+   <MudNavLink Icon="@Icons.Material.Filled.AutoFixHigh" OnClick="OpenMyPluginAsync">
+       My Plugin Tool
+   </MudNavLink>
+
+   @code {
+       private async Task OpenMyPluginAsync() {
+           var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+           await DialogService.ShowAsync<MyPluginDialog>("My Plugin Tool", options);
+       }
+   }
+   ```
+
+#### Pattern B: In-Workflow Action (Toolbar or Wizard Integration)
+Use this when your plugin enriches an existing workflow (e.g., adding auto-captioning directly inside the **Civitai Training Wizard**, or adding model checking to the **LoRA Library Browser** toolbar):
+* Inject `IDialogService` into the existing page or wizard component.
+* Add an action button that opens your dialog pre-seeded with context (e.g., the currently selected model or dataset folder).
+
+#### Pattern C: Long-Running Asynchronous Background Services
+For tasks taking minutes or hours (e.g., bulk downloads or heavy inference):
+* Wrap plugin execution in a dedicated singleton service (similar to `LoraUpdaterService.cs`).
+* Maintain a background status object with progress percentages and logs.
+* Display a persistent banner in `MainLayout.razor` or `LoraManagerDashboard.razor` so users can monitor progress or continue working without keeping a dialog open.
+
+---
+
+### 4. Hardware Acceleration & PyTorch Matching
+
+If your Python plugin relies on PyTorch (e.g. for vision or embedding models), include `torch` in `requirements.txt`. 
+
+When LoRAMancer provisions the plugin's `.venv`, it automatically detects the host GPU vendor and executes hardware-matched installation before general dependencies:
+* **AMD Radeon / ROCm**: Installs Windows ROCm wheels from the configured Radeon repository.
+* **NVIDIA RTX / CUDA**: Installs CUDA wheels via `--index-url https://download.pytorch.org/whl/cu124`.
+* **Intel Arc / XPU**: Installs Intel XPU wheels via `--index-url https://download.pytorch.org/whl/xpu`.
+* **CPU fallback**: Installs lightweight CPU wheels.
+
+Developers do **not** need to write custom GPU detection logic; LoRAMancer handles this automatically.
+
+---
+
+### 5. Distributing as an Open-Source Git Plugin
+
+To publish a plugin that any LoRAMancer user can install via **Install from Git**:
+
+1. Create a public Git repository containing:
+   ```text
+   my-loramancer-plugin/
+   ├── plugin.json         # id, name, version, description, entryPoint
+   ├── plugin.py           # CLI runner implementing "ping" and custom commands
+   ├── requirements.txt    # Python dependencies
+   ├── README.md           # Documentation for users
+   └── LICENSE             # Open-source license (MIT, Apache 2.0, etc.)
+   ```
+2. Users can paste the repository URL into **Plugin Manager > Install from Git**.
+3. LoRAMancer clones the repository, provisions an isolated `.venv`, and marks it ready for use.
