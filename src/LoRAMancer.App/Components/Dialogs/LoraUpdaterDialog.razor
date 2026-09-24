@@ -3,6 +3,7 @@
 @using System.Text.Json
 @implements IDisposable
 @inject LoraUpdaterService UpdaterService
+@inject LoraLibraryService LibraryService
 @inject SettingsService Settings
 @inject NativeFileDialogService FileDialogService
 @inject ISnackbar Snackbar
@@ -21,8 +22,22 @@
     </TitleContent>
     <DialogContent>
         <!-- Configuration Card -->
-        <MudCard Elevation="0" Class="pa-3 mb-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+        <MudCard Elevation="0" Class="pa-3 mb-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
             <MudGrid Spacing="2">
+                @if (LibraryService.Libraries.Count > 0) {
+                    <!-- Target Library Selector -->
+                    <MudItem xs="12">
+                        <MudSelect T="string" Value="_selectedLibraryId" ValueChanged="OnLibraryChanged" Label="Target Library" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="UpdaterService.IsRunning">
+                            @foreach (var lib in LibraryService.Libraries) {
+                                <MudSelectItem Value="@lib.Id">
+                                    📚 @lib.Name (@lib.ModelCount models) - @lib.FolderPath
+                                </MudSelectItem>
+                            }
+                            <MudSelectItem Value="@("custom")">📁 Custom Folder (Manual Selection)</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                }
+
                 <!-- Target Directory -->
                 <MudItem xs="12" md="8">
                     <div class="d-flex align-center gap-2">
@@ -199,6 +214,7 @@
     [Parameter]
     public string InitialFolder { get; set; } = string.Empty;
 
+    private string _selectedLibraryId = string.Empty;
     private string _targetFolder = string.Empty;
     private string _apiKey = string.Empty;
     private string _backupFolder = string.Empty;
@@ -233,11 +249,30 @@
     protected override void OnInitialized() {
         UpdaterService.OnStateChanged += HandleStateChanged;
 
-        _targetFolder = !string.IsNullOrWhiteSpace(UpdaterService.TargetFolder) ? UpdaterService.TargetFolder : InitialFolder;
+        if (LibraryService.ActiveLibrary != null) {
+            _selectedLibraryId = LibraryService.ActiveLibrary.Id;
+            _targetFolder = !string.IsNullOrWhiteSpace(UpdaterService.TargetFolder) 
+                ? UpdaterService.TargetFolder 
+                : (!string.IsNullOrWhiteSpace(InitialFolder) ? InitialFolder : LibraryService.ActiveLibrary.FolderPath);
+        } else {
+            _selectedLibraryId = "custom";
+            _targetFolder = !string.IsNullOrWhiteSpace(UpdaterService.TargetFolder) ? UpdaterService.TargetFolder : InitialFolder;
+        }
+
         _apiKey = Settings.Current.CivitaiApiKey;
 
         if (!string.IsNullOrWhiteSpace(UpdaterService.LastResultJson)) {
             ParseResults(UpdaterService.LastResultJson);
+        }
+    }
+
+    private void OnLibraryChanged(string libraryId) {
+        _selectedLibraryId = libraryId;
+        if (libraryId != "custom") {
+            var lib = LibraryService.Libraries.FirstOrDefault(l => l.Id == libraryId);
+            if (lib != null && !string.IsNullOrWhiteSpace(lib.FolderPath)) {
+                _targetFolder = lib.FolderPath;
+            }
         }
     }
 
@@ -254,6 +289,7 @@
         string? folder = await FileDialogService.PickFolderAsync("Select LoRA Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _targetFolder = folder;
+            _selectedLibraryId = LibraryService.Libraries.FirstOrDefault(l => string.Equals(l.FolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))?.Id ?? "custom";
         }
     }
 
