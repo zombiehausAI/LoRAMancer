@@ -115,6 +115,13 @@
                                 @if (plugin.RequiresPyTorch) {
                                     <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">PyTorch</MudChip>
                                 }
+                                @if (plugin.PluginType == "Python") {
+                                    @if (plugin.HasDedicatedVenv) {
+                                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 22px;">.venv Ready</MudChip>
+                                    } else {
+                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">No .venv</MudChip>
+                                    }
+                                }
                             </div>
                             <MudText Typo="Typo.caption" Color="Color.Secondary">
                                 v@plugin.Version • @plugin.PluginType Plugin
@@ -140,12 +147,21 @@
                             </div>
                         }
                     </MudCardContent>
-                    <MudCardActions Class="d-flex justify-space-between">
-                        <div class="d-flex gap-1">
-                            @if (plugin.PluginType == "Python" && !plugin.HasDedicatedVenv) {
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))" Disabled="_isBusy">
-                                    Setup .venv
-                                </MudButton>
+                    <MudCardActions Class="d-flex justify-space-between align-center flex-wrap gap-2">
+                        <div class="d-flex gap-1 align-center flex-wrap">
+                            @if (plugin.PluginType == "Python") {
+                                @if (!plugin.HasDedicatedVenv) {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))" Disabled="_isBusy">
+                                        Setup .venv
+                                    </MudButton>
+                                } else {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => RebuildPluginVenvAsync(plugin))" Disabled="_isBusy">
+                                        Rebuild .venv
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="@(() => RemovePluginVenvAsync(plugin))" Disabled="_isBusy">
+                                        Remove .venv
+                                    </MudButton>
+                                }
                             }
                             @if (plugin.IsGitRepo) {
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="@(() => UpdateGitPluginAsync(plugin))" Disabled="_isBusy">
@@ -156,7 +172,9 @@
                                 Test
                             </MudButton>
                         </div>
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeletePluginAsync(plugin))" Disabled="_isBusy" />
+                        <MudTooltip Text="Delete Plugin">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeletePluginAsync(plugin))" Disabled="_isBusy" />
+                        </MudTooltip>
                     </MudCardActions>
                 </MudCard>
             </MudItem>
@@ -275,6 +293,36 @@
         } finally {
             _isBusy = false;
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RebuildPluginVenvAsync(PluginManifest plugin) {
+        _isBusy = true;
+        ClearLog();
+        AppendLog($"Rebuilding isolated .venv for {plugin.Name}...");
+
+        try {
+            await PluginManager.RebuildPythonPluginVenvAsync(plugin, AppendLog);
+            Snackbar.Add($".venv rebuilt and dependencies reinstalled for {plugin.Name}!", Severity.Success);
+        } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Failed to rebuild plugin venv: {ex.Message}", Severity.Error);
+        } finally {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void RemovePluginVenvAsync(PluginManifest plugin) {
+        try {
+            PluginManager.RemovePythonPluginVenv(plugin);
+            AppendLog($"[INFO] Removed .venv for {plugin.Name}");
+            Snackbar.Add($".venv removed for {plugin.Name}.", Severity.Info);
+        } catch (Exception ex) {
+            AppendLog($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Failed to remove .venv: {ex.Message}", Severity.Error);
+        } finally {
+            StateHasChanged();
         }
     }
 

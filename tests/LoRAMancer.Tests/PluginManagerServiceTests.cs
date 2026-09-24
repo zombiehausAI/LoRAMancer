@@ -169,5 +169,33 @@ public class PluginManagerServiceTests : IDisposable {
         updaterService.Cancel();
         Assert.False(updaterService.IsRunning);
     }
+
+    [Fact]
+    public void RemovePythonPluginVenv_DeletesDirectoryAndUpdatesHasDedicatedVenv() {
+        // Arrange
+        string pluginDir = Path.Combine(_testTempDir, "VenvTestPlugin");
+        string venvDir = Path.Combine(pluginDir, ".venv");
+        string scriptsDir = Path.Combine(venvDir, "Scripts");
+        Directory.CreateDirectory(scriptsDir);
+        File.WriteAllText(Path.Combine(scriptsDir, "python.exe"), "dummy");
+
+        ProcessRunner runner = new();
+        PluginManagerService service = new(runner);
+
+        PluginManifest manifest = new() {
+            Id = "venv-test",
+            Name = "VenvTest",
+            PluginType = "Python",
+            DirectoryPath = pluginDir,
+            HasDedicatedVenv = true
+        };
+
+        // Act
+        service.RemovePythonPluginVenv(manifest);
+
+        // Assert
+        Assert.False(Directory.Exists(venvDir));
+        Assert.False(manifest.HasDedicatedVenv);
+    }
 }
 
