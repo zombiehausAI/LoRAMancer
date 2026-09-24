@@ -23,6 +23,12 @@
         </div>
     </TitleContent>
     <DialogContent>
+        @if (DonorLora != null) {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+                <b>Cloned Recipe:</b> Using hyperparameters from donor <code>@DonorLora.FileName</code> (Rank: @_networkDim, Alpha: @_networkAlpha, LR: @_learningRate.ToString("0.#####e+00")). Please provide your unique run name, dataset, and trigger word below.
+            </MudAlert>
+        }
+
         <!-- Step 1: Subject Type & Architecture Selection -->
         <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2" Style="font-weight: 600;">1. What are you training?</MudText>
         <MudGrid Class="mb-4">
@@ -200,6 +206,9 @@
     [CascadingParameter]
     private IMudDialogInstance MudDialog { get; set; } = default!;
 
+    [Parameter]
+    public LoraMetadata? DonorLora { get; set; }
+
     private IReadOnlyList<SubjectPreset> _presets = Array.Empty<SubjectPreset>();
     private TrainingSubjectType _selectedSubject = TrainingSubjectType.Character;
     private string _targetBaseModel = "FLUX.1 Dev";
@@ -225,6 +234,27 @@
         _presets = EstimationService.GetSubjectPresets();
         SubjectPreset defaultPreset = _presets.First();
         ApplyPreset(defaultPreset);
+
+        if (DonorLora != null) {
+            _selectedSubject = TrainingSubjectType.Custom;
+            if (!string.IsNullOrWhiteSpace(DonorLora.BaseModel) && DonorLora.BaseModel != "Unknown") {
+                _targetBaseModel = DonorLora.BaseModel;
+            }
+            if (DonorLora.NetworkDim.HasValue) {
+                _networkDim = DonorLora.NetworkDim.Value;
+            }
+            if (DonorLora.NetworkAlpha.HasValue) {
+                _networkAlpha = DonorLora.NetworkAlpha.Value;
+            }
+            if (DonorLora.LearningRate.HasValue) {
+                _learningRate = DonorLora.LearningRate.Value;
+            }
+            if (DonorLora.Epochs.HasValue) {
+                _epochs = DonorLora.Epochs.Value;
+            }
+            _runName = $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_fork";
+        }
+
         RecalculateEstimates();
     }
 

@@ -41,6 +41,12 @@ public sealed class AppSettings {
     public int ServerPort { get; set; } = 8420;
     public string ServerBindAddress { get; set; } = "0.0.0.0";
     public string ServerAccessToken { get; set; } = string.Empty;
+    public bool RequireAuthForWebAccess { get; set; } = true;
+
+    // Public Internet Sharing & Tunneling
+    public bool EnablePublicInternetTunnel { get; set; }
+    public string PublicCustomDomainUrl { get; set; } = string.Empty;
+    public string PublicTunnelType { get; set; } = "cloudflare"; // cloudflare, custom
 
     // Remote Client Node Connection
     public bool ClientRemoteMode { get; set; }

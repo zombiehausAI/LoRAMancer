@@ -1,80 +1,212 @@
 @page "/"
 @inject SafeTensorsMetadataReader MetadataReader
+@inject LoraLibraryService LibraryService
+@inject CivitaiService Civitai
 @inject NativeFileDialogService FileDialogService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
 @using LoRAMancer.App.Components.Dialogs
 
 <div class="d-flex align-center justify-space-between mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">LoRA Library & Metadata Inspector</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Inspect hyperparameters, clone configs, and prepare training matrices with zero weight overhead</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">LoRA Library & Visual Browser</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Browse local models with embedded/Civitai thumbnails and right-click to train using donor recipes
+        </MudText>
     </div>
-    <div class="d-flex gap-2">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
-            Browse LoRA...
+    <div class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+            Browse Folder...
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
-            Browse Library...
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
+            Add File...
         </MudButton>
+        @if (_loraLibrary.Count > 0) {
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="_isEnrichingAll" OnClick="EnrichAllCivitaiAsync">
+                @(_isEnrichingAll ? $"Enriching ({_enrichProgress}/{_loraLibrary.Count})..." : "Fetch Civitai Info")
+            </MudButton>
+        }
     </div>
 </div>
 
-<!-- Drag and Drop Dropzone -->
-<div class="drop-zone mb-6" @ondragover:preventDefault @ondrop="HandleFileDrop">
-    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
-    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Drag and Drop .safetensors files or folder here</MudText>
-    <MudText Typo="Typo.caption" Color="Color.Secondary">LoRAMancer parses header bytes in milliseconds without loading gigabytes of weights into memory</MudText>
-</div>
+<!-- Search, Filter & View Toggle Bar -->
+<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+    <MudCardContent Class="py-3">
+        <MudGrid Class="align-center">
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Search by file name, model title, or trigger word..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+            </MudItem>
+            <MudItem xs="6" md="3">
+                <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Filter Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                    <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
+                    <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
+                    <MudSelectItem Value="@("SDXL")">SDXL / Pony / Illustrious</MudSelectItem>
+                    <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" md="3" Class="d-flex justify-end align-center gap-1">
+                <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                    <MudButton Variant="@(_viewMode == "grid" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GridView" OnClick="@(() => _viewMode = "grid")">
+                        Cards
+                    </MudButton>
+                    <MudButton Variant="@(_viewMode == "table" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" StartIcon="@Icons.Material.Filled.TableRows" OnClick="@(() => _viewMode = "table")">
+                        Table
+                    </MudButton>
+                </MudButtonGroup>
+            </MudItem>
+        </MudGrid>
+    </MudCardContent>
+</MudCard>
 
-<!-- Library Grid -->
-<MudTable Items="_loraLibrary" Hover="true" Breakpoint="Breakpoint.Sm" Loading="_isLoading" LoadingProgressColor="Color.Primary" Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
-    <HeaderContent>
-        <MudTh>File Name</MudTh>
-        <MudTh>Base Model</MudTh>
-        <MudTh>Rank (Dim)</MudTh>
-        <MudTh>Alpha</MudTh>
-        <MudTh>LR</MudTh>
-        <MudTh>Optimizer</MudTh>
-        <MudTh>File Size</MudTh>
-        <MudTh Style="text-align: right;">Actions</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd DataLabel="File Name">
-            <div class="d-flex align-center">
-                <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
-                <div>
-                    <div style="font-weight: 600; color: #cdd6f4;">@context.FileName</div>
-                    <div style="font-size: 0.75rem; color: #6c7086;">@context.FilePath</div>
+@if (_isLoading) {
+    <div class="d-flex flex-column align-center justify-center my-12">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-3" />
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@_loadingMessage</MudText>
+    </div>
+} else if (FilteredLoras.Count == 0) {
+    <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+        <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+        <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs indexed yet</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            Click "Browse Folder..." to point to your LoRA storage directory (e.g. ComfyUI or Automatic1111 models).
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+            Select LoRA Folder
+        </MudButton>
+    </MudCard>
+} else if (_viewMode == "grid") {
+    <!-- Visual Card Grid -->
+    <MudGrid>
+        @foreach (var lora in FilteredLoras) {
+            <MudItem xs="12" sm="6" md="4" lg="3">
+                <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
+                    <!-- Thumbnail Container -->
+                    <div style="position: relative; width: 100%; height: 220px; background-color: #11111b; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                        @if (!string.IsNullOrWhiteSpace(lora.ThumbnailPath) && File.Exists(lora.ThumbnailPath)) {
+                            <img src="@GetImageSrc(lora.ThumbnailPath)" alt="@lora.FileName" style="width: 100%; height: 100%; object-fit: cover;" />
+                        } else {
+                            <div class="d-flex flex-column align-center justify-center p-4 text-center" style="width: 100%; height: 100%; background: linear-gradient(135deg, rgba(203,166,247,0.1), rgba(137,180,250,0.05));">
+                                <MudIcon Icon="@Icons.Material.Filled.Layers" Size="Size.Large" Color="Color.Secondary" Style="opacity: 0.4;" Class="mb-1" />
+                                <MudText Typo="Typo.caption" Style="color: #6c7086;">No Preview Thumbnail</MudText>
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" OnClick="@(() => FetchSingleCivitaiAsync(lora))" Class="mt-1" Style="font-size: 0.7rem;">
+                                    Find on Civitai
+                                </MudButton>
+                            </div>
+                        }
+
+                        <!-- Base Model Overlay Badge -->
+                        <div style="position: absolute; top: 10px; left: 10px;">
+                            <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(lora.BaseModel)" Variant="Variant.Filled" Style="font-weight: 600; font-size: 0.7rem;">
+                                @lora.BaseModel
+                            </MudChip>
+                        </div>
+
+                        <!-- Size Badge -->
+                        <div style="position: absolute; bottom: 8px; right: 10px; background: rgba(17,17,27,0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: #cdd6f4;">
+                            @lora.FormattedSize
+                        </div>
+                    </div>
+
+                    <MudCardContent Class="py-3 px-3" Style="flex: 1;">
+                        <MudTooltip Text="@lora.FileName">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #fff; line-height: 1.2; word-break: break-all;">
+                                @(lora.CivitaiInfo != null ? lora.CivitaiInfo.ModelName : lora.FileName)
+                            </MudText>
+                        </MudTooltip>
+                        @if (lora.CivitaiInfo != null && !string.IsNullOrWhiteSpace(lora.CivitaiInfo.VersionName)) {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@lora.CivitaiInfo.VersionName</MudText>
+                        }
+
+                        <!-- Trigger Word Badge -->
+                        @if (GetPrimaryTrigger(lora) is string trigger && !string.IsNullOrWhiteSpace(trigger)) {
+                            <div class="d-flex align-center justify-space-between p-1 px-2 my-2" style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #cba6f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">
+                                    @trigger
+                                </div>
+                                <MudTooltip Text="Copy trigger word">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CopyToClipboardAsync(trigger))" />
+                                </MudTooltip>
+                            </div>
+                        }
+
+                        <!-- Hyperparameters Quick Matrix -->
+                        <div class="d-grid mt-2" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center;">
+                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: #a6adc8;">DIM/ALPHA</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.NetworkDim?.ToString() ?? "-")/@(lora.NetworkAlpha?.ToString() ?? "-")</div>
+                            </div>
+                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: #a6adc8;">LR</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.LearningRate?.ToString("0.e+0") ?? "-")</div>
+                            </div>
+                            <div style="background-color: #11111b; padding: 4px; border-radius: 4px;">
+                                <div style="font-size: 0.6rem; color: #a6adc8;">STEPS</div>
+                                <div style="font-weight: 700; font-size: 0.75rem; color: #cdd6f4;">@(lora.TotalSteps?.ToString() ?? "-")</div>
+                            </div>
+                        </div>
+                    </MudCardContent>
+
+                    <!-- Card Actions -->
+                    <MudCardActions Class="px-3 py-2 d-flex justify-space-between align-center" Style="border-top: 1px solid #313244;">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(lora))">
+                            Use Settings
+                        </MudButton>
+                        <div class="d-flex gap-1">
+                            <MudTooltip Text="Inspect Header">
+                                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => InspectLora(lora))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Reveal in Explorer">
+                                <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" Color="Color.Default" OnClick="@(() => OpenInExplorer(lora.FilePath))" />
+                            </MudTooltip>
+                        </div>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+} else {
+    <!-- Table View -->
+    <MudTable Items="FilteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+        <HeaderContent>
+            <MudTh>File Name</MudTh>
+            <MudTh>Base Model</MudTh>
+            <MudTh>Rank (Dim)</MudTh>
+            <MudTh>Alpha</MudTh>
+            <MudTh>LR</MudTh>
+            <MudTh>Optimizer</MudTh>
+            <MudTh>File Size</MudTh>
+            <MudTh Style="text-align: right;">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="File Name">
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
+                    <div>
+                        <div style="font-weight: 600; color: #cdd6f4;">@context.FileName</div>
+                        <div style="font-size: 0.75rem; color: #6c7086;">@context.FilePath</div>
+                    </div>
                 </div>
-            </div>
-        </MudTd>
-        <MudTd DataLabel="Base Model">
-            <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@context.BaseModel</MudChip>
-        </MudTd>
-        <MudTd DataLabel="Rank (Dim)">@(context.NetworkDim?.ToString() ?? "-")</MudTd>
-        <MudTd DataLabel="Alpha">@(context.NetworkAlpha?.ToString() ?? "-")</MudTd>
-        <MudTd DataLabel="LR">@(context.LearningRate?.ToString("0.#####e+00") ?? "-")</MudTd>
-        <MudTd DataLabel="Optimizer">@(string.IsNullOrEmpty(context.Optimizer) ? "-" : context.Optimizer)</MudTd>
-        <MudTd DataLabel="File Size">@((context.FileSizeBytes / (1024.0 * 1024.0)).ToString("0.0")) MB</MudTd>
-        <MudTd DataLabel="Actions" Style="text-align: right;">
-            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+            </MudTd>
+            <MudTd DataLabel="Base Model">
+                <MudChip T="string" Size="Size.Small" Color="@GetArchitectureColor(context.BaseModel)" Variant="Variant.Outlined">@context.BaseModel</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Rank (Dim)">@(context.NetworkDim?.ToString() ?? "-")</MudTd>
+            <MudTd DataLabel="Alpha">@(context.NetworkAlpha?.ToString() ?? "-")</MudTd>
+            <MudTd DataLabel="LR">@(context.LearningRate?.ToString("0.#####e+00") ?? "-")</MudTd>
+            <MudTd DataLabel="Optimizer">@(string.IsNullOrEmpty(context.Optimizer) ? "-" : context.Optimizer)</MudTd>
+            <MudTd DataLabel="File Size">@context.FormattedSize</MudTd>
+            <MudTd DataLabel="Actions" Style="text-align: right;">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
+                    Use Settings
+                </MudButton>
                 <MudTooltip Text="Inspect Metadata">
-                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Primary" OnClick="@(() => InspectLora(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => InspectLora(context))" />
                 </MudTooltip>
-                <MudTooltip Text="Clone Config">
-                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Color="Color.Secondary" OnClick="@(() => CloneLoraConfig(context))" />
-                </MudTooltip>
-            </MudButtonGroup>
-        </MudTd>
-    </RowTemplate>
-    <NoRecordsContent>
-        <div class="p-6 text-center text-secondary">
-            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large" Class="mb-2" />
-            <div>No LoRAs loaded yet. Browse for a file or folder above.</div>
-        </div>
-    </NoRecordsContent>
-</MudTable>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
 
 <!-- Metadata Inspector Drawer -->
 <MetadataInspectorDrawer @bind-IsOpen="_drawerOpen" Metadata="_selectedLora" />
@@ -82,8 +214,24 @@
 @code {
     private readonly List<LoraMetadata> _loraLibrary = new();
     private bool _isLoading;
+    private string _loadingMessage = string.Empty;
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
+
+    private string _viewMode = "grid";
+    private string _searchQuery = string.Empty;
+    private string _selectedArchitecture = "all";
+
+    private bool _isEnrichingAll;
+    private int _enrichProgress;
+
+    private List<LoraMetadata> FilteredLoras => _loraLibrary
+        .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
+            || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+            || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+            || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)))
+        .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
     private async Task BrowseLoraFileAsync() {
         string? file = await FileDialogService.PickSafeTensorsFileAsync();
@@ -93,7 +241,7 @@
     }
 
     private async Task BrowseLibraryFolderAsync() {
-        string? folder = await FileDialogService.PickFolderAsync("Select LoRA Library Directory");
+        string? folder = await FileDialogService.PickFolderAsync("Select LoRA Storage Directory");
         if (!string.IsNullOrEmpty(folder)) {
             await LoadFolderAsync(folder);
         }
@@ -101,13 +249,17 @@
 
     private async Task LoadSingleLoraAsync(string filePath) {
         _isLoading = true;
+        _loadingMessage = $"Reading {Path.GetFileName(filePath)}...";
         try {
             LoraMetadata meta = await MetadataReader.ReadMetadataAsync(filePath);
+            LibraryService.FindLocalThumbnail(meta);
+            await LibraryService.EnrichFromCivitaiAsync(meta);
+
             _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
             _loraLibrary.Insert(0, meta);
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
         } catch (Exception ex) {
-            Snackbar.Add($"Failed to inspect {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Failed to read {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
         } finally {
             _isLoading = false;
         }
@@ -115,28 +267,62 @@
 
     private async Task LoadFolderAsync(string folderPath) {
         _isLoading = true;
+        _loadingMessage = $"Indexing .safetensors files in {folderPath}...";
         try {
-            string[] files = Directory.GetFiles(folderPath, "*.safetensors", SearchOption.AllDirectories);
-            int count = 0;
-            foreach (string file in files) {
-                try {
-                    LoraMetadata meta = await MetadataReader.ReadMetadataAsync(file);
-                    _loraLibrary.RemoveAll(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase));
-                    _loraLibrary.Add(meta);
-                    count++;
-                } catch {
-                    // Skip corrupt or unreadable files
-                }
-            }
-            Snackbar.Add($"Indexed {count} LoRAs from directory", Severity.Success);
+            var items = await LibraryService.ScanDirectoryAsync(folderPath, (file, current, total) => {
+                _loadingMessage = $"Indexed {current}/{total}: {file}";
+                InvokeAsync(StateHasChanged);
+            });
+
+            _loraLibrary.Clear();
+            _loraLibrary.AddRange(items);
+            Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs with thumbnails and metadata", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Folder scan failed: {ex.Message}", Severity.Error);
         } finally {
             _isLoading = false;
         }
     }
 
-    private void HandleFileDrop() {
-        // Native drop handling can hook into platform clipboard/file payload
-        Snackbar.Add("Drop received. Use 'Browse LoRA...' or 'Browse Library...' for native Windows dialogs.", Severity.Info);
+    private async Task FetchSingleCivitaiAsync(LoraMetadata lora) {
+        Snackbar.Add($"Searching Civitai for {lora.FileName}...", Severity.Info);
+        var info = await LibraryService.EnrichFromCivitaiAsync(lora);
+        if (info != null) {
+            Snackbar.Add($"Identified as '{info.ModelName}' from Civitai!", Severity.Success);
+        } else {
+            Snackbar.Add("No matching model found on Civitai.", Severity.Normal);
+        }
+        StateHasChanged();
+    }
+
+    private async Task EnrichAllCivitaiAsync() {
+        _isEnrichingAll = true;
+        _enrichProgress = 0;
+        try {
+            foreach (var lora in _loraLibrary) {
+                if (lora.CivitaiInfo == null) {
+                    await LibraryService.EnrichFromCivitaiAsync(lora);
+                    _enrichProgress++;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            Snackbar.Add("Civitai metadata lookup complete!", Severity.Success);
+        } finally {
+            _isEnrichingAll = false;
+        }
+    }
+
+    private async Task UseLoraTrainingSettings(LoraMetadata lora) {
+        DialogParameters parameters = new() {
+            ["DonorLora"] = lora
+        };
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<TrainingWizardDialog>("New Training Run (Using Cloned Recipe)", parameters, options);
     }
 
     private void InspectLora(LoraMetadata lora) {
@@ -144,15 +330,48 @@
         _drawerOpen = true;
     }
 
-    private async Task CloneLoraConfig(LoraMetadata lora) {
-        DialogParameters parameters = new() {
-            ["DonorLora"] = lora
+    private static void OpenInExplorer(string? filePath) {
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath)) {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{filePath}\"",
+                UseShellExecute = true
+            });
+        }
+    }
+
+    private async Task CopyToClipboardAsync(string text) {
+        if (!string.IsNullOrWhiteSpace(text)) {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add($"Copied '{text}' to clipboard!", Severity.Success);
+        }
+    }
+
+    private static string? GetPrimaryTrigger(LoraMetadata lora) {
+        if (lora.TrainedWords != null && lora.TrainedWords.Count > 0) {
+            return lora.TrainedWords.First();
+        }
+        if (lora.RawHeaderMetadata.TryGetValue("ss_tag_frequency", out var tags) && !string.IsNullOrWhiteSpace(tags)) {
+            return tags.Split(',').FirstOrDefault()?.Trim();
+        }
+        return null;
+    }
+
+    private static string GetImageSrc(string path) {
+        byte[] bytes = File.ReadAllBytes(path);
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        string mime = ext switch {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => "image/jpeg"
         };
-        DialogOptions options = new() {
-            CloseOnEscapeKey = true,
-            MaxWidth = MaxWidth.Medium,
-            FullWidth = true
-        };
-        await DialogService.ShowAsync<CloneConfigModal>("Clone LoRA Configuration", parameters, options);
+        return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+    }
+
+    private static Color GetArchitectureColor(string arch) {
+        if (arch.Contains("flux", StringComparison.OrdinalIgnoreCase)) return Color.Tertiary;
+        if (arch.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return Color.Info;
+        if (arch.Contains("pony", StringComparison.OrdinalIgnoreCase)) return Color.Secondary;
+        return Color.Default;
     }
 }

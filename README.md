@@ -9,9 +9,11 @@ LoRAMancer is a production-grade, highly responsive desktop LoRA Manager, Config
   - **NVIDIA GeForce / RTX**: Official PyTorch CUDA 12.4 index (`download.pytorch.org/whl/cu124`).
   - **Intel Arc / Xe**: Official PyTorch Intel XPU index (`download.pytorch.org/whl/xpu`).
   - **CPU Fallback**: Generic CPU-optimized wheels (`download.pytorch.org/whl/cpu`).
-- **Remote Training & Cross-Platform Web UI**: Embedded Kestrel network server (`http://0.0.0.0:8420`) running on your AI PC:
-  - **Browser Web Access (Zero Install)**: Open any web browser on a Linux PC, Mac, iPad, or smartphone to configure runs, upload dataset ZIPs, monitor live loss sparklines, and view terminal logs.
-  - **Windows Desktop Remote Client**: Connect a secondary Windows laptop/PC running LoRAMancer to your AI PC over LAN or VPN (e.g. Tailscale) with live Server-Sent Events (SSE) telemetry.
+- **Remote Training, PWA Web App & Public Internet Serving**: Embedded Kestrel network server running on your AI PC:
+  - **Installable Progressive Web App (PWA)**: Install the remote interface directly onto Linux PCs, Macs, Android, and iOS as a standalone app with offline shell caching, native window chrome, and quick launcher support.
+  - **Public Internet Servability (WAN)**: Expose your workstation securely over the internet using zero-configuration **Cloudflare Quick Tunnels** (`https://*.trycloudflare.com`) or custom reverse proxies with PIN/Access Token security.
+  - **Browser Web Access (Zero Install)**: Open any web browser on any device to configure runs, upload dataset ZIPs, monitor live loss sparklines, and view terminal logs.
+  - **Windows Desktop Remote Client**: Connect a secondary Windows laptop/PC running LoRAMancer to your AI PC over LAN, WAN, or VPN with live Server-Sent Events (SSE) telemetry.
 - **Permanent LoRA Training History & Vault**: A Civitai-style local ledger (`/history`) cataloguing every trained model, trigger words, hyperparameter snapshots (rank, alpha, learning rate, optimizer, steps), final loss, and training duration. Unlike cloud services that purge models after 30 days, LoRAMancer records **never expire** until you explicitly remove them, with 1-click **Clone Config** to iterate on versions.
 - **AI-Toolkit Automated Setup & Git Updates**: One-click automated setup and Git synchronization (`AiToolkitSetupService`) that clones the official AI-Toolkit repository, tracks active commits, pulls updates recursively, and updates dependencies into your hardware-matched `.venv` with `--no-deps` protection.
 - **Dual Plugin Architecture & Built-in Ollama Vision Tagger**: Extensible plugin system supporting C# DLLs and Python plugins running in isolated environments. Includes a default **Ollama Vision LoRA Tagger** plugin supporting local, remote LAN, datacenter, and cloud vision models (`llama3.2-vision`, `llava`, `minicpm-v`, `qwen2-vl`) with custom Bearer tokens and automated dataset ZIP unzipping.
@@ -44,8 +46,9 @@ LoRAMancer/
 ## Documentation
 
 For comprehensive guides and technical specifications, refer to:
+- [LoRA Library & Visual Browser](file:///d:/repos/LoRAMancer/docs/LORA_LIBRARY_BROWSER.md)
 - [Universal GPU & Environment Provisioning](file:///d:/repos/LoRAMancer/docs/GPU_AND_ENVIRONMENT_SETUP.md)
-- [Remote Training & Web UI Architecture](file:///d:/repos/LoRAMancer/docs/REMOTE_TRAINING.md)
+- [Remote Training, PWA Web App & Public Internet Serving](file:///d:/repos/LoRAMancer/docs/REMOTE_TRAINING.md)
 - [LoRA Training History & Vault](file:///d:/repos/LoRAMancer/docs/HISTORY_AND_VAULT.md)
 - [Training Wizard & Estimators](file:///d:/repos/LoRAMancer/docs/TRAINING_WIZARD.md)
 - [Architecture Overview](file:///d:/repos/LoRAMancer/docs/ARCHITECTURE.md)

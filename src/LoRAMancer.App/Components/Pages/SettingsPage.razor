@@ -4,6 +4,7 @@
 @inject AiToolkitSetupService ToolkitSetup
 @inject NativeFileDialogService FileDialogService
 @inject NetworkServerService NetworkServer
+@inject PublicTunnelService PublicTunnel
 @inject RemoteTrainingClientService RemoteClient
 @inject ISnackbar Snackbar
 
@@ -276,15 +277,20 @@
                                 <MudIcon Icon="@Icons.Material.Filled.Router" Color="Color.Primary" />
                                 <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Host Engine & Web UI</MudText>
                             </div>
-                            @if (NetworkServer.IsRunning) {
-                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">Active: Port @_settings.ServerPort</MudChip>
-                            } else {
-                                <MudChip T="string" Color="Color.Default" Size="Size.Small" Variant="Variant.Outlined">Stopped</MudChip>
-                            }
+                            <div class="d-flex gap-1">
+                                @if (NetworkServer.IsRunning) {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">Port @_settings.ServerPort</MudChip>
+                                    @if (!string.IsNullOrWhiteSpace(NetworkServer.PublicInternetUrl)) {
+                                        <MudChip T="string" Color="Color.Tertiary" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Public">Internet Live</MudChip>
+                                    }
+                                } else {
+                                    <MudChip T="string" Color="Color.Default" Size="Size.Small" Variant="Variant.Outlined">Stopped</MudChip>
+                                }
+                            </div>
                         </div>
 
                         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
-                            Hosts the training venv, hardware GPU runner, and embedded web server.
+                            Hosts the training venv, hardware GPU runner, embedded web server, and Progressive Web App (PWA).
                         </MudText>
 
                         <MudSwitch @bind-Value="_settings.ServerEnabled" Label="Enable Network Server & Web View" Color="Color.Primary" Class="mb-2" />
@@ -294,7 +300,48 @@
                             <MudTextField @bind-Value="_settings.ServerBindAddress" Label="Bind IP" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="0.0.0.0 for LAN, 127.0.0.1 for local" Style="flex: 1;" />
                         </div>
 
-                        <MudTextField @bind-Value="_settings.ServerAccessToken" Label="Access PIN / Auth Token (Optional)" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Leave blank for open local LAN access" Class="mb-3" />
+                        <div class="d-flex gap-3 mb-2">
+                            <MudTextField @bind-Value="_settings.ServerAccessToken" Label="Auth Token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Secret key required for all incoming connections" Style="flex: 1;" />
+                            <MudSwitch @bind-Value="_settings.RequireAuthForWebAccess" Label="Strict Auth (Deny Missing Token)" Color="Color.Error" Class="mt-1" />
+                        </div>
+
+                        <MudText Typo="Typo.caption" Style="color: #f38ba8;" Class="d-block mb-2">
+                            🔒 <strong>Strict Token Enforcement:</strong> Every request without this token (via Bearer header, <code>?token=</code> query, or session cookie) is immediately denied with HTTP 401 Unauthorized.
+                        </MudText>
+
+                        <MudDivider Class="my-2" />
+
+                        <MudText Typo="Typo.subtitle2" Class="mb-1" Style="font-weight: 600;">
+                            <MudIcon Icon="@Icons.Material.Filled.Public" Size="Size.Small" Class="mr-1" /> External / Custom Server Setup (WAN)
+                        </MudText>
+
+                        <MudTextField @bind-Value="_settings.PublicCustomDomainUrl" Label="Custom Server / Domain URL (Optional)" Placeholder="e.g. https://lora.yourdomain.com or http://192.168.1.150:8420" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Your own server domain, reverse proxy (Nginx, Caddy), or static WAN IP" Class="mb-2" />
+
+                        <MudExpansionPanels Dense="true" Elevation="0" Class="mb-2">
+                            <MudExpansionPanel Text="Cloudflare Quick Tunnel (Alternative for automatic HTTPS without domain)">
+                                <MudSwitch @bind-Value="_settings.EnablePublicInternetTunnel" Label="Use Temporary Cloudflare Quick Tunnel" Color="Color.Tertiary" />
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+
+                        @if (NetworkServer.IsRunning) {
+                            var displayUrl = !string.IsNullOrWhiteSpace(_settings.PublicCustomDomainUrl) 
+                                ? _settings.PublicCustomDomainUrl 
+                                : (!string.IsNullOrWhiteSpace(NetworkServer.PublicInternetUrl) ? NetworkServer.PublicInternetUrl : NetworkServer.ListeningUrl);
+
+                            <div class="d-flex align-center justify-space-between p-2 mb-3" style="background: rgba(203, 166, 247, 0.1); border: 1px solid #cba6f7; border-radius: 6px;">
+                                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%;">
+                                    <MudText Typo="Typo.caption" Color="Color.Tertiary" Style="font-weight: 700;">CONNECT URL:</MudText>
+                                    <MudText Typo="Typo.body2" Style="font-family: monospace; color: #fff;">@displayUrl</MudText>
+                                </div>
+                                <MudTooltip Text="Copy Connect URL">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => CopyUrlToClipboard(displayUrl))" />
+                                </MudTooltip>
+                            </div>
+                        }
+
+                        <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-3" Style="background-color: rgba(166, 227, 161, 0.08); color: #a6e3a1; font-size: 0.78rem;">
+                            📲 <strong>Installable Web App (PWA):</strong> Open your server URL in any browser on Linux, Mac, Android, or iOS. Tap "Install App" or "Add to Home Screen" to install LoRAMancer as a standalone application.
+                        </MudAlert>
 
                         <div class="d-flex align-center gap-2">
                             @if (NetworkServer.IsRunning) {
@@ -533,6 +580,13 @@
             Snackbar.Add("LoRAMancer Server stopped.", Severity.Info);
         } catch (Exception ex) {
             Snackbar.Add($"Error stopping server: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task CopyUrlToClipboard(string url) {
+        if (!string.IsNullOrWhiteSpace(url)) {
+            await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(url);
+            Snackbar.Add("Connect URL copied to clipboard!", Severity.Success);
         }
     }
 

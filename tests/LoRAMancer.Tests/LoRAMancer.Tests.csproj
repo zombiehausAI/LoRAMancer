@@ -36,6 +36,8 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\PluginManagerService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\AiToolkitSetupService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraHistoryService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraLibraryService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\PublicTunnelService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>
