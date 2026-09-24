@@ -214,17 +214,14 @@ public sealed class AiToolkitConfigBuilder {
         }
 
         string opt = rawOptimizer.Trim().ToLowerInvariant();
-        if (opt.Contains("bf16")) {
-            return "adamw_bf16";
-        }
-        if (opt.Contains("8bit") || opt.Contains("paged") || opt.Contains("lion8bit")) {
-            return "adamw_bf16";
-        }
         if (opt.Contains("prodigy")) {
             return "prodigy";
         }
         if (opt.Contains("adafactor")) {
             return "adafactor";
+        }
+        if (opt.Contains("lion") && !opt.Contains("8bit")) {
+            return "lion";
         }
         return "adamw";
     }

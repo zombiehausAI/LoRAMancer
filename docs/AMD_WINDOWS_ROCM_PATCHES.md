@@ -238,3 +238,28 @@ ValueError: Model path ChromaHD-1 does not exist
 1. `AiToolkitConfigBuilder.ResolveModelPath` maps display names back to canonical paths.
 2. The Training Wizard UI includes a dedicated **Custom Base Checkpoint File** browser to select local `.safetensors` files directly.
 3. Both the **History & Vault** cards and the **Training Console** failure banner include an **Edit in Wizard** button to reopen any failed or past training run with all hyperparameters and paths pre-filled for instant modification.
+
+---
+
+## 9. Optimizer Type Sanitization (`adamw` vs `adamw_bf16`)
+
+### The Problem
+```text
+Error running job: Unknown optimizer type adamw_bf16
+Traceback (most recent call last):
+  File "C:\AI\LoRAMancer\tools\ai-toolkit\toolkit\optimizer.py", line 115, in get_optimizer
+    raise ValueError(f'Unknown optimizer type {optimizer_type}')
+ValueError: Unknown optimizer type adamw_bf16
+```
+
+### The Cause
+In `ai-toolkit`, `toolkit/optimizer.py` implements `get_optimizer()` which parses the `optimizer:` configuration field against a strict list of canonical optimizer names (`"adamw"`, `"prodigy"`, `"adam"`, `"lion"`, `"adafactor"`).
+Unlike Kohya or scripts that accept compound strings like `adamw_bf16`, `paged_adamw_8bit`, or `adamw8bit`, `ai-toolkit` decouples optimizer algorithms from precision:
+- Algorithm is specified in `train.optimizer: adamw`
+- Numerical precision is specified separately in `train.dtype: bf16`
+
+### The Solution
+`AiToolkitConfigBuilder.SanitizeOptimizer` normalizes any incoming optimizer name:
+- `adamw_bf16`, `paged_adamw_8bit`, `adamw8bit`, `adamw_8bit`, etc., are mapped directly to `"adamw"`.
+- `TrainingWizardDialog.razor` defaults the optimizer dropdown to `"adamw"`.
+

@@ -6,9 +6,9 @@ namespace LoRAMancer.Tests;
 public sealed class AiToolkitConfigBuilderTests {
     [Fact]
     public void SanitizeOptimizer_ConvertsNvidia8BitToAmdBf16() {
-        Assert.Equal("adamw_bf16", AiToolkitConfigBuilder.SanitizeOptimizer("adamw8bit"));
-        Assert.Equal("adamw_bf16", AiToolkitConfigBuilder.SanitizeOptimizer("PagedAdamW"));
-        Assert.Equal("adamw_bf16", AiToolkitConfigBuilder.SanitizeOptimizer("Lion8bit"));
+        Assert.Equal("adamw", AiToolkitConfigBuilder.SanitizeOptimizer("adamw8bit"));
+        Assert.Equal("adamw", AiToolkitConfigBuilder.SanitizeOptimizer("PagedAdamW"));
+        Assert.Equal("adamw", AiToolkitConfigBuilder.SanitizeOptimizer("Lion8bit"));
         Assert.Equal("adamw", AiToolkitConfigBuilder.SanitizeOptimizer("adamw"));
         Assert.Equal("prodigy", AiToolkitConfigBuilder.SanitizeOptimizer("prodigy"));
     }
@@ -29,7 +29,7 @@ public sealed class AiToolkitConfigBuilderTests {
         TrainingConfig config = builder.CloneFromDonor(donor, "test_run", "D:\\datasets\\flux", "D:\\output\\flux");
         string yaml = builder.BuildAiToolkitYaml(config);
 
-        Assert.Contains("adamw_bf16", yaml);
+        Assert.Contains("adamw", yaml);
         Assert.Contains("sdpa", yaml);
         Assert.Contains("bf16", yaml);
         Assert.Contains("cache_latents_to_disk: true", yaml);
