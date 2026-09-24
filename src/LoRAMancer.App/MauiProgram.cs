@@ -65,6 +65,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<NetworkServerService>();
         builder.Services.AddSingleton<RemoteTrainingClientService>();
         builder.Services.AddSingleton<LoraHistoryService>();
+        builder.Services.AddSingleton<LoraDatabaseService>();
         builder.Services.AddSingleton<LoraLibraryService>();
         builder.Services.AddSingleton<LoraUpdaterService>();
         builder.Services.AddSingleton<SystemTrayService>();
