@@ -523,12 +523,14 @@
 
     private CancellationTokenSource? _searchCts;
     private static readonly ConcurrentDictionary<string, string> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> _loadingThumbnails = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record SubfolderItem(string Name, string FullPath, string RelativePath, int LoraCount);
     private sealed record CrumbItem(string Name, string FullPath);
 
     private List<SubfolderItem> _currentSubfolders = new();
     private List<LoraMetadata> _filteredLoras = new();
+    private string? _cachedSubfolderPath;
 
     private int TotalPages => Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
     private IEnumerable<LoraMetadata> PagedLoras => _filteredLoras.Skip((_currentPage - 1) * _pageSize).Take(_pageSize);
@@ -561,28 +563,13 @@
             string root = LibraryService.RootFolder;
             var items = LibraryService.Items;
 
-            // Update subfolders
-            if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current) || _showAllFlat) {
+            // Offload subfolder filesystem I/O to background - never block the UI thread
+            if (_showAllFlat || string.IsNullOrWhiteSpace(current)) {
                 _currentSubfolders = new List<SubfolderItem>();
-            } else {
-                try {
-                    string[] subDirs = Directory.GetDirectories(current);
-                    List<SubfolderItem> subList = new();
-                    foreach (string dir in subDirs) {
-                        string dirName = Path.GetFileName(dir);
-                        if (dirName.StartsWith('.')) {
-                            continue;
-                        }
-
-                        string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                        int count = items.Count(l => l.FilePath != null && l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-                        string rel = string.IsNullOrWhiteSpace(root) ? dirName : Path.GetRelativePath(root, dir);
-                        subList.Add(new SubfolderItem(dirName, dir, rel, count));
-                    }
-                    _currentSubfolders = subList.OrderBy(s => s.Name).ToList();
-                } catch {
-                    _currentSubfolders = new List<SubfolderItem>();
-                }
+                _cachedSubfolderPath = null;
+            } else if (!string.Equals(_cachedSubfolderPath, current, StringComparison.OrdinalIgnoreCase)) {
+                _cachedSubfolderPath = current;
+                _ = RefreshSubfoldersAsync(current, root, items);
             }
 
             // Update filtered LoRAs
@@ -636,6 +623,37 @@
             }
         } catch {
             _filteredLoras = new List<LoraMetadata>();
+            _currentSubfolders = new List<SubfolderItem>();
+        }
+    }
+
+    private async Task RefreshSubfoldersAsync(string current, string root, IReadOnlyList<LoraMetadata> items) {
+        try {
+            var subList = await Task.Run(() => {
+                if (string.IsNullOrWhiteSpace(current) || !Directory.Exists(current)) {
+                    return new List<SubfolderItem>();
+                }
+                string[] subDirs = Directory.GetDirectories(current);
+                List<SubfolderItem> list = new();
+                foreach (string dir in subDirs) {
+                    string dirName = Path.GetFileName(dir);
+                    if (dirName.StartsWith('.')) {
+                        continue;
+                    }
+
+                    string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    int count = items.Count(l => l.FilePath != null && l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                    string rel = string.IsNullOrWhiteSpace(root) ? dirName : Path.GetRelativePath(root, dir);
+                    list.Add(new SubfolderItem(dirName, dir, rel, count));
+                }
+                return list.OrderBy(s => s.Name).ToList();
+            });
+
+            await InvokeAsync(() => {
+                _currentSubfolders = subList;
+                StateHasChanged();
+            });
+        } catch {
             _currentSubfolders = new List<SubfolderItem>();
         }
     }
@@ -735,6 +753,7 @@
 
     private void NavigateToFolder(string folderPath) {
         if (Directory.Exists(folderPath)) {
+            _cachedSubfolderPath = null;
             LibraryService.SetCurrentSubfolder(folderPath);
             _showAllFlat = false;
             _currentPage = 1;
@@ -756,6 +775,7 @@
         }
 
         string? parent = Path.GetDirectoryName(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        _cachedSubfolderPath = null;
         if (!string.IsNullOrEmpty(parent) && parent.StartsWith(root, StringComparison.OrdinalIgnoreCase)) {
             LibraryService.SetCurrentSubfolder(parent);
         } else {
@@ -805,7 +825,6 @@
         try {
             LoraMetadata meta = await MetadataReader.ReadMetadataAsync(filePath);
             LibraryService.FindLocalThumbnail(meta);
-            await LibraryService.EnrichFromCivitaiAsync(meta);
             LibraryService.AddOrUpdateLora(meta);
 
             if (string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
@@ -815,6 +834,21 @@
 
             UpdateFilteredList();
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
+
+            // Fetch Civitai metadata asynchronously in background without blocking UI
+            _ = Task.Run(async () => {
+                try {
+                    var info = await LibraryService.EnrichFromCivitaiAsync(meta);
+                    if (info != null) {
+                        await InvokeAsync(() => {
+                            UpdateFilteredList();
+                            StateHasChanged();
+                        });
+                    }
+                } catch {
+                    // Suppress background lookup errors
+                }
+            });
         } catch (Exception ex) {
             Snackbar.Add($"Failed to read {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
         }
@@ -838,6 +872,7 @@
     }
 
     private async void HandleLibrariesChanged() {
+        _cachedSubfolderPath = null;
         await InvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
@@ -845,6 +880,7 @@
     }
 
     private async void HandleLibraryUpdated() {
+        _cachedSubfolderPath = null;
         await InvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
@@ -856,6 +892,9 @@
     }
 
     private async void HandleScanStateChanged(bool isScanning) {
+        if (!isScanning) {
+            _cachedSubfolderPath = null;
+        }
         await InvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
@@ -1022,28 +1061,34 @@
         return null;
     }
 
-    private static string GetImageSrc(string? path) {
+    private string GetImageSrc(string? path) {
         if (string.IsNullOrWhiteSpace(path)) {
             return string.Empty;
         }
         if (_thumbnailCache.TryGetValue(path, out var cached)) {
             return cached;
         }
-        try {
-            if (File.Exists(path)) {
-                byte[] bytes = File.ReadAllBytes(path);
-                string ext = Path.GetExtension(path).ToLowerInvariant();
-                string mime = ext switch {
-                    ".png" => "image/png",
-                    ".webp" => "image/webp",
-                    _ => "image/jpeg"
-                };
-                string dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
-                _thumbnailCache[path] = dataUri;
-                return dataUri;
-            }
-        } catch {
-            // Graceful fallback to prevent unhandled exception if file is locked or unreadable
+        if (_loadingThumbnails.TryAdd(path, 0)) {
+            _ = Task.Run(async () => {
+                try {
+                    if (File.Exists(path)) {
+                        byte[] bytes = await File.ReadAllBytesAsync(path);
+                        string ext = Path.GetExtension(path).ToLowerInvariant();
+                        string mime = ext switch {
+                            ".png" => "image/png",
+                            ".webp" => "image/webp",
+                            _ => "image/jpeg"
+                        };
+                        string dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                        _thumbnailCache[path] = dataUri;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                } catch {
+                    // Graceful fallback to prevent unhandled exception if file is locked or unreadable
+                } finally {
+                    _loadingThumbnails.TryRemove(path, out _);
+                }
+            });
         }
         return string.Empty;
     }
