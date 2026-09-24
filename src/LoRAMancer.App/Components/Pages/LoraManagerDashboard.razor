@@ -32,11 +32,11 @@
 </div>
 
 <!-- Search, Filter & View Toggle Bar -->
-<MudCard Elevation="1" Class="mb-4" Style="background-color: #181825; border: 1px solid #313244;">
+<MudCard Elevation="1" Class="mb-3" Style="background-color: #181825; border: 1px solid #313244;">
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="_searchQuery" Placeholder="Search by file name, model title, or trigger word..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Search by file name, model title, trigger word, or path..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
             </MudItem>
             <MudItem xs="6" md="3">
                 <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Filter Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
@@ -60,13 +60,53 @@
     </MudCardContent>
 </MudCard>
 
+<!-- Subfolder Navigation & Breadcrumbs Bar -->
+@if (!string.IsNullOrWhiteSpace(_rootFolder)) {
+    <MudCard Elevation="1" Class="pa-2 px-3 mb-3 d-flex align-center justify-space-between flex-wrap gap-2" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+        <div class="d-flex align-center gap-1 flex-wrap">
+            <MudTooltip Text="Up one level">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Color="Color.Primary" Disabled="@(string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase) || _showAllFlat)" OnClick="NavigateUp" />
+            </MudTooltip>
+            
+            <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase) && !_showAllFlat ? Color.Tertiary : Color.Primary)" StartIcon="@Icons.Material.Filled.FolderSpecial" OnClick="@(() => NavigateToFolder(_rootFolder))">
+                @(Path.GetFileName(_rootFolder) is string rootName && !string.IsNullOrWhiteSpace(rootName) ? rootName : _rootFolder)
+            </MudButton>
+
+            @if (!_showAllFlat && !string.Equals(_currentFolder, _rootFolder, StringComparison.OrdinalIgnoreCase)) {
+                @foreach (var crumb in GetBreadcrumbs()) {
+                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Secondary" />
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="@(crumb.FullPath == _currentFolder ? Color.Tertiary : Color.Primary)" OnClick="@(() => NavigateToFolder(crumb.FullPath))">
+                        @crumb.Name
+                    </MudButton>
+                }
+            }
+        </div>
+
+        <div class="d-flex align-center gap-2">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                @if (_showAllFlat) {
+                    <span>Showing all @_loraLibrary.Count LoRAs (Flat View)</span>
+                } else if (!string.IsNullOrWhiteSpace(_searchQuery)) {
+                    <span>Searching across all subfolders (@FilteredLoras.Count results)</span>
+                } else {
+                    <span>@FilteredLoras.Count LoRA@((FilteredLoras.Count == 1 ? "" : "s")) in this folder (@_loraLibrary.Count total indexed)</span>
+                }
+            </MudText>
+
+            <MudButton Variant="@(_showAllFlat ? Variant.Filled : Variant.Outlined)" Color="Color.Tertiary" Size="Size.Small" StartIcon="@(_showAllFlat ? Icons.Material.Filled.AccountTree : Icons.Material.Filled.Folder)" OnClick="@(() => _showAllFlat = !_showAllFlat)">
+                @(_showAllFlat ? "Flat (All)" : "Subfolder View")
+            </MudButton>
+        </div>
+    </MudCard>
+}
+
 @if (_isScanning) {
     <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid #cba6f7; border-radius: 8px;">
         <div class="d-flex align-center justify-space-between mb-2">
             <div class="d-flex align-center gap-2">
                 <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="true" />
                 <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
-                    Scanning LoRAs in background: @_scannedCount of @_totalFiles (@_currentScanningFile)
+                    Scanning LoRAs recursively in background: @_scannedCount of @_totalFiles (@_currentScanningFile)
                 </MudText>
             </div>
             <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelScan">
@@ -77,7 +117,7 @@
     </MudCard>
 }
 
-@if (FilteredLoras.Count == 0) {
+@if (FilteredLoras.Count == 0 && CurrentSubfolders.Count == 0) {
     @if (_isScanning) {
         <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
             <MudProgressCircular Size="Size.Large" Color="Color.Tertiary" Indeterminate="true" Class="mb-3" />
@@ -89,18 +129,47 @@
     } else {
         <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
             <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs indexed yet</MudText>
+            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs found</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-                Click "Browse Folder..." to point to your LoRA storage directory (e.g. ComfyUI or Automatic1111 models).
+                @(string.IsNullOrWhiteSpace(_rootFolder) ? "Click \"Browse Folder...\" to point to your LoRA storage directory." : "No models or subfolders found in this directory.")
             </MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
-                Select LoRA Folder
-            </MudButton>
+            @if (string.IsNullOrWhiteSpace(_rootFolder)) {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+                    Select LoRA Folder
+                </MudButton>
+            }
         </MudCard>
     }
 } else if (_viewMode == "grid") {
     <!-- Visual Card Grid -->
     <MudGrid>
+        <!-- Subfolder Cards -->
+        @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
+            @foreach (var sub in CurrentSubfolders) {
+                <MudItem xs="12" sm="6" md="4" lg="3">
+                    <MudCard Elevation="1" Style="background: linear-gradient(145deg, #1e1e2e, #181825); border: 1px solid #45475a; border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <div class="d-flex align-center gap-3">
+                                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" Color="Color.Tertiary" />
+                                <div>
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4; line-height: 1.2;">@sub.Name</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.LoraCount LoRA@((sub.LoraCount == 1 ? "" : "s"))</MudText>
+                                </div>
+                            </div>
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Secondary" />
+                        </div>
+                        <div class="d-flex align-center justify-space-between mt-3">
+                            <MudText Typo="Typo.caption" Style="color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">
+                                @sub.RelativePath
+                            </MudText>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">Browse</MudChip>
+                        </div>
+                    </MudCard>
+                </MudItem>
+            }
+        }
+
+        <!-- LoRA Model Cards -->
         @foreach (var lora in FilteredLoras) {
             <MudItem xs="12" sm="6" md="4" lg="3">
                 <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
@@ -139,6 +208,12 @@
                         </MudTooltip>
                         @if (lora.CivitaiInfo != null && !string.IsNullOrWhiteSpace(lora.CivitaiInfo.VersionName)) {
                             <MudText Typo="Typo.caption" Color="Color.Secondary">@lora.CivitaiInfo.VersionName</MudText>
+                        }
+
+                        @if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery)) {
+                            <div class="mt-1" style="font-size: 0.7rem; color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                📁 @GetRelativeSubfolder(lora.FilePath)
+                            </div>
                         }
 
                         <!-- Trigger Word Badge -->
@@ -188,8 +263,27 @@
             </MudItem>
         }
     </MudGrid>
+
+    @if (FilteredLoras.Count == 0 && CurrentSubfolders.Count > 0) {
+        <div class="pa-4 text-center mt-4" style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                No direct LoRA files in this folder. Click any subfolder card above to view contained models.
+            </MudText>
+        </div>
+    }
 } else {
     <!-- Table View -->
+    @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfolders.Count > 0) {
+        <div class="d-flex flex-wrap gap-2 mb-3 align-center">
+            <MudText Typo="Typo.body2" Style="color: #a6adc8; font-weight: 600;">Subfolders:</MudText>
+            @foreach (var sub in CurrentSubfolders) {
+                <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
+                    @sub.Name (@sub.LoraCount)
+                </MudChip>
+            }
+        </div>
+    }
+
     <MudTable Items="FilteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
         <HeaderContent>
             <MudTh>File Name</MudTh>
@@ -240,6 +334,10 @@
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
 
+    private string _rootFolder = string.Empty;
+    private string _currentFolder = string.Empty;
+    private bool _showAllFlat;
+
     private string _viewMode = "grid";
     private string _searchQuery = string.Empty;
     private string _selectedArchitecture = "all";
@@ -253,17 +351,130 @@
     private int _totalFiles;
     private string _currentScanningFile = string.Empty;
 
+    private sealed record SubfolderItem(string Name, string FullPath, string RelativePath, int LoraCount);
+    private sealed record CrumbItem(string Name, string FullPath);
+
+    private List<SubfolderItem> CurrentSubfolders {
+        get {
+            if (string.IsNullOrWhiteSpace(_currentFolder) || !Directory.Exists(_currentFolder) || _showAllFlat) {
+                return new List<SubfolderItem>();
+            }
+
+            try {
+                string[] subDirs = Directory.GetDirectories(_currentFolder);
+                List<SubfolderItem> result = new();
+
+                lock (_libraryLock) {
+                    foreach (string dir in subDirs) {
+                        string dirName = Path.GetFileName(dir);
+                        if (dirName.StartsWith('.')) {
+                            continue;
+                        }
+
+                        string prefix = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                        int count = _loraLibrary.Count(l => l.FilePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                        string rel = string.IsNullOrWhiteSpace(_rootFolder) ? dirName : Path.GetRelativePath(_rootFolder, dir);
+
+                        result.Add(new SubfolderItem(dirName, dir, rel, count));
+                    }
+                }
+
+                return result.OrderBy(s => s.Name).ToList();
+            } catch {
+                return new List<SubfolderItem>();
+            }
+        }
+    }
+
     private List<LoraMetadata> FilteredLoras {
         get {
             lock (_libraryLock) {
                 return _loraLibrary
+                    .Where(l => {
+                        if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery) || string.IsNullOrWhiteSpace(_currentFolder)) {
+                            return true;
+                        }
+                        string dir = Path.GetDirectoryName(l.FilePath) ?? string.Empty;
+                        return string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                             _currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                             StringComparison.OrdinalIgnoreCase);
+                    })
                     .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
                         || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
                         || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-                        || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)))
+                        || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                        || l.FilePath.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
                     .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
+        }
+    }
+
+    private List<CrumbItem> GetBreadcrumbs() {
+        List<CrumbItem> crumbs = new();
+        if (string.IsNullOrWhiteSpace(_rootFolder) || string.IsNullOrWhiteSpace(_currentFolder)) {
+            return crumbs;
+        }
+
+        try {
+            string rel = Path.GetRelativePath(_rootFolder, _currentFolder);
+            if (string.IsNullOrWhiteSpace(rel) || rel == ".") {
+                return crumbs;
+            }
+
+            string[] parts = rel.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            string currentAccum = _rootFolder;
+            foreach (string part in parts) {
+                currentAccum = Path.Combine(currentAccum, part);
+                crumbs.Add(new CrumbItem(part, currentAccum));
+            }
+        } catch {
+            // Fallback empty
+        }
+
+        return crumbs;
+    }
+
+    private void NavigateToFolder(string folderPath) {
+        if (Directory.Exists(folderPath)) {
+            _currentFolder = folderPath;
+            _showAllFlat = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateUp() {
+        if (string.IsNullOrWhiteSpace(_currentFolder) || string.IsNullOrWhiteSpace(_rootFolder)) {
+            return;
+        }
+        if (string.Equals(_currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                          _rootFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                          StringComparison.OrdinalIgnoreCase)) {
+            return;
+        }
+
+        string? parent = Path.GetDirectoryName(_currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent) && parent.StartsWith(_rootFolder, StringComparison.OrdinalIgnoreCase)) {
+            _currentFolder = parent;
+        } else {
+            _currentFolder = _rootFolder;
+        }
+        StateHasChanged();
+    }
+
+    private string GetRelativeSubfolder(string filePath) {
+        if (string.IsNullOrWhiteSpace(_rootFolder)) {
+            return Path.GetDirectoryName(filePath) ?? string.Empty;
+        }
+        string? dir = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrEmpty(dir)) {
+            return string.Empty;
+        }
+        try {
+            string rel = Path.GetRelativePath(_rootFolder, dir);
+            return rel == "." ? "Root" : rel;
+        } catch {
+            return dir;
         }
     }
 
@@ -291,6 +502,13 @@
                 _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
                 _loraLibrary.Insert(0, meta);
             }
+
+            if (string.IsNullOrWhiteSpace(_rootFolder)) {
+                string dir = Path.GetDirectoryName(filePath) ?? string.Empty;
+                _rootFolder = dir;
+                _currentFolder = dir;
+            }
+
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
         } catch (Exception ex) {
             Snackbar.Add($"Failed to read {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
@@ -303,10 +521,14 @@
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
 
+        _rootFolder = folderPath;
+        _currentFolder = folderPath;
+        _showAllFlat = false;
+
         _isScanning = true;
         _scannedCount = 0;
         _totalFiles = 0;
-        _currentScanningFile = "Discovering files...";
+        _currentScanningFile = "Discovering files recursively...";
         lock (_libraryLock) {
             _loraLibrary.Clear();
         }
@@ -332,7 +554,7 @@
                 );
 
                 await InvokeAsync(() => {
-                    Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs in background", Severity.Success);
+                    Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs across subfolders", Severity.Success);
                 });
             } catch (OperationCanceledException) {
                 await InvokeAsync(() => {

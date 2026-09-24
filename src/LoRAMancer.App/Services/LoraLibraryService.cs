@@ -197,9 +197,20 @@ public sealed class LoraLibraryService {
     private async Task DownloadAndCacheThumbnailAsync(LoraMetadata meta, string imageUrl, CancellationToken cancellationToken) {
         try {
             string destination = Path.Combine(_cacheDirectory, $"{meta.Sha256Hash}.png");
-            byte[] imageBytes = await _httpClient.GetByteArrayAsync(imageUrl, cancellationToken);
-            await File.WriteAllBytesAsync(destination, imageBytes, cancellationToken);
-            meta.ThumbnailPath = destination;
+            using HttpRequestMessage request = new(HttpMethod.Get, imageUrl);
+            request.Headers.TryAddWithoutValidation("User-Agent", "LoRAMancer/1.0 (Windows NT 10.0; Win64; x64)");
+
+            string apiKey = _settingsService.Current.CivitaiApiKey;
+            if (!string.IsNullOrWhiteSpace(apiKey) && imageUrl.Contains("civitai", StringComparison.OrdinalIgnoreCase)) {
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
+            }
+
+            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode) {
+                byte[] imageBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                await File.WriteAllBytesAsync(destination, imageBytes, cancellationToken);
+                meta.ThumbnailPath = destination;
+            }
         } catch {
             // Ignore thumbnail download errors
         }

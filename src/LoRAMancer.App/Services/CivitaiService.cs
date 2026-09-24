@@ -46,10 +46,15 @@ public sealed class CivitaiService {
     public async Task<CivitaiModelVersionInfo?> LookupByHashAsync(string hash, CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrWhiteSpace(hash);
 
-        string url = $"https://civitai.com/api/v1/model-versions/by-hash/{hash}";
-        using HttpRequestMessage request = new(HttpMethod.Get, url);
-
         string apiKey = _settingsService.Current.CivitaiApiKey;
+        string url = $"https://civitai.com/api/v1/model-versions/by-hash/{hash}";
+        if (!string.IsNullOrWhiteSpace(apiKey)) {
+            url += $"?token={Uri.EscapeDataString(apiKey.Trim())}";
+        }
+
+        using HttpRequestMessage request = new(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", "LoRAMancer/1.0 (Windows NT 10.0; Win64; x64)");
+
         if (!string.IsNullOrWhiteSpace(apiKey)) {
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
         }
