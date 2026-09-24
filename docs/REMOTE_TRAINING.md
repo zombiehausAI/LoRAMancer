@@ -121,6 +121,8 @@ The embedded Kestrel server exposes the following endpoints (all protected by Au
 | `/api/v1/training/start` | `POST` | Dispatches and initiates a training job with config YAML |
 | `/api/v1/training/stop` | `POST` | Sends a cancellation signal to the active training runner |
 | `/api/v1/training/stream` | `GET` | Server-Sent Events (SSE) streaming live step telemetry, loss metrics, and logs |
+| `/api/v1/history` | `GET` | List all past training runs in the Vault with status, metrics, and timestamps |
+| `/api/v1/history/retry/{id}` | `POST` | Immediately resubmit and start a training run from history on the host |
 | `/api/v1/tokens` | `GET` | List all auth tokens with status, role, usage, and plain-text secret |
 | `/api/v1/tokens` | `POST` | Create a new auth token with custom or auto-generated `lrm_...` secret |
 | `/api/v1/tokens/{id}/block` | `POST` | Immediately block an auth token, revoking server access |

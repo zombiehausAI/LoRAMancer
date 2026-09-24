@@ -29,6 +29,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
     private readonly AmdVenvProvisioner _venvProvisioner;
     private readonly PublicTunnelService? _publicTunnelService;
     private readonly AuthTokenManagerService? _authTokenManager;
+    private readonly LoraHistoryService? _historyService;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -47,7 +48,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
         DatasetInspectorService datasetInspector,
         AmdVenvProvisioner venvProvisioner,
         PublicTunnelService? publicTunnelService = null,
-        AuthTokenManagerService? authTokenManager = null
+        AuthTokenManagerService? authTokenManager = null,
+        LoraHistoryService? historyService = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
@@ -55,6 +57,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
         _venvProvisioner = venvProvisioner;
         _publicTunnelService = publicTunnelService;
         _authTokenManager = authTokenManager;
+        _historyService = historyService;
 
         _trainingRunner.OnProgressUpdated += HandleProgressUpdated;
         _trainingRunner.OnLogReceived += HandleLogReceived;
@@ -329,6 +332,65 @@ public sealed class NetworkServerService : IAsyncDisposable {
             } catch (OperationCanceledException) {
                 // Client disconnected
             }
+        });
+
+        // 10. Training History Records
+        app.MapGet("/api/v1/history", async (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+
+            if (_historyService == null) {
+                return Results.Json(Array.Empty<LoraHistoryRecord>());
+            }
+
+            var records = await _historyService.GetHistoryAsync();
+            return Results.Json(records);
+        });
+
+        // 11. Retry Training Run From History
+        app.MapPost("/api/v1/history/retry/{id}", async (string id, HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) {
+                return Results.Unauthorized();
+            }
+
+            if (_historyService == null) {
+                return Results.NotFound(new { error = "History service not available on host." });
+            }
+
+            var record = await _historyService.GetRecordByIdAsync(id);
+            if (record == null) {
+                return Results.NotFound(new { error = "History record not found." });
+            }
+
+            if (string.IsNullOrWhiteSpace(record.ConfigYamlPath) || !File.Exists(record.ConfigYamlPath)) {
+                return Results.BadRequest(new { error = "Training configuration YAML not found on host." });
+            }
+
+            if (_trainingRunner.IsRunning) {
+                return Results.Conflict(new { error = "A training job is already active on the host." });
+            }
+
+            string venvPath = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
+            if (!Directory.Exists(venvPath)) {
+                venvPath = Path.Combine(AppContext.BaseDirectory, ".venv");
+            }
+
+            _ = Task.Run(async () => {
+                try {
+                    await _trainingRunner.StartTrainingAsync(venvPath, null, record.ConfigYamlPath);
+                } catch (Exception ex) {
+                    BroadcastTelemetry(new TrainingTelemetryDto {
+                        EventType = "failed",
+                        Message = $"Retried training launch failed: {ex.Message}"
+                    });
+                }
+            });
+
+            return Results.Accepted($"/api/v1/history/retry/{id}", new {
+                message = $"Training job '{record.Name}' resubmitted successfully.",
+                runName = record.Name
+            });
         });
 
         // 10. Embedded Responsive Web Interface & PWA App Shell (Strictly Protected)
@@ -818,6 +880,19 @@ public sealed class NetworkServerService : IAsyncDisposable {
             padding: 12px; text-align: center;
         }
         .stat-val { font-size: 1.25rem; font-weight: 700; color: #fff; margin-top: 4px; }
+        .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .history-table th, .history-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+        .history-table th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.5px; }
+        .history-table tr:hover { background-color: var(--bg-card); }
+        .btn-retry {
+            background: linear-gradient(135deg, #f9e2af, #fab387);
+            color: #11111b; font-weight: 600;
+            padding: 5px 12px; font-size: 0.8rem;
+            border: none; border-radius: 6px; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 4px;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .btn-retry:hover { opacity: 0.9; transform: scale(1.02); }
     </style>
 </head>
 <body>
@@ -909,6 +984,16 @@ public sealed class NetworkServerService : IAsyncDisposable {
             </div>
 
             <div id="terminal" class="terminal">Connecting to LoRAMancer telemetry stream...</div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1;">
+            <div class="card-title">
+                <span>LoRA Training History & Vault</span>
+                <button class="btn btn-install" onclick="loadHistory()">🔄 Refresh History</button>
+            </div>
+            <div id="historyTableContainer" style="overflow-x:auto;">
+                <div style="color:var(--text-muted); font-size:0.88rem; padding: 12px 0;">Loading training history...</div>
+            </div>
         </section>
     </main>
 
@@ -1039,6 +1124,79 @@ public sealed class NetworkServerService : IAsyncDisposable {
 
         checkHealth();
         initTelemetryStream();
+        loadHistory();
+
+        async function loadHistory() {
+            const container = document.getElementById('historyTableContainer');
+            try {
+                const res = await fetch('/api/v1/history', { headers: authHeaders() });
+                if (res.status === 401) {
+                    window.location.reload();
+                    return;
+                }
+                if (!res.ok) {
+                    container.innerHTML = '<div style="color:var(--red); padding:10px 0;">Failed to load history from host.</div>';
+                    return;
+                }
+                const list = await res.json();
+                if (!list || list.length === 0) {
+                    container.innerHTML = '<div style="color:var(--text-muted); font-style:italic; padding:12px 0;">No training records found in vault.</div>';
+                    return;
+                }
+                let html = '<table class="history-table"><thead><tr>' +
+                    '<th>Name</th><th>Architecture</th><th>Status</th><th>Steps</th><th>Loss</th><th>Completed</th><th>Action</th>' +
+                    '</tr></thead><tbody>';
+                for (const item of list) {
+                    const status = item.Status || 'Unknown';
+                    const isSuccess = status === 'Completed';
+                    const isFailed = status === 'Failed' || status === 'Cancelled';
+                    const badgeClass = isSuccess ? 'badge-live' : (isFailed ? 'badge-busy' : '');
+                    const btnLabel = isFailed ? '🔁 Retry' : '▶️ Retrain';
+                    const dateStr = item.CompletedAt ? new Date(item.CompletedAt).toLocaleDateString() : '-';
+                    const arch = (item.BaseArchitecture || 'FLUX').toUpperCase();
+                    const loss = item.FinalLoss ? item.FinalLoss.toFixed(4) : '-';
+                    html += '<tr>' +
+                        '<td><b>' + (item.Name || 'Unnamed') + '</b><div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">' + (item.TriggerWord || '') + '</div></td>' +
+                        '<td><span class="badge" style="background:#313244; color:#cdd6f4;">' + arch + '</span></td>' +
+                        '<td><span class="badge ' + badgeClass + '">' + status + '</span></td>' +
+                        '<td>' + (item.Steps || 0) + '</td>' +
+                        '<td style="color:var(--green); font-weight:600;">' + loss + '</td>' +
+                        '<td>' + dateStr + '</td>' +
+                        '<td><button class="btn-retry" onclick="retryTraining(\'' + item.Id + '\', \'' + (item.Name || 'Job').replace(/'/g, "\\'") + '\')">' + btnLabel + '</button></td>' +
+                    '</tr>';
+                }
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch(e) {
+                container.innerHTML = '<div style="color:var(--red); padding:10px 0;">Error loading history: ' + e.message + '</div>';
+            }
+        }
+
+        async function retryTraining(id, name) {
+            if (!confirm('Resubmit and start training for "' + name + '" on host?')) return;
+            try {
+                const headers = authHeaders();
+                headers['Content-Type'] = 'application/json';
+                const res = await fetch('/api/v1/history/retry/' + encodeURIComponent(id), {
+                    method: 'POST',
+                    headers
+                });
+                if (res.status === 401) {
+                    window.location.reload();
+                    return;
+                }
+                const data = await res.json();
+                if (res.ok) {
+                    appendLog('[RETRY] Training successfully queued for: ' + name);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    checkHealth();
+                } else {
+                    alert('Failed to retry training: ' + (data.error || 'Server error'));
+                }
+            } catch(e) {
+                alert('Network error: ' + e.message);
+            }
+        }
 
         async function startTraining() {
             const runName = document.getElementById('runName').value.trim() || 'remote_run';

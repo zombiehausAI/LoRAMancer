@@ -44,6 +44,10 @@ When not overridden, LoRAMancer defaults to:
 
 The `rocm_sdk` package on Windows requires library entry stubs for non-present Unix shared objects (`hipsparselt`, `hipdnn`, `rocm-openblas`) inside `rocm_sdk/_dist_info.py`. `AmdVenvProvisioner` implements this patch automatically after wheel installation to prevent `ModuleNotFoundError` during process initialization.
 
+## TorchAO & Diffusers Compatibility Patching
+
+Windows ROCm PyTorch builds do not contain `torch._C._distributed_c10d`. AI-Toolkit requires `torchao` for `_DTYPE_TO_BIT_WIDTH`, and `diffusers` inspects `torchao` on startup. Because `torchao` unconditionally attempts to import `torch.distributed` across `torchao/__init__.py` and `torchao.float8.distributed_utils`, `AmdVenvProvisioner` automatically guards these import blocks in `.venv` before training begins, ensuring `torchao`, `diffusers`, and `ai-toolkit` all run seamlessly together on Windows AMD ROCm.
+
 ## PyTorch Protection & Dependency Resolution
 
 Hardware PyTorch wheels (`torch`, `torchvision`, `torchaudio`) are installed directly with `--no-deps` to ensure they are isolated from standard PyPI indexes. When subsequently installing training engine requirements (AI-Toolkit or Kohya), requirements are installed with full dependency resolution (omitting `--upgrade`), ensuring all core packages (`numpy`, `Pillow`, `filelock`, `tqdm`, `requests`, `sympy`, `networkx`, `jinja2`) are fully provisioned without replacing or downgrading the AMD ROCm PyTorch binaries.

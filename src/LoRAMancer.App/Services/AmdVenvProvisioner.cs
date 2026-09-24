@@ -332,6 +332,7 @@ public sealed class AmdVenvProvisioner {
 
                 if (sdkExit == 0) {
                     PatchRocmSdkDistInfo(venvPath, onProgress);
+                    PatchTorchaoDistributedUtils(venvPath, onProgress);
                 }
                 break;
         }
@@ -375,6 +376,72 @@ public sealed class AmdVenvProvisioner {
             string patch = "\n# [loramancer] windows-missing-libs\n" + string.Join("\n", missing) + "\n";
             File.AppendAllText(distInfoPath, patch);
             onProgress?.Invoke($"[Patch] Applied {missing.Count} Windows library stubs to rocm_sdk _dist_info.py");
+        }
+    }
+
+    public static void PatchTorchaoDistributedUtils(string venvPath, Action<string>? onProgress) {
+        string aoInitPath = Path.Combine(venvPath, "Lib", "site-packages", "torchao", "__init__.py");
+        if (File.Exists(aoInitPath)) {
+            string initContent = File.ReadAllText(aoInitPath);
+            if (!initContent.Contains("# [loramancer] windows-c10d-guard")) {
+                string normalizedInit = initContent.Replace("\r\n", "\n");
+                string targetInit = "from torchao.quantization import (\n    autoquant,\n    quantize_,\n)\n\nfrom . import dtypes, optim, testing";
+                string replacementInit = "# [loramancer] windows-c10d-guard\ntry:\n    from torchao.quantization import (\n        autoquant,\n        quantize_,\n    )\n    from . import dtypes, optim, testing\nexcept Exception as e:\n    logging.debug(f\"Skipping distributed/c10d dependent modules: {e}\")";
+
+                if (normalizedInit.Contains(targetInit)) {
+                    normalizedInit = normalizedInit.Replace(targetInit, replacementInit);
+                    File.WriteAllText(aoInitPath, normalizedInit);
+                    onProgress?.Invoke("[Patch] Patched torchao/__init__.py to guard distributed/c10d imports.");
+                }
+            }
+        }
+
+        string distUtilsPath = Path.Combine(venvPath, "Lib", "site-packages", "torchao", "float8", "distributed_utils.py");
+        if (File.Exists(distUtilsPath)) {
+            string content = File.ReadAllText(distUtilsPath);
+            if (!content.Contains("# [loramancer] windows-distributed-mock")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target = "import torch.distributed._functional_collectives as funcol\nfrom torch.distributed._tensor import DTensor";
+                string replacement = "# [loramancer] windows-distributed-mock\ntry:\n    import torch.distributed._functional_collectives as funcol\n    from torch.distributed._tensor import DTensor\nexcept Exception:\n    funcol = None\n    DTensor = None";
+
+                if (normalized.Contains(target)) {
+                    normalized = normalized.Replace(target, replacement);
+                    File.WriteAllText(distUtilsPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched torchao distributed_utils for Windows ROCm.");
+                }
+            }
+        }
+
+        string float8TensorPath = Path.Combine(venvPath, "Lib", "site-packages", "torchao", "float8", "float8_tensor.py");
+        if (File.Exists(float8TensorPath)) {
+            string content = File.ReadAllText(float8TensorPath);
+            if (!content.Contains("# [loramancer] windows-dtensor-mock")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target = "from torch.distributed._tensor import DTensor";
+                string replacement = "# [loramancer] windows-dtensor-mock\ntry:\n    from torch.distributed._tensor import DTensor\nexcept Exception:\n    class DTensor:\n        pass";
+
+                if (normalized.Contains(target)) {
+                    normalized = normalized.Replace(target, replacement);
+                    File.WriteAllText(float8TensorPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched torchao float8_tensor for Windows ROCm.");
+                }
+            }
+        }
+
+        string float8UtilsPath = Path.Combine(venvPath, "Lib", "site-packages", "torchao", "float8", "float8_utils.py");
+        if (File.Exists(float8UtilsPath)) {
+            string content = File.ReadAllText(float8UtilsPath);
+            if (!content.Contains("# [loramancer] windows-dist-mock")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target = "import torch.distributed as dist\nfrom torch.distributed._functional_collectives import AsyncCollectiveTensor, all_reduce";
+                string replacement = "# [loramancer] windows-dist-mock\ntry:\n    import torch.distributed as dist\n    from torch.distributed._functional_collectives import AsyncCollectiveTensor, all_reduce\nexcept Exception:\n    dist = None\n    AsyncCollectiveTensor = None\n    all_reduce = None";
+
+                if (normalized.Contains(target)) {
+                    normalized = normalized.Replace(target, replacement);
+                    File.WriteAllText(float8UtilsPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched torchao float8_utils for Windows ROCm.");
+                }
+            }
         }
     }
 

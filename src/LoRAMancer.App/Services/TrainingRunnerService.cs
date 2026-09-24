@@ -93,6 +93,8 @@ public sealed class TrainingRunnerService {
             startInfo.EnvironmentVariables["PYTORCH_ROCM_ARCH"] = "native";
             startInfo.EnvironmentVariables["MIOPEN_FIND_MODE"] = "FAST";
             startInfo.EnvironmentVariables["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0";
+            AmdVenvProvisioner.PatchRocmSdkDistInfo(venvPath, msg => OnLogReceived?.Invoke(msg));
+            AmdVenvProvisioner.PatchTorchaoDistributedUtils(venvPath, msg => OnLogReceived?.Invoke(msg));
         } else if (envInfo.DetectedVendor == HardwareVendor.Nvidia) {
             startInfo.EnvironmentVariables["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID";
         } else if (envInfo.DetectedVendor == HardwareVendor.Intel) {
