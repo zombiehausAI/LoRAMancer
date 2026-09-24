@@ -84,14 +84,14 @@
                 </CardHeaderAvatar>
                 <CardHeaderContent>
                     <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">ComfyUI Script Ingestion</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Parse comfyui.ps1 to inherit ROCm wheel configuration</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Parse runner script to inherit environment and wheel configuration</MudText>
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
                 <div class="mb-3">
                     <MudText Typo="Typo.caption" Color="Color.Secondary">Select your existing ComfyUI startup script:</MudText>
                     <div class="d-flex align-center gap-2 mt-1">
-                        <MudTextField @bind-Value="_scriptPath" Placeholder="e.g. Reference/comfyui.ps1" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                        <MudTextField @bind-Value="_scriptPath" Placeholder="Select a .ps1 or .bat script..." Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
                         <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseScriptAsync">Browse...</MudButton>
                     </div>
                 </div>
@@ -225,11 +225,6 @@
 
     protected override async Task OnInitializedAsync() {
         _envInfo = await Provisioner.DetectEnvironmentAsync();
-        string defaultRefScript = Path.Combine(Directory.GetCurrentDirectory(), "Reference", "comfyui.ps1");
-        if (File.Exists(defaultRefScript)) {
-            _scriptPath = defaultRefScript;
-            await Provisioner.IngestComfyUiScriptAsync(_scriptPath, _envInfo);
-        }
         await RefreshPackageStatusAsync();
     }
 
