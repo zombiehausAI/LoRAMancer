@@ -24,6 +24,7 @@ Comprehensive guides and architectural specifications are located in the [`docs/
 - 🧙 [Civitai-Style Training Wizard & Estimators](docs/TRAINING_WIZARD.md)
 - ⚡ [Universal GPU & Environment Provisioning (ROCm / CUDA / Intel / CPU)](docs/GPU_AND_ENVIRONMENT_SETUP.md)
 - 🔴 [AMD ROCm Dedicated Windows Setup](docs/AMD_ROCM_SETUP.md)
+- 🛠️ [AMD ROCm Windows Runtime Patches & Troubleshooting Log](docs/AMD_WINDOWS_ROCM_PATCHES.md)
 - 🌐 [Remote Training, PWA Web App & Public Internet Serving](docs/REMOTE_TRAINING.md)
 - 🏛️ [Permanent LoRA Training History & Vault](docs/HISTORY_AND_VAULT.md)
 - 🔌 [Plugin System Guide (C# & Python Extensions)](docs/PLUGINS.md)

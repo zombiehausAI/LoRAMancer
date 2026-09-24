@@ -1,0 +1,177 @@
+# AMD ROCm on Windows: Runtime Patches & Troubleshooting Log
+
+This document serves as a comprehensive, running technical log of issues, architectural quirks, and runtime patches required to execute modern diffusion LoRA training (AI-Toolkit, Kohya) using AMD ROCm on Windows hosts.
+
+---
+
+## Environment Baseline
+
+- **Operating System**: Windows 11 / Windows 10 (64-bit)
+- **Python**: 3.12 (CPython x64)
+- **PyTorch**: `torch==2.9.1+rocm7.2.1`, `torchvision`, `torchaudio`
+- **ROCm SDK**: AMD ROCm 7.x (`rocm_sdk`, `rocm_sdk_core`, `rocm_sdk_devel`, `rocm_sdk_libraries_custom`)
+- **Acceleration Stack**: MIOpen, HIP, PyTorch ROCm Windows
+- **Engine**: AI-Toolkit (`ai-toolkit` by ostris)
+
+---
+
+## 1. Missing Library Stubs in `rocm_sdk` (`_dist_info.py`)
+
+### The Problem
+When initializing `torch` with ROCm on Windows:
+```python
+import torch
+# Triggers: _rocm_init.initialize() -> import rocm_sdk -> from ._dist_info import __version__
+```
+The Windows port of `rocm_sdk` queries for Unix shared objects that do not exist on Windows, or fails with:
+`ModuleNotFoundError: No module named 'libhipsparselt'` or `IndentationError: unexpected indent`.
+
+### The Cause
+1. `_dist_info.py` expects Linux `.so` shared libraries (`libhipsparselt.so.0`, `libhipdnn.so.0`, `librocm-openblas.so.0`).
+2. Ad-hoc file appending often introduces indentation errors into `_dist_info.py`.
+
+### The Patch
+`AmdVenvProvisioner.PatchRocmSdkDistInfo` appends `optional=True` library entry stubs without leading indentation to:
+`.venv/Lib/site-packages/rocm_sdk/_dist_info.py`:
+```python
+# [loramancer] windows-missing-libs
+LibraryEntry("hipsparselt", "core", "libhipsparselt.so.0", "", optional=True)
+LibraryEntry("hipdnn", "core", "libhipdnn.so.0", "", optional=True)
+LibraryEntry("rocm-openblas", "core", "librocm-openblas.so.0", "", optional=True)
+```
+
+---
+
+## 2. Process Output Buffering & Silent Hangs
+
+### The Problem
+When starting training via a subprocess, training appeared to hang indefinitely without log output, especially while downloading model weights or compiling kernels.
+
+### The Cause
+By default, Python buffers stdout and stderr when attached to a pipe (non-TTY). On Windows, buffer flushes can be delayed until tens of kilobytes are accumulated, giving the appearance of a hard lock during 10+ GB weight downloads.
+
+### The Solution
+`TrainingRunnerService` explicitly injects:
+```csharp
+startInfo.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
+startInfo.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+```
+This forces line-by-line streaming of all engine logs and HuggingFace progress bars.
+
+---
+
+## 3. PyTorch Dependency Stripping vs. Missing Packages
+
+### The Problem
+Installing PyTorch with `--no-deps` prevents PyPI from overwriting ROCm PyTorch with CUDA/CPU versions, but strips core utilities needed by `ai-toolkit`, such as `httpx`, `numpy`, `Pillow`, `filelock`, `sympy`, `networkx`, and `jinja2`.
+
+### The Solution
+`AiToolkitSetupService` provisions dependencies in two separate stages:
+1. Install AMD ROCm PyTorch wheels with `--no-cache-dir --no-deps`.
+2. Install engine requirements (`requirements.txt`) without `--upgrade`, explicitly including foundational packages:
+   ```powershell
+   python.exe -m pip install --no-cache-dir -r requirements.txt sympy networkx jinja2 httpx
+   ```
+
+---
+
+## 4. `torch._C._distributed_c10d` Missing on Windows ROCm (`torchao` & `diffusers`)
+
+### The Problem
+Attempting to run training triggers one of these errors:
+```text
+ModuleNotFoundError: No module named 'torch._C._distributed_c10d'; 'torch._C' is not a package
+```
+or:
+```text
+Failed to import diffusers.models.autoencoders.autoencoder_tiny because of the following error:
+No module named 'torch._C._distributed_c10d'; 'torch._C' is not a package
+```
+
+### The Cause
+- `ai-toolkit` requires `torchao` for `_DTYPE_TO_BIT_WIDTH` in `toolkit/config_modules.py`.
+- `diffusers` inspects `torchao` on startup via `is_torchao_available()`.
+- AMD PyTorch Windows wheels are compiled with `USE_DISTRIBUTED=0`. The C++ extension `torch._C._distributed_c10d.pyd` is **omitted**.
+- Importing `torchao` causes a cascading import chain:
+  `torchao/__init__.py` &rarr; `torchao.quantization` &rarr; `autoquant` &rarr; `torchao.dtypes` &rarr; `float8` &rarr; `float8_tensor.py` &rarr; `from torch.distributed._tensor import DTensor`.
+- PyTorch's `torch.distributed._tensor` unconditionally imports `distributed_c10d`, which searches for `torch._C._distributed_c10d` and throws a fatal `ModuleNotFoundError`.
+
+### The Patches
+Because LoRAMancer runs single-GPU training, distributed operations are completely unused. `AmdVenvProvisioner.PatchTorchaoDistributedUtils` applies guards across four key files in `.venv/Lib/site-packages/torchao/`:
+
+#### A. Guard `torchao/__init__.py`
+Guards lines 41–46 so distributed modules do not crash package import:
+```python
+# [loramancer] windows-c10d-guard
+try:
+    from torchao.quantization import (
+        autoquant,
+        quantize_,
+    )
+    from . import dtypes, optim, testing
+except Exception as e:
+    logging.debug(f"Skipping distributed/c10d dependent modules: {e}")
+```
+
+#### B. Mock `torchao/float8/float8_tensor.py`
+Guards line 10 (`DTensor` import):
+```python
+# [loramancer] windows-dtensor-mock
+try:
+    from torch.distributed._tensor import DTensor
+except Exception:
+    class DTensor:
+        pass
+```
+
+#### C. Mock `torchao/float8/float8_utils.py`
+Guards lines 10–11:
+```python
+# [loramancer] windows-dist-mock
+try:
+    import torch.distributed as dist
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor, all_reduce
+except Exception:
+    dist = None
+    AsyncCollectiveTensor = None
+    all_reduce = None
+```
+
+#### D. Mock `torchao/float8/distributed_utils.py`
+Guards lines 8–9:
+```python
+# [loramancer] windows-distributed-mock
+try:
+    import torch.distributed._functional_collectives as funcol
+    from torch.distributed._tensor import DTensor
+except Exception:
+    funcol = None
+    DTensor = None
+```
+
+### Verification Command
+Run this command in PowerShell to confirm compatibility:
+```powershell
+& "C:\AI\LoRAMancer\.venv\Scripts\python.exe" -c "from torchao.quantization.quant_primitives import _DTYPE_TO_BIT_WIDTH; from diffusers import AutoencoderTiny; print('SUCCESS: Both TorchAO and Diffusers loaded without errors!')"
+```
+
+---
+
+## 5. Triton Kernel Warnings
+
+### The Warning
+```text
+WARNING:torchao.kernel.intmm:Warning: Detected no triton, on systems without Triton certain kernels will not work
+```
+### Notes
+Triton is a Linux-native compiler that has limited, experimental support on Windows. This warning is informational; PyTorch and AI-Toolkit fall back to standard PyTorch ATen kernels and SDPA (Scaled Dot-Product Attention) for all matrix multiplications and attention operations.
+
+---
+
+## 6. Chroma1-HD Foundation Model Footprint
+
+### Details
+- **Architecture**: Chroma (`lodestones/Chroma1-HD`)
+- **Parameters**: ~8.9B (~17–18 GB base model weights)
+- **First-run download**: Downloaded to HuggingFace hub cache (`~/.cache/huggingface/hub/models--lodestones--Chroma1-HD/`).
+- **Telemetry note**: Because weights are ~17 GB, download may take several minutes before step telemetry starts. LoRAMancer outputs diagnostic notices to inform the user that the process is downloading and not hung.
