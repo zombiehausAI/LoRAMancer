@@ -1,4 +1,5 @@
 @page "/"
+@implements IDisposable
 @inject SafeTensorsMetadataReader MetadataReader
 @inject LoraLibraryService LibraryService
 @inject CivitaiService Civitai
@@ -59,22 +60,44 @@
     </MudCardContent>
 </MudCard>
 
-@if (_isLoading) {
-    <div class="d-flex flex-column align-center justify-center my-12">
-        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-3" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">@_loadingMessage</MudText>
-    </div>
-} else if (FilteredLoras.Count == 0) {
-    <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
-        <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-        <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs indexed yet</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-            Click "Browse Folder..." to point to your LoRA storage directory (e.g. ComfyUI or Automatic1111 models).
-        </MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
-            Select LoRA Folder
-        </MudButton>
+@if (_isScanning) {
+    <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid #cba6f7; border-radius: 8px;">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div class="d-flex align-center gap-2">
+                <MudProgressCircular Size="Size.Small" Color="Color.Tertiary" Indeterminate="true" />
+                <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">
+                    Scanning LoRAs in background: @_scannedCount of @_totalFiles (@_currentScanningFile)
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelScan">
+                Stop Scan
+            </MudButton>
+        </div>
+        <MudProgressLinear Color="Color.Tertiary" Value="@(_totalFiles > 0 ? (double)_scannedCount / _totalFiles * 100 : 0)" Class="my-1" />
     </MudCard>
+}
+
+@if (FilteredLoras.Count == 0) {
+    @if (_isScanning) {
+        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+            <MudProgressCircular Size="Size.Large" Color="Color.Tertiary" Indeterminate="true" Class="mb-3" />
+            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">Scanning Directory in Background...</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Reading model headers and local preview thumbnails. Discovered models will appear here in real time.
+            </MudText>
+        </MudCard>
+    } else {
+        <MudCard Elevation="0" Class="pa-8 text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px;">
+            <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+            <MudText Typo="Typo.h6" Style="color: #cdd6f4;">No LoRAs indexed yet</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                Click "Browse Folder..." to point to your LoRA storage directory (e.g. ComfyUI or Automatic1111 models).
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+                Select LoRA Folder
+            </MudButton>
+        </MudCard>
+    }
 } else if (_viewMode == "grid") {
     <!-- Visual Card Grid -->
     <MudGrid>
@@ -213,8 +236,7 @@
 
 @code {
     private readonly List<LoraMetadata> _loraLibrary = new();
-    private bool _isLoading;
-    private string _loadingMessage = string.Empty;
+    private readonly object _libraryLock = new();
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
 
@@ -225,13 +247,25 @@
     private bool _isEnrichingAll;
     private int _enrichProgress;
 
-    private List<LoraMetadata> FilteredLoras => _loraLibrary
-        .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
-            || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
-            || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
-            || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)))
-        .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
-        .ToList();
+    private CancellationTokenSource? _scanCts;
+    private bool _isScanning;
+    private int _scannedCount;
+    private int _totalFiles;
+    private string _currentScanningFile = string.Empty;
+
+    private List<LoraMetadata> FilteredLoras {
+        get {
+            lock (_libraryLock) {
+                return _loraLibrary
+                    .Where(l => string.IsNullOrWhiteSpace(_searchQuery)
+                        || l.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+                        || (l.CivitaiInfo != null && l.CivitaiInfo.ModelName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+                        || l.TrainedWords.Any(w => w.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)))
+                    .Where(l => _selectedArchitecture == "all" || l.BaseModel.Contains(_selectedArchitecture, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+        }
+    }
 
     private async Task BrowseLoraFileAsync() {
         string? file = await FileDialogService.PickSafeTensorsFileAsync();
@@ -248,40 +282,80 @@
     }
 
     private async Task LoadSingleLoraAsync(string filePath) {
-        _isLoading = true;
-        _loadingMessage = $"Reading {Path.GetFileName(filePath)}...";
         try {
             LoraMetadata meta = await MetadataReader.ReadMetadataAsync(filePath);
             LibraryService.FindLocalThumbnail(meta);
             await LibraryService.EnrichFromCivitaiAsync(meta);
 
-            _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
-            _loraLibrary.Insert(0, meta);
+            lock (_libraryLock) {
+                _loraLibrary.RemoveAll(x => x.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+                _loraLibrary.Insert(0, meta);
+            }
             Snackbar.Add($"Loaded {meta.FileName}", Severity.Success);
         } catch (Exception ex) {
             Snackbar.Add($"Failed to read {Path.GetFileName(filePath)}: {ex.Message}", Severity.Error);
-        } finally {
-            _isLoading = false;
         }
     }
 
     private async Task LoadFolderAsync(string folderPath) {
-        _isLoading = true;
-        _loadingMessage = $"Indexing .safetensors files in {folderPath}...";
-        try {
-            var items = await LibraryService.ScanDirectoryAsync(folderPath, (file, current, total) => {
-                _loadingMessage = $"Indexed {current}/{total}: {file}";
-                InvokeAsync(StateHasChanged);
-            });
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanCts = new CancellationTokenSource();
+        var token = _scanCts.Token;
 
+        _isScanning = true;
+        _scannedCount = 0;
+        _totalFiles = 0;
+        _currentScanningFile = "Discovering files...";
+        lock (_libraryLock) {
             _loraLibrary.Clear();
-            _loraLibrary.AddRange(items);
-            Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs with thumbnails and metadata", Severity.Success);
-        } catch (Exception ex) {
-            Snackbar.Add($"Folder scan failed: {ex.Message}", Severity.Error);
-        } finally {
-            _isLoading = false;
         }
+        await InvokeAsync(StateHasChanged);
+
+        _ = Task.Run(async () => {
+            try {
+                await LibraryService.ScanDirectoryStreamAsync(
+                    folderPath,
+                    async meta => {
+                        lock (_libraryLock) {
+                            _loraLibrary.Add(meta);
+                        }
+                        await InvokeAsync(StateHasChanged);
+                    },
+                    (file, current, total) => {
+                        _currentScanningFile = file;
+                        _scannedCount = current;
+                        _totalFiles = total;
+                        InvokeAsync(StateHasChanged);
+                    },
+                    token
+                );
+
+                await InvokeAsync(() => {
+                    Snackbar.Add($"Indexed {_loraLibrary.Count} LoRAs in background", Severity.Success);
+                });
+            } catch (OperationCanceledException) {
+                await InvokeAsync(() => {
+                    Snackbar.Add("Background scan stopped.", Severity.Info);
+                });
+            } catch (Exception ex) {
+                await InvokeAsync(() => {
+                    Snackbar.Add($"Folder scan failed: {ex.Message}", Severity.Error);
+                });
+            } finally {
+                _isScanning = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }, token);
+    }
+
+    private void CancelScan() {
+        _scanCts?.Cancel();
+    }
+
+    public void Dispose() {
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
     }
 
     private async Task FetchSingleCivitaiAsync(LoraMetadata lora) {

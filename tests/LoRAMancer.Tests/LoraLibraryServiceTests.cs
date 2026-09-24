@@ -46,4 +46,30 @@ public sealed class LoraLibraryServiceTests {
 
         Assert.Equal("150.0 MB", meta.FormattedSize);
     }
+
+    [Fact]
+    public async Task ScanDirectoryStreamAsync_EmptyDirectory_ReturnsZeroDiscovered() {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"stream_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try {
+            SettingsService settings = new(null);
+            CivitaiService civitai = new(settings);
+            SafeTensorsMetadataReader reader = new();
+            LoraLibraryService service = new(reader, civitai, settings);
+
+            List<LoraMetadata> streamed = new();
+            int count = await service.ScanDirectoryStreamAsync(tempDir, meta => {
+                streamed.Add(meta);
+                return Task.CompletedTask;
+            });
+
+            Assert.Equal(0, count);
+            Assert.Empty(streamed);
+        } finally {
+            if (Directory.Exists(tempDir)) {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
 }

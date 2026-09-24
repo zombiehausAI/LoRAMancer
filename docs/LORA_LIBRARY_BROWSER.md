@@ -9,6 +9,10 @@ The **LoRA Library & Visual Browser** is LoRAMancer's core discovery and inspect
 ## 1. Visual Card Gallery & Thumbnails
 
 The browser supports both a rich **Card Grid** view and a compact **Table** view:
+- **Non-Blocking Background Scanning**: When scanning large directories (even thousands of models), scanning executes asynchronously in the background (`ScanDirectoryStreamAsync`) without freezing the user interface.
+  - Discovered models stream into the gallery in real time as each header is parsed.
+  - Creators can immediately search, filter, inspect metadata, or click **"Use Settings"** on any loaded model while the background scan continues running.
+  - A real-time progress banner displays current progress with a 1-click **"Stop Scan"** cancellation control.
 - **Local Thumbnail Auto-Discovery**: When pointing to any folder, LoRAMancer automatically detects local companion images:
   - `<model_name>.png`
   - `<model_name>.preview.png`

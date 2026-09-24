@@ -29,30 +29,60 @@ public sealed class LoraLibraryService {
         Directory.CreateDirectory(_cacheDirectory);
     }
 
-    public async Task<List<LoraMetadata>> ScanDirectoryAsync(string directoryPath, Action<string, int, int>? onProgress = null, CancellationToken cancellationToken = default) {
+    public async Task<int> ScanDirectoryStreamAsync(
+        string directoryPath,
+        Func<LoraMetadata, Task> onItemDiscovered,
+        Action<string, int, int>? onProgress = null,
+        CancellationToken cancellationToken = default
+    ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(directoryPath);
         if (!Directory.Exists(directoryPath)) {
             throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
         }
 
         string[] files = Directory.GetFiles(directoryPath, "*.safetensors", SearchOption.AllDirectories);
-        List<LoraMetadata> result = new();
+        int discoveredCount = 0;
 
         for (int i = 0; i < files.Length; i++) {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested) {
+                break;
+            }
+
             string file = files[i];
 
             try {
                 LoraMetadata meta = await _metadataReader.ReadMetadataAsync(file, cancellationToken);
                 FindLocalThumbnail(meta);
                 LoadCachedCivitaiInfo(meta);
-                result.Add(meta);
-                onProgress?.Invoke(Path.GetFileName(file), i + 1, files.Length);
+                discoveredCount++;
+                if (onItemDiscovered != null) {
+                    await onItemDiscovered(meta);
+                }
             } catch {
                 // Ignore corrupt or non-LoRA safetensors files
+            } finally {
+                onProgress?.Invoke(Path.GetFileName(file), i + 1, files.Length);
             }
         }
 
+        return discoveredCount;
+    }
+
+    public async Task<List<LoraMetadata>> ScanDirectoryAsync(
+        string directoryPath,
+        Action<string, int, int>? onProgress = null,
+        CancellationToken cancellationToken = default
+    ) {
+        List<LoraMetadata> result = new();
+        await ScanDirectoryStreamAsync(
+            directoryPath,
+            meta => {
+                result.Add(meta);
+                return Task.CompletedTask;
+            },
+            onProgress,
+            cancellationToken
+        );
         return result;
     }
 
