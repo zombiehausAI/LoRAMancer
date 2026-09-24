@@ -79,11 +79,40 @@ public sealed class LoraDatabaseService : IDisposable {
                 CREATE INDEX IF NOT EXISTS idx_loras_dir ON Loras(DirectoryPath);
                 CREATE INDEX IF NOT EXISTS idx_loras_fav ON Loras(IsFavorite);
                 CREATE INDEX IF NOT EXISTS idx_loras_base ON Loras(BaseModel);
+
+                CREATE TABLE IF NOT EXISTS Libraries (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    FolderPath TEXT NOT NULL,
+                    Description TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_libraries_path ON Libraries(FolderPath);
             ";
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = createTableSql;
             await cmd.ExecuteNonQueryAsync();
+
+            // Migrate Loras table to add LibraryId column if not yet present
+            using var pragmaCmd = connection.CreateCommand();
+            pragmaCmd.CommandText = "PRAGMA table_info(Loras);";
+            bool hasLibraryId = false;
+            using (var reader = await pragmaCmd.ExecuteReaderAsync()) {
+                while (await reader.ReadAsync()) {
+                    string col = reader.GetString(1);
+                    if (string.Equals(col, "LibraryId", StringComparison.OrdinalIgnoreCase)) {
+                        hasLibraryId = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasLibraryId) {
+                using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE Loras ADD COLUMN LibraryId TEXT;";
+                await alterCmd.ExecuteNonQueryAsync();
+            }
 
             _initialized = true;
         } finally {
@@ -100,6 +129,126 @@ public sealed class LoraDatabaseService : IDisposable {
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
+
+            var list = new List<LoraMetadata>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                list.Add(MapReaderToMetadata(reader));
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task<List<LoraLibrary>> GetLibrariesAsync() {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT l.Id, l.Name, l.FolderPath, l.Description, l.CreatedAtUtc, l.UpdatedAtUtc,
+                       COUNT(m.FilePath) as ModelCount
+                FROM Libraries l
+                LEFT JOIN Loras m ON m.LibraryId = l.Id OR (m.LibraryId IS NULL AND m.DirectoryPath LIKE l.FolderPath || '%')
+                GROUP BY l.Id
+                ORDER BY l.Name COLLATE NOCASE ASC;
+            ";
+
+            var list = new List<LoraLibrary>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                var lib = new LoraLibrary {
+                    Id = reader.GetString(0),
+                    Name = reader.GetString(1),
+                    FolderPath = reader.GetString(2),
+                    Description = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
+                    ModelCount = reader.GetInt32(6)
+                };
+                list.Add(lib);
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task<LoraLibrary?> GetLibraryAsync(string id) {
+        var libs = await GetLibrariesAsync();
+        return libs.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task UpsertLibraryAsync(LoraLibrary library) {
+        ArgumentNullException.ThrowIfNull(library);
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT OR REPLACE INTO Libraries (
+                    Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc
+                ) VALUES (
+                    $Id, $Name, $FolderPath, $Description, $CreatedAtUtc, $UpdatedAtUtc
+                );
+            ";
+            cmd.Parameters.AddWithValue("$Id", library.Id);
+            cmd.Parameters.AddWithValue("$Name", library.Name);
+            cmd.Parameters.AddWithValue("$FolderPath", library.FolderPath);
+            cmd.Parameters.AddWithValue("$Description", (object?)library.Description ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$CreatedAtUtc", library.CreatedAtUtc.ToString("O"));
+            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task DeleteLibraryAsync(string id) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM Libraries WHERE Id = $Id;";
+            cmd.Parameters.AddWithValue("$Id", id);
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task<List<LoraMetadata>> GetByLibraryAsync(string? libraryId = null, string? folderPath = null) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var cmd = connection.CreateCommand();
+            if (!string.IsNullOrWhiteSpace(libraryId) && !string.IsNullOrWhiteSpace(folderPath)) {
+                cmd.CommandText = "SELECT * FROM Loras WHERE LibraryId = $LibraryId OR (LibraryId IS NULL AND DirectoryPath LIKE $FolderPath) ORDER BY FileName COLLATE NOCASE ASC;";
+                cmd.Parameters.AddWithValue("$LibraryId", libraryId);
+                cmd.Parameters.AddWithValue("$FolderPath", folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "%");
+            } else if (!string.IsNullOrWhiteSpace(libraryId)) {
+                cmd.CommandText = "SELECT * FROM Loras WHERE LibraryId = $LibraryId ORDER BY FileName COLLATE NOCASE ASC;";
+                cmd.Parameters.AddWithValue("$LibraryId", libraryId);
+            } else if (!string.IsNullOrWhiteSpace(folderPath)) {
+                cmd.CommandText = "SELECT * FROM Loras WHERE DirectoryPath LIKE $FolderPath ORDER BY FileName COLLATE NOCASE ASC;";
+                cmd.Parameters.AddWithValue("$FolderPath", folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "%");
+            } else {
+                cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
+            }
 
             var list = new List<LoraMetadata>();
             using var reader = await cmd.ExecuteReaderAsync();
@@ -147,7 +296,7 @@ public sealed class LoraDatabaseService : IDisposable {
 
             const string sql = @"
                 INSERT INTO Loras (
-                    FilePath, FileName, DirectoryPath, BaseModel, UserBaseModel, IsFavorite,
+                    FilePath, FileName, DirectoryPath, LibraryId, BaseModel, UserBaseModel, IsFavorite,
                     NetworkDim, NetworkAlpha, NetworkModule, LearningRate, UnetLearningRate, TextEncoderLearningRate,
                     Optimizer, LrScheduler, Epochs, TotalSteps, Resolution, Precision,
                     FileSizeBytes, LastModifiedUtc, ThumbnailPath, Sha256Hash, TrainedWordsJson, RawMetadataJson,
@@ -155,7 +304,7 @@ public sealed class LoraDatabaseService : IDisposable {
                     CivitaiDescription, CivitaiDownloadUrl, CivitaiUrl, CivitaiPreviewImageUrl, CivitaiSamplePromptsJson,
                     CreatedAtUtc, UpdatedAtUtc
                 ) VALUES (
-                    $FilePath, $FileName, $DirectoryPath, $BaseModel, $UserBaseModel, $IsFavorite,
+                    $FilePath, $FileName, $DirectoryPath, $LibraryId, $BaseModel, $UserBaseModel, $IsFavorite,
                     $NetworkDim, $NetworkAlpha, $NetworkModule, $LearningRate, $UnetLearningRate, $TextEncoderLearningRate,
                     $Optimizer, $LrScheduler, $Epochs, $TotalSteps, $Resolution, $Precision,
                     $FileSizeBytes, $LastModifiedUtc, $ThumbnailPath, $Sha256Hash, $TrainedWordsJson, $RawMetadataJson,
@@ -165,6 +314,7 @@ public sealed class LoraDatabaseService : IDisposable {
                 ) ON CONFLICT(FilePath) DO UPDATE SET
                     FileName = excluded.FileName,
                     DirectoryPath = excluded.DirectoryPath,
+                    LibraryId = COALESCE(excluded.LibraryId, Loras.LibraryId),
                     BaseModel = excluded.BaseModel,
                     UserBaseModel = COALESCE(Loras.UserBaseModel, excluded.UserBaseModel),
                     IsFavorite = Loras.IsFavorite,
@@ -206,6 +356,7 @@ public sealed class LoraDatabaseService : IDisposable {
             var pFilePath = cmd.Parameters.Add("$FilePath", SqliteType.Text);
             var pFileName = cmd.Parameters.Add("$FileName", SqliteType.Text);
             var pDirectoryPath = cmd.Parameters.Add("$DirectoryPath", SqliteType.Text);
+            var pLibraryId = cmd.Parameters.Add("$LibraryId", SqliteType.Text);
             var pBaseModel = cmd.Parameters.Add("$BaseModel", SqliteType.Text);
             var pUserBaseModel = cmd.Parameters.Add("$UserBaseModel", SqliteType.Text);
             var pIsFavorite = cmd.Parameters.Add("$IsFavorite", SqliteType.Integer);
@@ -246,6 +397,7 @@ public sealed class LoraDatabaseService : IDisposable {
                 pFilePath.Value = meta.FilePath;
                 pFileName.Value = meta.FileName;
                 pDirectoryPath.Value = Path.GetDirectoryName(meta.FilePath) ?? string.Empty;
+                pLibraryId.Value = (object?)meta.LibraryId ?? DBNull.Value;
                 pBaseModel.Value = meta.BaseModel;
                 pUserBaseModel.Value = (object?)meta.UserBaseModel ?? DBNull.Value;
                 pIsFavorite.Value = meta.IsFavorite ? 1 : 0;
@@ -408,6 +560,15 @@ public sealed class LoraDatabaseService : IDisposable {
             IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) == 1,
             FileSizeBytes = reader.GetInt64(reader.GetOrdinal("FileSizeBytes"))
         };
+
+        try {
+            int libOrd = reader.GetOrdinal("LibraryId");
+            if (libOrd >= 0 && !reader.IsDBNull(libOrd)) {
+                meta.LibraryId = reader.GetString(libOrd);
+            }
+        } catch {
+            // Ignore if LibraryId column is not present
+        }
 
         int dimOrd = reader.GetOrdinal("NetworkDim");
         if (!reader.IsDBNull(dimOrd)) {
