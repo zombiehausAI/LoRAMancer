@@ -46,7 +46,7 @@
     </MudAlert>
 }
 
-@if (!ToolkitSetup.IsInstalled()) {
+@if (!Settings.Current.ClientRemoteMode && !ToolkitSetup.IsInstalled()) {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-4" Dense="false">
         <div class="d-flex align-center justify-space-between w-100">
             <div>
