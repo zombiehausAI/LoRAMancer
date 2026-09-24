@@ -109,7 +109,7 @@ public sealed class AiToolkitSetupService {
             onProgress?.Invoke("[AI-Toolkit] Updating dependencies in .venv (protecting PyTorch wheels)...");
             await _processRunner.RunAsync(
                 pythonExe,
-                $"-m pip install --no-cache-dir -r \"{reqFile}\" --no-deps",
+                $"-m pip install --no-cache-dir -r \"{reqFile}\" sympy networkx jinja2",
                 installDir,
                 null,
                 line => onProgress?.Invoke($"[pip] {line}"),
@@ -175,10 +175,10 @@ public sealed class AiToolkitSetupService {
         if (File.Exists(reqFile)) {
             onProgress?.Invoke("[AI-Toolkit] Installing requirements into compute .venv (protecting PyTorch wheels)...");
 
-            // Install dependencies protecting torch binaries
+            // Install dependencies protecting torch binaries (without --upgrade to preserve ROCm torch)
             int pipExit = await _processRunner.RunAsync(
                 pythonExe,
-                $"-m pip install --no-cache-dir -r \"{reqFile}\" --no-deps",
+                $"-m pip install --no-cache-dir -r \"{reqFile}\" sympy networkx jinja2",
                 installDir,
                 null,
                 line => onProgress?.Invoke($"[pip] {line}"),

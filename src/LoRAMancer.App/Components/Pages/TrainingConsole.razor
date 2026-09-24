@@ -23,6 +23,11 @@
                 Stop Training
             </MudButton>
         } else {
+            @if (TrainingRunner.CurrentProgress.Status == TrainingStatus.Failed) {
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" OnClick="RetryTrainingAsync">
+                    Retry Training
+                </MudButton>
+            }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartTrainingAsync">
                 Launch Training
             </MudButton>
@@ -54,6 +59,19 @@
             </div>
             <MudButton Variant="Variant.Outlined" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => NavManager.NavigateTo("/settings"))">
                 Configure in Settings
+            </MudButton>
+        </div>
+    </MudAlert>
+}
+
+@if (!TrainingRunner.IsRunning && TrainingRunner.CurrentProgress.Status == TrainingStatus.Failed) {
+    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Dense="true" Class="mb-4">
+        <div class="d-flex align-center justify-space-between w-100">
+            <div>
+                <b>Training Failed:</b> The previous training run encountered an error or crashed. Click <b>Retry Training</b> to resubmit with the active configuration.
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Surface" Size="Size.Small" StartIcon="@Icons.Material.Filled.Replay" OnClick="RetryTrainingAsync">
+                Retry Training
             </MudButton>
         </div>
     </MudAlert>
@@ -231,6 +249,13 @@
                                         TrainingRunner.CurrentProgress.CurrentStep = telemetry.Step;
                                         TrainingRunner.CurrentProgress.TotalSteps = telemetry.TotalSteps;
                                         TrainingRunner.CurrentProgress.CurrentLoss = telemetry.Loss;
+                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Training;
+                                        StateHasChanged();
+                                    } else if (telemetry.EventType == "failed") {
+                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
+                                        StateHasChanged();
+                                    } else if (telemetry.EventType == "completed") {
+                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Completed;
                                         StateHasChanged();
                                     }
                                 });
@@ -240,6 +265,7 @@
                         }
                     });
                 } else {
+                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
                     Snackbar.Add("Failed to start remote training job. Check connection.", Severity.Error);
                 }
                 return;
@@ -256,8 +282,18 @@
             _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
             await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
         } catch (Exception ex) {
+            TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
             Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task RetryTrainingAsync() {
+        _logs.Add(string.Empty);
+        _logs.Add("================================================================================");
+        _logs.Add($"[RETRY] Resubmitting training job for: {_configYamlPath}");
+        _logs.Add("================================================================================");
+        TrainingRunner.CurrentProgress.Status = TrainingStatus.Initializing;
+        await StartTrainingAsync();
     }
 
     private void CancelTraining() {
