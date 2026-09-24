@@ -559,20 +559,58 @@
     <!-- Appearance & Themes Tab -->
     <MudTabPanel Text="Appearance & Themes" Icon="@Icons.Material.Filled.Palette">
         <div class="px-4 pb-4">
-            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-4" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
-                Select your preferred color theme below. Themes update the entire application interface dynamically without requiring a restart.
-            </MudAlert>
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-4">
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">Theme Engine</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Select from built-in high contrast dark/light palettes or import/export custom JSON themes</MudText>
+                </div>
+                <div class="d-flex gap-2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FileDownload" Size="Size.Small" OnClick="OpenImportThemeDialog">
+                        Import Theme (JSON)
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="ExportCurrentTheme">
+                        Export Current Theme
+                    </MudButton>
+                </div>
+            </div>
+
+            @if (_showImportThemeModal) {
+                <MudCard Elevation="0" Class="pa-4 mb-4" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--accent-purple); border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--accent-purple);">Import Custom Theme (JSON)</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showImportThemeModal = false)" />
+                    </div>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Choose a <code style="color: var(--accent-purple);">.json</code> theme file from disk or paste valid theme JSON below.
+                    </MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="ImportThemeFromFileAsync">
+                            Pick .json File...
+                        </MudButton>
+                    </div>
+                    <MudTextField @bind-Value="_importThemeJsonText" Label="Or Paste Theme JSON Content" Variant="Variant.Outlined" Lines="4" Margin="Margin.Dense" Placeholder="{ &quot;name&quot;: &quot;My Custom Theme&quot;, &quot;isDark&quot;: true, ... }" Class="mb-3" />
+                    <div class="d-flex justify-end gap-2">
+                        <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="@(() => _showImportThemeModal = false)">Cancel</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" OnClick="ImportThemeFromText">Import & Activate</MudButton>
+                    </div>
+                </MudCard>
+            }
 
             <MudGrid>
                 @foreach (var theme in ThemeService.AvailableThemes) {
                     bool isActive = string.Equals(ThemeManager.CurrentThemeId, theme.Id, StringComparison.OrdinalIgnoreCase);
                     <MudItem xs="12" sm="6" md="4">
-                        <MudCard Elevation="isActive ? 4 : 1" Class="theme-preview-card pa-3 h-100 d-flex flex-column justify-space-between" Style="@($"background-color: {theme.Surface}; border: {(isActive ? "2px solid " + theme.Primary : "1px solid " + theme.Border)}; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;")" @onclick="@(() => SelectTheme(theme.Id))">
+                        <MudCard Elevation="isActive ? 3 : 0" Class="theme-preview-card pa-3 h-100 d-flex flex-column justify-space-between" Style="@($"background-color: {theme.Surface}; border: {(isActive ? "2px solid " + theme.Primary : "1px solid " + theme.Border)}; border-radius: 10px; transition: all 0.2s ease;")">
                             <div>
                                 <div class="d-flex align-center justify-space-between mb-2">
-                                    <MudText Typo="Typo.subtitle1" Style="@($"font-weight: 700; color: {theme.TextPrimary};")">
-                                        @theme.Name
-                                    </MudText>
+                                    <div class="d-flex align-center gap-1">
+                                        <MudText Typo="Typo.subtitle1" Style="@($"font-weight: 700; color: {theme.TextPrimary};")">
+                                            @theme.Name
+                                        </MudText>
+                                        @if (theme.IsCustom) {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined" Class="ml-1" Style="font-size: 0.65rem;">Custom</MudChip>
+                                        }
+                                    </div>
                                     @if (isActive) {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">Active</MudChip>
                                     }
@@ -591,9 +629,19 @@
                                 </div>
                             </div>
 
-                            <MudButton Variant="@(isActive ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" Size="Size.Small" FullWidth="true" OnClick="@(() => SelectTheme(theme.Id))">
-                                @(isActive ? "Current Theme" : "Apply Theme")
-                            </MudButton>
+                            <div class="d-flex align-center gap-2 mt-2">
+                                <MudButton Variant="@(isActive ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" Size="Size.Small" Style="flex: 1;" OnClick="@(() => SelectTheme(theme.Id))">
+                                    @(isActive ? "Current Theme" : "Apply Theme")
+                                </MudButton>
+                                <MudTooltip Text="Copy Theme JSON">
+                                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => ExportTheme(theme.Id))" />
+                                </MudTooltip>
+                                @if (theme.IsCustom) {
+                                    <MudTooltip Text="Delete Custom Theme">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteTheme(theme.Id))" />
+                                    </MudTooltip>
+                                }
+                            </div>
                         </MudCard>
                     </MudItem>
                 }
@@ -940,6 +988,71 @@
     private void ResetCpuDefaults() {
         _settings.ResetCpuToDefault();
         Snackbar.Add("Reset CPU settings to official defaults.", Severity.Info);
+    }
+
+    private bool _showImportThemeModal;
+    private string _importThemeJsonText = string.Empty;
+
+    private void OpenImportThemeDialog() {
+        _showImportThemeModal = !_showImportThemeModal;
+    }
+
+    private async Task ImportThemeFromFileAsync() {
+        try {
+            FilePickerFileType jsonType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".json" } }
+            });
+            var result = await FilePicker.Default.PickAsync(new PickOptions {
+                PickerTitle = "Select Theme JSON file",
+                FileTypes = jsonType
+            });
+            if (result != null) {
+                string json = await File.ReadAllTextAsync(result.FullPath);
+                if (ThemeManager.ImportTheme(json, out var imported, out var err)) {
+                    _settings.ThemePreset = imported!.Id;
+                    _showImportThemeModal = false;
+                    _importThemeJsonText = string.Empty;
+                    Snackbar.Add($"Theme '{imported.Name}' imported and activated!", Severity.Success);
+                } else {
+                    Snackbar.Add(err ?? "Failed to import theme.", Severity.Error);
+                }
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Error reading theme file: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void ImportThemeFromText() {
+        if (string.IsNullOrWhiteSpace(_importThemeJsonText)) {
+            Snackbar.Add("Please paste theme JSON content first.", Severity.Warning);
+            return;
+        }
+
+        if (ThemeManager.ImportTheme(_importThemeJsonText, out var imported, out var err)) {
+            _settings.ThemePreset = imported!.Id;
+            _showImportThemeModal = false;
+            _importThemeJsonText = string.Empty;
+            Snackbar.Add($"Theme '{imported.Name}' imported and activated!", Severity.Success);
+        } else {
+            Snackbar.Add(err ?? "Invalid theme JSON structure.", Severity.Error);
+        }
+    }
+
+    private async Task ExportCurrentTheme() {
+        await ExportTheme(ThemeManager.CurrentThemeId);
+    }
+
+    private async Task ExportTheme(string themeId) {
+        string json = ThemeManager.ExportTheme(themeId);
+        await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(json);
+        Snackbar.Add($"Theme JSON copied to clipboard!", Severity.Success);
+    }
+
+    private void DeleteTheme(string themeId) {
+        if (ThemeManager.DeleteCustomTheme(themeId)) {
+            _settings.ThemePreset = ThemeManager.CurrentThemeId;
+            Snackbar.Add("Custom theme removed.", Severity.Info);
+        }
     }
 
     private void SelectTheme(string themeId) {
