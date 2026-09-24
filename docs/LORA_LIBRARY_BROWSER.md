@@ -43,7 +43,15 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
   - **Civitai API Key Support**: If configured under **Settings** (`CivitaiApiKey`), your API token is automatically supplied both in the HTTP `Authorization: Bearer <key>` header and as the `?token=<key>` query parameter. This enables fetching metadata and downloading thumbnails for private, early-access, or member-only models.
   - **Cloudflare Bypass**: HTTP requests specify standard browser `User-Agent` headers to prevent HTTP 403 Forbidden errors when fetching data from Civitai CDN endpoints.
   - Retrieved metadata includes the official model title, version name, high-resolution preview image (cached locally), and trained trigger words with a 1-click **Copy Trigger** button.
-- **Persistent Cache**: All computed hashes, metadata payloads, and downloaded preview thumbnails are cached in `~/.loramancer/lora_cache/` so subsequent folder loads are instantaneous.
+- **Persistent SQLite Library (`~/.LoRAMancer/loras.db`)**: All indexed LoRA models, computed hashes, SafeTensors metadata, Civitai payloads, user favorites, and base model overrides are stored in an ACID SQLite database. When navigating to the LoRA Manager, the gallery loads instantly (0ms) from SQLite with zero background scan overhead.
+- **On-Demand Differential Rescan**:
+  - Scanning is strictly user-initiated via the **"Rescan / Sync"** menu or folder refresh buttons.
+  - **Fast Delta Sync**: Compares file last-modified timestamps and file sizes against SQLite signatures, parsing headers only for newly added or modified files and pruning removed files in milliseconds.
+  - **Scope-Specific Rescan**: Rescan your entire library, a specific subfolder, or refresh an individual LoRA file.
+  - **Full Re-index**: Forces a clean re-scan and header re-parse across all files in the configured directory tree.
+- **Favorites & Base Model Overrides**:
+  - **Favorites (❤️)**: Mark any LoRA as a favorite with a single click on card or table view, and filter instantly with the "Favorites Only" chip.
+  - **Base Model Assignment**: Assign or override detected base models (e.g. FLUX.1, SDXL, SD 1.5, Pony, Illustrious, Chroma, HunyuanVideo, Wan 2.1) directly from quick dropdown menus on cards and table rows, automatically persisting changes to SQLite.
 
 ---
 
@@ -66,3 +74,4 @@ A central feature of LoRAMancer is borrowing the mathematical settings from high
 
 - **Inspect Header**: Launches the header inspector drawer, displaying raw JSON metadata, tensor keys, and model architecture tags with zero tensor weight overhead.
 - **Reveal in Explorer**: Opens Windows Explorer with the specific `.safetensors` file selected.
+
