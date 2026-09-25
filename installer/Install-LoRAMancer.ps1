@@ -72,10 +72,90 @@ if (-not $SkipPrereqCheck) {
     }
 }
 
-# 2. Directory Provisioning & Custom Path Selection
-Write-Host "`n[2/4] Selecting and provisioning installation directory..." -ForegroundColor Cyan
+# 2. Directory Provisioning & Custom Path Selection / Existing Install Detection
+Write-Host "`n[2/4] Detecting existing installation & selecting directory..." -ForegroundColor Cyan
 
 $defaultInstallPath = "$env:LOCALAPPDATA\LoRAMancer"
+$existingInstall = $null
+$isUpdate = $false
+
+# Check for existing installation across Registry, Inno Setup, Desktop Shortcut, or Default Path
+try {
+    $regPath = (Get-ItemProperty -Path "HKCU:\Software\LoRAMancer" -Name "InstallPath" -ErrorAction SilentlyContinue).InstallPath
+    if ($regPath -and (Test-Path (Join-Path $regPath "bin\LoRAMancer.App.exe"))) {
+        $existingInstall = $regPath
+    }
+} catch { }
+
+if (-not $existingInstall) {
+    try {
+        $innoReg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D37E88F9-6E53-4872-8C84-B09257C95B32}_is1",
+                                          "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D37E88F9-6E53-4872-8C84-B09257C95B32}_is1" -ErrorAction SilentlyContinue |
+                   Where-Object { $_.InstallLocation -and (Test-Path (Join-Path $_.InstallLocation "bin\LoRAMancer.App.exe")) } |
+                   Select-Object -First 1
+        if ($innoReg) {
+            $existingInstall = $innoReg.InstallLocation
+        }
+    } catch { }
+}
+
+if (-not $existingInstall) {
+    try {
+        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+        $shortcutFile = Join-Path $desktop "LoRAMancer.lnk"
+        if (Test-Path $shortcutFile) {
+            $wshShell = New-Object -ComObject WScript.Shell
+            $sc = $wshShell.CreateShortcut($shortcutFile)
+            if ($sc.TargetPath -and (Test-Path $sc.TargetPath)) {
+                $scBinDir = Split-Path $sc.TargetPath -Parent
+                $scBase = Split-Path $scBinDir -Parent
+                if (Test-Path (Join-Path $scBase "bin\LoRAMancer.App.exe")) {
+                    $existingInstall = $scBase
+                }
+            }
+        }
+    } catch { }
+}
+
+if (-not $existingInstall) {
+    if (Test-Path (Join-Path $defaultInstallPath "bin\LoRAMancer.App.exe")) {
+        $existingInstall = $defaultInstallPath
+    }
+}
+
+# If an explicit InstallPath was provided via CLI parameter, use it
+if (-not [string]::IsNullOrWhiteSpace($InstallPath)) {
+    if ($existingInstall -and ($InstallPath -eq $existingInstall)) {
+        $isUpdate = $true
+    }
+} elseif ($existingInstall) {
+    # An existing install was found!
+    $existingVer = "Unknown"
+    $exeCheck = Join-Path $existingInstall "bin\LoRAMancer.App.exe"
+    if (Test-Path $exeCheck) {
+        try {
+            $existingVer = (Get-Item $exeCheck).VersionInfo.ProductVersion
+        } catch { }
+    }
+
+    Write-Host "  > Existing installation detected at: $existingInstall (v$existingVer)" -ForegroundColor Green
+
+    if ($Unattended -or [Console]::IsInputRedirected) {
+        $InstallPath = $existingInstall
+        $isUpdate = $true
+    } else {
+        Write-Host "Would you like to update this installation?" -ForegroundColor Yellow
+        Write-Host "  [Enter]  Update existing install at $existingInstall" -ForegroundColor White
+        Write-Host "  [C]      Choose a different folder or drive" -ForegroundColor Gray
+        $choice = Read-Host "`nChoice [Default: Update]"
+
+        if ([string]::IsNullOrWhiteSpace($choice) -or ($choice.Trim() -ne "C" -and $choice.Trim() -ne "c")) {
+            $InstallPath = $existingInstall
+            $isUpdate = $true
+            Write-Host "  > Selected: Update existing installation" -ForegroundColor Green
+        }
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($InstallPath)) {
     if ($Unattended -or [Console]::IsInputRedirected) {
@@ -120,17 +200,27 @@ try {
     $InstallPath = $defaultInstallPath
 }
 
-Write-Host "  > Target path: $InstallPath" -ForegroundColor Green
+if ($isUpdate) {
+    Write-Host "  > Target path (Updating): $InstallPath" -ForegroundColor Green
+} else {
+    Write-Host "  > Target path: $InstallPath" -ForegroundColor Green
+}
+
+# Save installed path to registry for future update detection
+try {
+    New-Item -Path "HKCU:\Software\LoRAMancer" -Force -ErrorAction SilentlyContinue | Out-Null
+    Set-ItemProperty -Path "HKCU:\Software\LoRAMancer" -Name "InstallPath" -Value $InstallPath -Force -ErrorAction SilentlyContinue
+} catch { }
 
 # Query target drive and display free disk space
 try {
     $driveRoot = [System.IO.Path]::GetPathRoot($InstallPath)
     if ($driveRoot) {
         $driveLetter = $driveRoot.Substring(0, 1)
-        $diskInfo = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$driveLetter:'" -ErrorAction SilentlyContinue
+        $diskInfo = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$($driveLetter):'" -ErrorAction SilentlyContinue
         if ($diskInfo -and $diskInfo.FreeSpace) {
             $freeGb = [math]::Round($diskInfo.FreeSpace / 1GB, 1)
-            Write-Host "  > Target Drive ($driveLetter`:): $freeGb GB free space available" -ForegroundColor Gray
+            Write-Host "  > Target Drive ($($driveLetter):): $freeGb GB free space available" -ForegroundColor Gray
         }
     }
 } catch { }
@@ -185,5 +275,9 @@ if ($CreateDesktopShortcut) {
 }
 
 Write-Host "`n===========================================================" -ForegroundColor Green
-Write-Host "           LoRAMancer successfully installed!              " -ForegroundColor Green
+if ($isUpdate) {
+    Write-Host "           LoRAMancer successfully updated!                " -ForegroundColor Green
+} else {
+    Write-Host "           LoRAMancer successfully installed!              " -ForegroundColor Green
+}
 Write-Host "===========================================================" -ForegroundColor Green

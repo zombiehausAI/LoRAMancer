@@ -3,8 +3,16 @@
 ## Overview
 
 LoRAMancer includes automated deployment packaging and in-app update mechanisms:
-1. **PowerShell Bootstrap Installer (`installer/Install-LoRAMancer.ps1`)**: Handles prerequisite detection (.NET 10, Python 3.12, AMD GPU/ROCm drivers), directory setup with custom destination drive/folder selection (via interactive prompt, GUI folder picker, or `-InstallPath`), and desktop shortcut generation.
-2. **Inno Setup Script (`installer/LoRAMancer.iss`)**: Generates an enterprise-ready Windows standalone installer executable with full destination folder and drive selection (`DisableDirPage=no`).
+1. **PowerShell Bootstrap Installer (`installer/Install-LoRAMancer.ps1`)**:
+   - **Prerequisite Detection**: Verifies .NET 10, Python 3.12+, and AMD ROCm GPU drivers.
+   - **Existing Install Detection**: Checks `HKCU:\Software\LoRAMancer` (`InstallPath`), Inno Setup uninstall registry keys, desktop shortcuts, and default directories.
+   - **Streamlined Update Mode**: When an existing install is detected, prompts to update in-place with `[Enter]` (or automatically in unattended mode), bypassing directory re-entry while still offering `[C]` to pick a different folder or drive.
+   - **Disk Space Telemetry**: Queries free space on the destination drive before deploying.
+2. **Inno Setup Executable (`installer/LoRAMancer.iss`)**:
+   - **Auto-Detection & In-Place Update**: Detects previous installations from `HKCU:\Software\LoRAMancer` or Windows uninstall records.
+   - **Bypasses Full Wizard Walkthrough**: Automatically skips the license agreement, directory picker, and tasks pages on detected upgrades, displaying an "Update LoRAMancer" screen and navigating directly to Ready to Update with an **Update** button.
+   - **Optional Advanced Override**: Provides a checkbox on the Welcome page (`Change installation folder or advanced options`) if the user wishes to change drives or customize their setup.
+   - **Registry Synchronization**: Stores `{app}` in `HKCU\Software\LoRAMancer\InstallPath` so both PowerShell and Windows installer share consistent state.
 3. **In-App Auto-Update Service (`AutoUpdateService.cs`)**: Checks remote release manifests, displays update notes, and manages zero-friction background download and restart transitions.
 
 ## In-App Auto-Update Flow
