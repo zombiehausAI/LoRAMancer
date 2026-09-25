@@ -2,6 +2,13 @@
 
 **LoRAMancer** is a production-grade, highly responsive desktop LoRA Manager, Configuration Cloner, and Training Orchestrator application targeting **.NET 10 (Blazor Hybrid MAUI Desktop)** on Windows, with cross-platform **Remote Web UI** capabilities and universal hardware acceleration across **NVIDIA CUDA**, **AMD ROCm**, **Intel XPU**, and **CPU**.
 
+> [!NOTE]
+> **Project Context & Disclaimer**:
+> - **Proof of Concept**: This application, setup scripts, utilities, and technical documentation represent an early **proof of concept** created to overcome current Windows AMD ROCm and cross-vendor hardware hurdles. While these setups have been tested and verified on local AMD hardware (such as Radeon RX 7000 and RX 9000 series GPUs), hardware configurations, Windows driver versions, and environments can differ significantly—what works seamlessly in one test environment may require adjustments or further testing on yours. Community feedback, issue reports, and real-world testing are warmly welcomed!
+> - **AI-Assisted Development**: This application, its runtime patches, and documentation were created with AI assistance. In the spirit of complete transparency: if you prefer not to use AI-assisted code, please feel free to pass on this project and wait for official upstream Windows ROCm fixes from the respective project maintainers.
+
+---
+
 ## What LoRAMancer Does
 
 LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
