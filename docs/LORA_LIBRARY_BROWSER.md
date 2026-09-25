@@ -79,7 +79,16 @@ A central feature of LoRAMancer is borrowing the mathematical settings from high
 
 ## 4. Direct Explorer & Metadata Inspection
 
-- **Inspect Header**: Launches the header inspector drawer, displaying raw JSON metadata, tensor keys, and model architecture tags with zero tensor weight overhead.
+- **Inspect Header**: Launches the header inspector drawer, displaying raw metadata, tensor keys, and model architecture tags with zero tensor weight overhead.
+- **Save & Copy Metadata JSON**:
+  - Available directly on each LoRA card, table row, and inside the Metadata Inspector drawer via the **`DataObject` (`{ }`)** icon and buttons.
+  - Automatically exports a formatted sidecar `<model_name>_metadata.json` alongside the `.safetensors` model file.
+  - Automatically copies the full JSON payload directly to your system clipboard for instant sharing or debugging.
+  - The exported JSON includes:
+    - `file_info`: File path, file size, formatted size, and computed SHA256 model hash.
+    - `hyperparameters`: Rank (dim), alpha, learning rates (UNet and Text Encoder), optimizer, scheduler, epochs, steps, resolution, and precision.
+    - `civitai`: Model version, base model, Civitai URL, and trained trigger tags.
+    - `raw_header_metadata`: Complete key-value dictionary of all raw embedded SafeTensors header attributes (such as `ss_network_args`, `ss_optimizer_args`, `ss_dataset_dirs`, `ss_tag_frequency`, `ss_bucket_info`, etc.).
 - **Reveal in Explorer**: Opens Windows Explorer with the specific `.safetensors` file selected.
 
 ---

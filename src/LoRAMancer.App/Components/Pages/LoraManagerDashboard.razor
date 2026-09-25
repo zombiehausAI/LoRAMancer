@@ -385,6 +385,9 @@
                             Use Settings
                         </MudButton>
                         <div class="d-flex gap-1">
+                            <MudTooltip Text="Save & Copy Metadata JSON">
+                                <MudIconButton Icon="@Icons.Material.Filled.DataObject" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SaveLoraMetadataJsonAsync(lora))" />
+                            </MudTooltip>
                             <MudTooltip Text="Fetch Civitai Info">
                                 <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => FetchSingleCivitaiAsync(lora))" />
                             </MudTooltip>
@@ -489,6 +492,9 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
                     Use Settings
                 </MudButton>
+                <MudTooltip Text="Save & Copy Metadata JSON">
+                    <MudIconButton Icon="@Icons.Material.Filled.DataObject" Color="Color.Primary" Size="Size.Small" OnClick="@(() => SaveLoraMetadataJsonAsync(context))" />
+                </MudTooltip>
                 <MudTooltip Text="Fetch Civitai Info">
                     <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Tertiary" Size="Size.Small" OnClick="@(() => FetchSingleCivitaiAsync(context))" />
                 </MudTooltip>
@@ -1175,6 +1181,70 @@
         var result = await dialog.Result;
         if (result != null && !result.Canceled && !string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
             LibraryService.StartScan(LibraryService.RootFolder, forceClear: false);
+        }
+    }
+
+    private async Task SaveLoraMetadataJsonAsync(LoraMetadata lora) {
+        try {
+            var exportData = new {
+                loramancer_export_version = "1.0",
+                exported_at_utc = DateTime.UtcNow.ToString("o"),
+                file_info = new {
+                    file_name = lora.FileName,
+                    file_path = lora.FilePath,
+                    file_size_bytes = lora.FileSizeBytes,
+                    formatted_size = lora.FormattedSize,
+                    sha256_hash = lora.Sha256Hash
+                },
+                hyperparameters = new {
+                    base_model = lora.EffectiveBaseModel,
+                    network_dim = lora.NetworkDim,
+                    network_alpha = lora.NetworkAlpha,
+                    network_module = lora.NetworkModule,
+                    learning_rate = lora.LearningRate,
+                    unet_learning_rate = lora.UnetLearningRate,
+                    text_encoder_learning_rate = lora.TextEncoderLearningRate,
+                    optimizer = lora.Optimizer,
+                    lr_scheduler = lora.LrScheduler,
+                    epochs = lora.Epochs,
+                    total_steps = lora.TotalSteps,
+                    resolution = lora.Resolution,
+                    precision = lora.Precision
+                },
+                civitai = lora.CivitaiInfo != null ? new {
+                    model_name = lora.CivitaiInfo.ModelName,
+                    version_name = lora.CivitaiInfo.VersionName,
+                    base_model = lora.CivitaiInfo.BaseModel,
+                    civitai_url = lora.CivitaiInfo.CivitaiUrl,
+                    trained_words = lora.CivitaiInfo.TrainedWords
+                } : null,
+                raw_header_metadata = lora.RawHeaderMetadata
+            };
+
+            string json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", json);
+
+            string? savedPath = null;
+            if (!string.IsNullOrWhiteSpace(lora.FilePath)) {
+                string? dir = Path.GetDirectoryName(lora.FilePath);
+                if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)) {
+                    string baseName = Path.GetFileNameWithoutExtension(lora.FilePath);
+                    savedPath = Path.Combine(dir, $"{baseName}_metadata.json");
+                    await File.WriteAllTextAsync(savedPath, json);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(savedPath)) {
+                Snackbar.Add($"Saved {Path.GetFileName(savedPath)} and copied JSON to clipboard!", Severity.Success);
+            } else {
+                Snackbar.Add("Copied LoRA metadata JSON to clipboard!", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to export metadata JSON: {ex.Message}", Severity.Error);
         }
     }
 }

@@ -1,6 +1,7 @@
 @inject IDialogService DialogService
 @inject CivitaiService Civitai
 @inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
 
 <MudDrawer @bind-Open="IsOpen" Anchor="Anchor.Right" Elevation="3" Variant="DrawerVariant.Temporary" Width="540px" Style="background-color: #181825; border-left: 1px solid #313244;">
     <MudDrawerHeader Class="d-flex align-center justify-space-between pb-2" Style="border-bottom: 1px solid #313244;">
@@ -22,10 +23,18 @@
                         <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@(Metadata.FileSizeBytes / (1024 * 1024)) MB</MudChip>
                     </div>
                 </MudCardContent>
-                <MudCardActions Class="d-flex gap-2">
+                <MudCardActions Class="d-flex flex-column gap-2">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="OpenCloneModalAsync">
                         Clone Configuration
                     </MudButton>
+                    <div class="d-flex gap-2" style="width: 100%;">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" FullWidth="true" StartIcon="@Icons.Material.Filled.DataObject" OnClick="SaveMetadataJsonAsync">
+                            Save JSON File
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyMetadataJsonAsync">
+                            Copy JSON
+                        </MudButton>
+                    </div>
                 </MudCardActions>
             </MudCard>
 
@@ -224,5 +233,94 @@
         };
 
         await DialogService.ShowAsync<CloneConfigModal>("Clone LoRA Configuration", parameters, options);
+    }
+
+    private string BuildMetadataJson() {
+        if (Metadata == null) {
+            return "{}";
+        }
+
+        var exportData = new {
+            loramancer_export_version = "1.0",
+            exported_at_utc = DateTime.UtcNow.ToString("o"),
+            file_info = new {
+                file_name = Metadata.FileName,
+                file_path = Metadata.FilePath,
+                file_size_bytes = Metadata.FileSizeBytes,
+                formatted_size = Metadata.FormattedSize,
+                sha256_hash = Metadata.Sha256Hash
+            },
+            hyperparameters = new {
+                base_model = Metadata.EffectiveBaseModel,
+                network_dim = Metadata.NetworkDim,
+                network_alpha = Metadata.NetworkAlpha,
+                network_module = Metadata.NetworkModule,
+                learning_rate = Metadata.LearningRate,
+                unet_learning_rate = Metadata.UnetLearningRate,
+                text_encoder_learning_rate = Metadata.TextEncoderLearningRate,
+                optimizer = Metadata.Optimizer,
+                lr_scheduler = Metadata.LrScheduler,
+                epochs = Metadata.Epochs,
+                total_steps = Metadata.TotalSteps,
+                resolution = Metadata.Resolution,
+                precision = Metadata.Precision
+            },
+            civitai = Metadata.CivitaiInfo != null ? new {
+                model_name = Metadata.CivitaiInfo.ModelName,
+                version_name = Metadata.CivitaiInfo.VersionName,
+                base_model = Metadata.CivitaiInfo.BaseModel,
+                civitai_url = Metadata.CivitaiInfo.CivitaiUrl,
+                trained_words = Metadata.CivitaiInfo.TrainedWords
+            } : null,
+            raw_header_metadata = Metadata.RawHeaderMetadata
+        };
+
+        return System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
+    }
+
+    private async Task SaveMetadataJsonAsync() {
+        if (Metadata == null) {
+            return;
+        }
+
+        try {
+            string json = BuildMetadataJson();
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", json);
+
+            string? savedPath = null;
+            if (!string.IsNullOrWhiteSpace(Metadata.FilePath)) {
+                string? dir = Path.GetDirectoryName(Metadata.FilePath);
+                if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)) {
+                    string baseName = Path.GetFileNameWithoutExtension(Metadata.FilePath);
+                    savedPath = Path.Combine(dir, $"{baseName}_metadata.json");
+                    await File.WriteAllTextAsync(savedPath, json);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(savedPath)) {
+                Snackbar.Add($"Saved {Path.GetFileName(savedPath)} and copied JSON to clipboard!", Severity.Success);
+            } else {
+                Snackbar.Add("Copied LoRA metadata JSON to clipboard!", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save JSON: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task CopyMetadataJsonAsync() {
+        if (Metadata == null) {
+            return;
+        }
+
+        try {
+            string json = BuildMetadataJson();
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", json);
+            Snackbar.Add("Copied LoRA metadata JSON to clipboard!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to copy JSON: {ex.Message}", Severity.Error);
+        }
     }
 }
