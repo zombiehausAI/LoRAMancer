@@ -92,14 +92,16 @@ public sealed class SafeTensorsMetadataReader {
         string resolution = ExtractString(metadataDict, "ss_resolution", "resolution");
         string precision = ExtractString(metadataDict, "ss_mixed_precision", "mixed_precision", "precision");
 
-        string baseModel = ExtractString(metadataDict, "ss_sd_model_name", "ss_base_model_version", "modelspec.architecture", "base_model");
-        if (string.IsNullOrWhiteSpace(baseModel) || baseModel.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) {
-            baseModel = _registry.InferFromMetadata(metadataDict).DisplayName;
-        } else {
-            // Check if baseModel matches any known architecture keyword
-            var inferred = _registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = baseModel });
-            baseModel = inferred.DisplayName;
+        // Check explicit architecture specifications first, before generic model checkpoint filenames
+        string baseModel = ExtractString(metadataDict, "modelspec.architecture", "ss_base_model_version", "ss_model_type", "base_model", "ss_sd_model_name");
+        ModelArchitectureInfo inferred = _registry.InferFromMetadata(metadataDict);
+        if (!string.IsNullOrWhiteSpace(baseModel) && !baseModel.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) {
+            var specificInferred = _registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = baseModel });
+            if (!specificInferred.Id.Equals("flux_1_dev", StringComparison.OrdinalIgnoreCase) || baseModel.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
+                inferred = specificInferred;
+            }
         }
+        baseModel = inferred.DisplayName;
 
         return new LoraMetadata {
             FileName = fileName,

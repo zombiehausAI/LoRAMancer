@@ -100,7 +100,7 @@ public sealed class AiToolkitConfigBuilder {
                             ["steps"] = totalSteps,
                             ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
                             ["train_unet"] = true,
-                            ["train_text_encoder"] = !archInfo.IsFlux,
+                            ["train_text_encoder"] = !archInfo.IsFlux && !string.Equals(archInfo.Family, "Chroma", StringComparison.OrdinalIgnoreCase) && (sanitized.TextEncoderLearningRate == null || sanitized.TextEncoderLearningRate > 0),
                             ["gradient_checkpointing"] = true,
                             ["noise_scheduler"] = archInfo.NoiseScheduler,
                             ["optimizer"] = sanitized.Optimizer,
