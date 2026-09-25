@@ -201,7 +201,37 @@ public sealed class AiToolkitConfigBuilderTests {
         Assert.Contains("optimizer: adamw", yaml);
         Assert.Contains("steps: 1200", yaml);
         Assert.Contains("dtype: bf16", yaml);
-        Assert.Contains("train_text_encoder: false", yaml);
+        Assert.Contains("save_every: 60", yaml);
+        Assert.Contains("max_step_saves_to_keep: 20", yaml);
+    }
+
+    [Fact]
+    public void BuildAiToolkitYaml_WithAugmentationsAndClipSkip_OutputsCorrectProperties() {
+        AiToolkitConfigBuilder builder = new();
+        TrainingConfig config = new() {
+            RunName = "pony_test",
+            DatasetDirectory = "D:\\datasets\\pony",
+            OutputDirectory = "D:\\output\\pony",
+            TargetBaseModel = "Pony Diffusion V6 XL",
+            FlipAug = true,
+            ShuffleTokens = true,
+            KeepTokens = 3,
+            ClipSkip = 2,
+            TotalSteps = 1000
+        };
+
+        string yaml = builder.BuildAiToolkitYaml(config);
+        string kohya = builder.BuildKohyaConfig(config);
+
+        Assert.Contains("flip_aug: true", yaml);
+        Assert.Contains("shuffle_tokens: true", yaml);
+        Assert.Contains("keep_tokens: 3", yaml);
+        Assert.Contains("clip_skip: 2", yaml);
+
+        Assert.Contains("flip_aug = true", kohya);
+        Assert.Contains("shuffle_caption = true", kohya);
+        Assert.Contains("keep_tokens = 3", kohya);
+        Assert.Contains("clip_skip = 2", kohya);
     }
 }
 

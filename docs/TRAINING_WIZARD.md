@@ -23,6 +23,8 @@ $$\text{Total Training Steps} = \text{Epochs} \times \text{Steps per Epoch}$$
 $$\text{Save Every (Steps)} = \text{SaveEveryNEpochs} \times \text{Steps per Epoch}$$
 
 - **Dynamic Epoch-to-Step Translation**: Users specify the intuitive number of **Epochs** (cycles through the dataset) and **Repeats per Image**. LoRAMancer scans the dataset folder, detects the image count, and computes the exact total steps and checkpoint save intervals for AI-Toolkit.
+- **Donor LoRA Auto-Conversion**: When importing recipes or donor LoRAs that specify fixed `TotalSteps` alongside `Epochs`, steps per epoch is automatically derived as $\text{Derived Steps per Epoch} = \text{TotalSteps} / \text{Epochs}$. Checkpoint save frequency (`save_every`) matches this exact epoch interval.
+- **Dynamic Checkpoint Retention**: `max_step_saves_to_keep` dynamically scales to retain all epoch checkpoints ($\lceil \text{TotalSteps} / \text{save\_every} \rceil$) rather than discarding earlier epochs.
 - **Total Steps**: Shows exact iteration budget and checkpoint save intervals.
 - **Estimated VRAM**: Evaluates GPU memory requirements for the target architecture (Chroma1-HD: ~16 GB, FLUX.1: ~14 GB, SDXL/Pony/Illustrious: ~9.2 GB, SD 1.5: ~5.2 GB) against the user's detected AMD Radeon GPU.
 - **Estimated Output File Size**: Calculates final `.safetensors` file size from network rank ($dim$).
@@ -70,3 +72,15 @@ During training, AI-Toolkit periodically pauses to generate preview images to ve
 When cloning or borrowing training parameters from an existing "donor" LoRA (via **Use Training Settings** in LoRA Manager or **Clone Configuration** in Metadata Inspector):
 - **Mathematical Hyperparameter Extraction**: Network Rank (Dim), Network Alpha, Learning Rates (UNet and Text Encoder), Optimizer algorithm, and Epochs are extracted and converted into AMD ROCm safe standards.
 - **Identity Isolation**: The donor's name/filename and activation trigger words are strictly omitted and left empty. This guarantees that your new project starts with a clean slate, prompting you to provide a unique run name and trigger word tailored specifically to your new dataset without polluting it with donor tags or naming schemes.
+
+## 9. Pro Mode Tabbed Layout, Augmentations & Tag Conditioning
+
+To prevent UI crowding and provide an intuitive workflow, Pro Mode organizes advanced controls into clean thematic tabs:
+- **Training & Epochs**: Fine-tune Network Rank ($dim$), Alpha, Epochs, Repeats, Batch Size, Step overrides, and Checkpoint Save Frequency (`save_every` epochs).
+- **Optimizer & LR**: Configure primary Learning Rate, UNet/Text Encoder independent rates, ROCm-optimized optimizers (`adamw`, `prodigy`, `adafactor`, `lion`), LR schedulers, and precision (`bf16`/`fp16`).
+- **Augmentation & Conditioning**:
+  - **Horizontal Flip Augmentation (`flip_aug`)**: Mirrors images randomly left-to-right to double effective dataset volume. Ideal for art styles, lighting, and symmetrical objects; easily disabled for asymmetric characters or text.
+  - **Shuffle Caption Tags (`shuffle_tokens`)**: Randomizes comma-separated tags per epoch to break positional bias. Essential for Pony V6, Illustrious, and booru tag sets.
+  - **Keep Initial Tokens (`keep_tokens`)**: Sets how many initial tags (such as `{trigger}` or `score_9, score_8_up`) remain anchored at the front of the prompt while the remaining tags are shuffled.
+  - **CLIP Skip (`clip_skip`)**: Configures the penultimate text encoder layer skip. Automatically defaults to `2` for Pony Diffusion V6 XL and Illustrious architectures.
+- **Sample Prompts**: Dual test prompts with `{trigger}` substitution and architecture-calibrated negative prompts.

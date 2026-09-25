@@ -25,6 +25,7 @@ Comprehensive guides and architectural specifications are located in the [`docs/
 - ⚡ [Universal GPU & Environment Provisioning (ROCm / CUDA / Intel / CPU)](docs/GPU_AND_ENVIRONMENT_SETUP.md)
 - 🔴 [AMD ROCm Dedicated Windows Setup](docs/AMD_ROCM_SETUP.md)
 - 🛠️ [AMD ROCm Windows Runtime Patches & Troubleshooting Log](docs/AMD_WINDOWS_ROCM_PATCHES.md)
+- 🚀 [Standalone AMD ROCm AI-Toolkit Setup & Patch Guide](docs/AMD_AI_TOOLKIT_STANDALONE.md)
 - 🌐 [Remote Training, PWA Web App & Public Internet Serving](docs/REMOTE_TRAINING.md)
 - 🏛️ [Permanent LoRA Training History & Vault](docs/HISTORY_AND_VAULT.md)
 - 🔌 [Plugin System Guide (C# & Python Extensions)](docs/PLUGINS.md)
@@ -51,11 +52,21 @@ dotnet test tests/LoRAMancer.Tests/LoRAMancer.Tests.csproj
 pwsh -File .\Build-And-Package.ps1
 ```
 
+### Standalone AMD AI-Toolkit Utility (No GUI Required)
+
+For AMD creators and developers who wish to train LoRAs directly from the command line using `ai-toolkit` without running the full LoRAMancer desktop application:
+
+```powershell
+# Automated environment setup and custom patching for AMD ROCm on Windows
+pwsh -File .\Utilities\Setup-AmdAiToolkit.ps1 -TargetDir "C:\AI\ai-toolkit"
+```
+See the [Standalone AMD ROCm AI-Toolkit Technical Guide](docs/AMD_AI_TOOLKIT_STANDALONE.md) for full patch specifications and troubleshooting.
+
+## Development Transparency
+
+This project and its accompanying utilities were developed with AI assistance (*Assisted by AI, for AI*). We believe in open transparency: if you prefer not to use or engage with AI-assisted software, please be aware before installing, evaluating, or running this application.
+
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-*Assisted by AI, for AI.*
 

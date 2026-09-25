@@ -26,4 +26,8 @@ public sealed class TrainingConfig {
     public int BatchSize { get; set; } = 1;
     public int GradientAccumulationSteps { get; set; } = 1;
     public int SaveEveryNEpochs { get; set; } = 1;
+    public bool FlipAug { get; set; } = false;
+    public bool ShuffleTokens { get; set; } = false;
+    public int KeepTokens { get; set; } = 1;
+    public int? ClipSkip { get; set; }
 }

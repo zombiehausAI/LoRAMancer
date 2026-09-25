@@ -181,118 +181,181 @@
             </MudAlert>
         }
 
-        <!-- Pro Mode Hyperparameter Accordion -->
+        <!-- Pro Mode Hyperparameter Accordion with Clean Tabbed Layout -->
         <MudExpansionPanels Class="mb-3">
-            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters & Sample Prompts" @bind-Expanded="_isProMode" MaxHeight="450">
-                <div class="d-flex align-center justify-space-between mb-2">
+            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters, Augmentation & Prompts" @bind-Expanded="_isProMode">
+                <div class="d-flex align-center justify-space-between mb-3">
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         Customize or adjust mathematical settings imported from donor LoRA or preset. Hover fields for explanations.
                     </MudText>
                     <MudButton Variant="Variant.Text" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.MenuBook" OnClick="OpenHyperparameterGuide">
-                        Read Full Hyperparameter Guide
+                        Hyperparameter Guide
                     </MudButton>
                 </div>
-                <MudGrid>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Network Rank (Dim): Low-rank decomposition matrix capacity. Higher ranks (32-64+) allow more complex concepts but increase checkpoint file size and VRAM. 16 is recommended for FLUX/SDXL.">
-                            <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" HelperText="Capacity (16-32 standard)" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Network Alpha: Scaling multiplier for weight updates (Alpha/Dim). Usually set equal to Rank (1:1 ratio) or half Rank (1:2 ratio) for softer updates.">
-                            <MudNumericField @bind-Value="_networkAlpha" Label="Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" HelperText="Scaling factor (usually = Rank)" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Learning Rate: Gradient descent step size. 1e-4 (0.0001) is standard for AdamW. Lower (5e-5) for delicate fine-tuning; higher (2e-4) for fast convergence.">
-                            <MudNumericField @bind-Value="_learningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" HelperText="Step size (1e-4 standard)" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Batch Size: Number of images processed per gradient update. 1 uses the least VRAM (ideal for 8-16GB GPUs). Higher values require 24GB+ GPUs.">
-                            <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Min="1" Max="8" TextChanged="RecalculateEstimates" HelperText="1 for lowest VRAM usage" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Epochs: Number of complete cycles through your entire dataset. Typical range is 5-20 epochs depending on image count.">
-                            <MudNumericField @bind-Value="_epochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="100" TextChanged="RecalculateEstimates" HelperText="Full dataset cycles (5-20 typical)" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Repeats per Image: How many times each image in your dataset is presented to the network in a single epoch. 5-10 is standard.">
-                            <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" HelperText="Per-image epoch multiplier" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Optimizer: Gradient optimization algorithm. AdamW is universal; Prodigy auto-tunes learning rates; Lion uses less memory.">
-                            <MudSelect @bind-Value="_optimizer" Label="Optimizer" Variant="Variant.Outlined" Dense="true" HelperText="Optimization algorithm">
-                                <MudSelectItem Value="@("adamw")">AdamW (Standard AMD/ROCm)</MudSelectItem>
-                                <MudSelectItem Value="@("prodigy")">Prodigy (Adaptive LR)</MudSelectItem>
-                                <MudSelectItem Value="@("adafactor")">Adafactor (Low VRAM)</MudSelectItem>
-                                <MudSelectItem Value="@("lion")">Lion (Fast Convergence)</MudSelectItem>
-                            </MudSelect>
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="LR Scheduler: Learning rate decay schedule across training steps. Cosine with restarts periodic warm restarts can help escape local minima.">
-                            <MudSelect @bind-Value="_lrScheduler" Label="LR Scheduler" Variant="Variant.Outlined" Dense="true" HelperText="Decay curve">
-                                <MudSelectItem Value="@("cosine")">Cosine</MudSelectItem>
-                                <MudSelectItem Value="@("cosine_with_restarts")">Cosine with Restarts</MudSelectItem>
-                                <MudSelectItem Value="@("linear")">Linear</MudSelectItem>
-                                <MudSelectItem Value="@("constant")">Constant</MudSelectItem>
-                                <MudSelectItem Value="@("constant_with_warmup")">Constant with Warmup</MudSelectItem>
-                            </MudSelect>
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Total Steps (Override): Specify exact number of training steps. Leave empty to compute automatically from epochs, repeats, and dataset size.">
-                            <MudNumericField @bind-Value="_totalSteps" Label="Total Steps (Override)" Variant="Variant.Outlined" Min="1" Max="100000" Clearable="true" TextChanged="RecalculateEstimates" HelperText="Optional explicit step limit" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Precision / Dtype: Training precision. bf16 is optimal for modern AMD ROCm RDNA GPUs (RX 7000/6000).">
-                            <MudSelect @bind-Value="_precision" Label="Precision (Dtype)" Variant="Variant.Outlined" Dense="true" HelperText="Compute precision">
-                                <MudSelectItem Value="@("bf16")">bf16 (Recommended for ROCm)</MudSelectItem>
-                                <MudSelectItem Value="@("fp16")">fp16 (Half precision)</MudSelectItem>
-                            </MudSelect>
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="UNet Learning Rate: Specific learning rate for the diffusion backbone (optional). Leave empty to use primary LR.">
-                            <MudNumericField @bind-Value="_unetLearningRate" Label="UNet LR (Optional)" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="Leave empty to use primary LR" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="6" sm="3">
-                        <MudTooltip Text="Text Encoder LR: Specific learning rate for CLIP/T5 text encoders. Set to 0 to freeze text encoder training.">
-                            <MudNumericField @bind-Value="_textEncoderLearningRate" Label="Text Encoder LR" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="0 freezes text encoder" />
-                        </MudTooltip>
-                    </MudItem>
-                    <!-- Sample Generation Prompts & Negative Prompt -->
-                    <MudItem xs="12">
-                        <MudDivider Class="my-2" />
-                        <div class="d-flex align-center justify-space-between mb-1">
-                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Style="font-weight: 600;">Periodic Sample Prompts & Negative Prompt</MudText>
+
+                <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Color="Color.Surface" PanelClass="pt-3">
+                    <!-- Tab 1: Core Training & Steps -->
+                    <MudTabPanel Text="Training & Epochs" Icon="@Icons.Material.Filled.Tune">
+                        <MudGrid>
+                            <MudItem xs="6" sm="3">
+                                <MudTooltip Text="Network Rank (Dim): Low-rank decomposition matrix capacity. Higher ranks (32-64+) allow more complex concepts but increase checkpoint file size and VRAM. 16 is recommended for FLUX/SDXL.">
+                                    <MudNumericField @bind-Value="_networkDim" Label="Rank (Dim)" Variant="Variant.Outlined" Min="1" Max="256" TextChanged="RecalculateEstimates" HelperText="Capacity (16-32 standard)" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudTooltip Text="Network Alpha: Scaling multiplier for weight updates (Alpha/Dim). Usually set equal to Rank (1:1 ratio) or half Rank (1:2 ratio) for softer updates.">
+                                    <MudNumericField @bind-Value="_networkAlpha" Label="Alpha" Variant="Variant.Outlined" Min="1.0" Max="256.0" HelperText="Scaling factor (usually = Rank)" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudTooltip Text="Epochs: Number of complete cycles through your entire dataset. Typical range is 5-20 epochs depending on image count.">
+                                    <MudNumericField @bind-Value="_epochs" Label="Epochs" Variant="Variant.Outlined" Min="1" Max="100" TextChanged="RecalculateEstimates" HelperText="Full dataset cycles (5-20 typical)" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudTooltip Text="Repeats per Image: How many times each image in your dataset is presented to the network in a single epoch. 5-10 is standard.">
+                                    <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" HelperText="Per-image epoch multiplier" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Batch Size: Number of images processed per gradient update. 1 uses the least VRAM (ideal for 8-16GB GPUs). Higher values require 24GB+ GPUs.">
+                                    <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Min="1" Max="8" TextChanged="RecalculateEstimates" HelperText="1 for lowest VRAM usage" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Save Checkpoint Every N Epochs: Generates a .safetensors checkpoint at this epoch interval. Default is 1 (save every epoch).">
+                                    <MudNumericField @bind-Value="_saveEveryNEpochs" Label="Save Every (Epochs)" Variant="Variant.Outlined" Min="1" Max="50" HelperText="Epoch save frequency" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudTooltip Text="Total Steps (Override): Specify exact number of training steps. Leave empty to compute automatically from epochs, repeats, and dataset size.">
+                                    <MudNumericField @bind-Value="_totalSteps" Label="Total Steps (Override)" Variant="Variant.Outlined" Min="1" Max="100000" Clearable="true" TextChanged="RecalculateEstimates" HelperText="Optional explicit step limit" />
+                                </MudTooltip>
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <!-- Tab 2: Optimizer, LR & Precision -->
+                    <MudTabPanel Text="Optimizer & LR" Icon="@Icons.Material.Filled.Speed">
+                        <MudGrid>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Learning Rate: Gradient descent step size. 1e-4 (0.0001) is standard for AdamW. Lower (5e-5) for delicate fine-tuning; higher (2e-4) for fast convergence.">
+                                    <MudNumericField @bind-Value="_learningRate" Label="Learning Rate" Variant="Variant.Outlined" Format="0.#####e+00" HelperText="Step size (1e-4 standard)" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="UNet Learning Rate: Specific learning rate for the diffusion backbone (optional). Leave empty to use primary LR.">
+                                    <MudNumericField @bind-Value="_unetLearningRate" Label="UNet LR (Optional)" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="Leave empty to use primary LR" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Text Encoder LR: Specific learning rate for CLIP/T5 text encoders. Set to 0 to freeze text encoder training.">
+                                    <MudNumericField @bind-Value="_textEncoderLearningRate" Label="Text Encoder LR" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="0 freezes text encoder" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Optimizer: Gradient optimization algorithm. AdamW is universal; Prodigy auto-tunes learning rates; Lion uses less memory.">
+                                    <MudSelect @bind-Value="_optimizer" Label="Optimizer" Variant="Variant.Outlined" Dense="true" HelperText="Optimization algorithm">
+                                        <MudSelectItem Value="@("adamw")">AdamW (Standard AMD/ROCm)</MudSelectItem>
+                                        <MudSelectItem Value="@("prodigy")">Prodigy (Adaptive LR)</MudSelectItem>
+                                        <MudSelectItem Value="@("adafactor")">Adafactor (Low VRAM)</MudSelectItem>
+                                        <MudSelectItem Value="@("lion")">Lion (Fast Convergence)</MudSelectItem>
+                                    </MudSelect>
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="LR Scheduler: Learning rate decay schedule across training steps. Cosine with restarts periodic warm restarts can help escape local minima.">
+                                    <MudSelect @bind-Value="_lrScheduler" Label="LR Scheduler" Variant="Variant.Outlined" Dense="true" HelperText="Decay curve">
+                                        <MudSelectItem Value="@("cosine")">Cosine</MudSelectItem>
+                                        <MudSelectItem Value="@("cosine_with_restarts")">Cosine with Restarts</MudSelectItem>
+                                        <MudSelectItem Value="@("linear")">Linear</MudSelectItem>
+                                        <MudSelectItem Value="@("constant")">Constant</MudSelectItem>
+                                        <MudSelectItem Value="@("constant_with_warmup")">Constant with Warmup</MudSelectItem>
+                                    </MudSelect>
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="4">
+                                <MudTooltip Text="Precision / Dtype: Training precision. bf16 is optimal for modern AMD ROCm RDNA GPUs (RX 7000/6000).">
+                                    <MudSelect @bind-Value="_precision" Label="Precision (Dtype)" Variant="Variant.Outlined" Dense="true" HelperText="Compute precision">
+                                        <MudSelectItem Value="@("bf16")">bf16 (Recommended for ROCm)</MudSelectItem>
+                                        <MudSelectItem Value="@("fp16")">fp16 (Half precision)</MudSelectItem>
+                                    </MudSelect>
+                                </MudTooltip>
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <!-- Tab 3: Dataset Augmentation, Tag Shuffling & CLIP Skip -->
+                    <MudTabPanel Text="Augmentation & Conditioning" Icon="@Icons.Material.Filled.Shuffle">
+                        <MudGrid>
+                            <MudItem xs="12" sm="6">
+                                <MudCard Elevation="0" Style="background-color: #1e1e2e; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                                    <div class="d-flex align-center justify-space-between">
+                                        <div>
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Horizontal Flip Augmentation</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                Mirrors images left-to-right randomly. Recommended for styles and symmetric objects. Disable for asymmetric characters or text.
+                                            </MudText>
+                                        </div>
+                                        <MudSwitch @bind-Value="_flipAug" Color="Color.Tertiary" />
+                                    </div>
+                                </MudCard>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudCard Elevation="0" Style="background-color: #1e1e2e; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                                    <div class="d-flex align-center justify-space-between">
+                                        <div>
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Shuffle Caption Tags</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                Randomizes comma-separated tags per epoch. Highly recommended for Pony V6 / Illustrious / Booru tags.
+                                            </MudText>
+                                        </div>
+                                        <MudSwitch @bind-Value="_shuffleTokens" Color="Color.Tertiary" />
+                                    </div>
+                                </MudCard>
+                            </MudItem>
+                            <MudItem xs="6" sm="6">
+                                <MudTooltip Text="Keep Tokens at Start: Number of initial tags/words preserved at the beginning of the prompt without shuffling. 1 keeps the trigger word at the front. Set higher if using score tags (e.g. 3 for 'trigger, score_9, score_8_up').">
+                                    <MudNumericField @bind-Value="_keepTokens" Label="Keep Initial Tokens" Variant="Variant.Outlined" Min="0" Max="20" Disabled="!_shuffleTokens" HelperText="Tokens kept fixed at front (1 = trigger word)" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="6" sm="6">
+                                <MudTooltip Text="CLIP Skip: Number of text encoder layers to skip from the end. Default is 2 for Pony V6 / Illustrious / SD anime models; 1 (or unset) for standard SDXL / FLUX.">
+                                    <MudNumericField @bind-Value="_clipSkip" Label="CLIP Skip" Variant="Variant.Outlined" Min="1" Max="4" Clearable="true" Placeholder="Auto (2 for Pony, 1 for SDXL)" HelperText="Penultimate layer skip (2 for Pony V6)" />
+                                </MudTooltip>
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <!-- Tab 4: Sample Generation Prompts & Negative Prompt -->
+                    <MudTabPanel Text="Sample Prompts" Icon="@Icons.Material.Filled.Image">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Periodic visual inference samples generated during training runs to monitor concept quality.
+                            </MudText>
                             <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetSamplePromptsToDefault">
                                 Reset Defaults
                             </MudButton>
                         </div>
-                    </MudItem>
-                    <MudItem xs="12" md="6">
-                        <MudTooltip Text="Sample Prompt 1 (Primary): Evaluates subject recall during training at regular intervals. Use {trigger} to insert your trigger keyword.">
-                            <MudTextField @bind-Value="_samplePrompt1" Label="Sample Prompt 1 (Primary)" Variant="Variant.Outlined" Placeholder="e.g. a photo of {trigger}, cinematic lighting..." HelperText="Primary periodic test prompt with {trigger} token" Lines="2" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="12" md="6">
-                        <MudTooltip Text="Sample Prompt 2 (Optional): A second test prompt with a different angle, style, or lighting. If left blank, only sample prompt 1 will be used.">
-                            <MudTextField @bind-Value="_samplePrompt2" Label="Sample Prompt 2 (Optional)" Variant="Variant.Outlined" Placeholder="e.g. close-up portrait of {trigger}, natural daylight... (optional)" HelperText="Second test prompt (leave blank to only use one)" Lines="2" />
-                        </MudTooltip>
-                    </MudItem>
-                    <MudItem xs="12">
-                        <MudTooltip Text="Negative Prompt: Undesired visual features to penalize during sample image generation. Default values are pre-filled based on model architecture, and you can freely customize or clear them.">
-                            <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt (Samples)" Variant="Variant.Outlined" Placeholder="e.g. blurry, low quality, distorted, bad anatomy..." HelperText="Negative prompt values for samples (editable or can be cleared)" Lines="2" />
-                        </MudTooltip>
-                    </MudItem>
-                </MudGrid>
+                        <MudGrid>
+                            <MudItem xs="12" md="6">
+                                <MudTooltip Text="Sample Prompt 1 (Primary): Evaluates subject recall during training at regular intervals. Use {trigger} to insert your trigger keyword.">
+                                    <MudTextField @bind-Value="_samplePrompt1" Label="Sample Prompt 1 (Primary)" Variant="Variant.Outlined" Placeholder="e.g. a photo of {trigger}, cinematic lighting..." HelperText="Primary periodic test prompt with {trigger} token" Lines="2" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="12" md="6">
+                                <MudTooltip Text="Sample Prompt 2 (Optional): A second test prompt with a different angle, style, or lighting. If left blank, only sample prompt 1 will be used.">
+                                    <MudTextField @bind-Value="_samplePrompt2" Label="Sample Prompt 2 (Optional)" Variant="Variant.Outlined" Placeholder="e.g. close-up portrait of {trigger}, natural daylight... (optional)" HelperText="Second test prompt (leave blank to only use one)" Lines="2" />
+                                </MudTooltip>
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTooltip Text="Negative Prompt: Undesired visual features to penalize during sample image generation. Default values are pre-filled based on model architecture, and you can freely customize or clear them.">
+                                    <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt (Samples)" Variant="Variant.Outlined" Placeholder="e.g. blurry, low quality, distorted, bad anatomy..." HelperText="Negative prompt values for samples (editable or can be cleared)" Lines="2" />
+                                </MudTooltip>
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+                </MudTabs>
             </MudExpansionPanel>
         </MudExpansionPanels>
     </DialogContent>
@@ -341,6 +404,11 @@
     private int _epochs = 10;
     private int _repeats = 10;
     private int _batchSize = 1;
+    private int _saveEveryNEpochs = 1;
+    private bool _flipAug;
+    private bool _shuffleTokens = true;
+    private int _keepTokens = 1;
+    private int? _clipSkip;
     private bool _isProMode;
 
     private DatasetHealthReport? _datasetReport;
@@ -389,6 +457,10 @@
                 }
                 if (DonorLora.TotalSteps.HasValue) {
                     _totalSteps = DonorLora.TotalSteps.Value;
+                }
+                if (!string.IsNullOrWhiteSpace(DonorLora.EffectiveBaseModel) && (DonorLora.EffectiveBaseModel.Contains("Pony", StringComparison.OrdinalIgnoreCase) || DonorLora.EffectiveBaseModel.Contains("Illustrious", StringComparison.OrdinalIgnoreCase))) {
+                    _clipSkip = 2;
+                    _shuffleTokens = true;
                 }
                 _runName = string.Empty;
                 _triggerWord = string.Empty;
@@ -498,6 +570,10 @@
         }
         if (string.IsNullOrWhiteSpace(_samplePrompt2)) {
             _samplePrompt2 = arch.RecommendedSamplePrompt2;
+        }
+        if (selectedDisplayName.Contains("Pony", StringComparison.OrdinalIgnoreCase) || selectedDisplayName.Contains("Illustrious", StringComparison.OrdinalIgnoreCase)) {
+            _clipSkip = 2;
+            _shuffleTokens = true;
         }
         _negativePrompt = arch.RecommendedNegativePrompt;
         RecalculateEstimates();
@@ -636,7 +712,12 @@
             LrScheduler = _lrScheduler,
             Precision = _precision,
             SamplePrompts = prompts,
-            NegativePrompt = _negativePrompt
+            NegativePrompt = _negativePrompt,
+            SaveEveryNEpochs = _saveEveryNEpochs,
+            FlipAug = _flipAug,
+            ShuffleTokens = _shuffleTokens,
+            KeepTokens = _keepTokens,
+            ClipSkip = _clipSkip
         };
     }
 

@@ -55,7 +55,11 @@ public sealed class AiToolkitConfigBuilder {
             MaxTrainEpochs = donor.Epochs ?? 10,
             TotalSteps = donor.TotalSteps,
             SaveEveryNEpochs = 1,
-            Repeats = 1
+            Repeats = 1,
+            FlipAug = false,
+            ShuffleTokens = false,
+            KeepTokens = 1,
+            ClipSkip = string.Equals(arch.Family, "Pony", StringComparison.OrdinalIgnoreCase) || string.Equals(arch.DisplayName, "Pony Diffusion V6 XL", StringComparison.OrdinalIgnoreCase) ? 2 : null
         };
     }
 
@@ -106,6 +110,9 @@ public sealed class AiToolkitConfigBuilder {
                         if (sanitized.TextEncoderLearningRate.HasValue) {
                             trainDict["text_encoder_lr"] = sanitized.TextEncoderLearningRate.Value;
                         }
+                        if (sanitized.ClipSkip.HasValue && sanitized.ClipSkip.Value > 0) {
+                            trainDict["clip_skip"] = sanitized.ClipSkip.Value;
+                        }
 
                         var trainerProcess = new Dictionary<string, object> {
                             ["type"] = "sd_trainer",
@@ -119,14 +126,16 @@ public sealed class AiToolkitConfigBuilder {
                             ["save"] = new Dictionary<string, object> {
                                 ["dtype"] = sanitized.Precision,
                                 ["save_every"] = saveEverySteps,
-                                ["max_step_saves_to_keep"] = 4
+                                ["max_step_saves_to_keep"] = Math.Max(4, (int)Math.Ceiling((double)totalSteps / Math.Max(1, saveEverySteps)))
                             },
                             ["datasets"] = new List<object> {
                                 new Dictionary<string, object> {
                                     ["folder_path"] = sanitized.DatasetDirectory,
                                     ["caption_ext"] = "txt",
                                     ["caption_dropout_rate"] = 0.05,
-                                    ["shuffle_tokens"] = false,
+                                    ["shuffle_tokens"] = sanitized.ShuffleTokens,
+                                    ["keep_tokens"] = sanitized.KeepTokens,
+                                    ["flip_aug"] = sanitized.FlipAug,
                                     ["cache_latents_to_disk"] = sanitized.CacheLatentsToDisk,
                                     ["resolution"] = new List<int> { archInfo.DefaultResolution }
                                 }
@@ -183,6 +192,18 @@ public sealed class AiToolkitConfigBuilder {
         sb.AppendLine("xformers = false");
         sb.AppendLine($"max_train_epochs = {sanitized.MaxTrainEpochs}");
         sb.AppendLine($"train_batch_size = {sanitized.BatchSize}");
+        if (sanitized.FlipAug) {
+            sb.AppendLine("flip_aug = true");
+        }
+        if (sanitized.ShuffleTokens) {
+            sb.AppendLine("shuffle_caption = true");
+        }
+        if (sanitized.KeepTokens > 0) {
+            sb.AppendLine($"keep_tokens = {sanitized.KeepTokens}");
+        }
+        if (sanitized.ClipSkip.HasValue && sanitized.ClipSkip.Value > 0) {
+            sb.AppendLine($"clip_skip = {sanitized.ClipSkip.Value}");
+        }
         return sb.ToString();
     }
 
@@ -214,7 +235,11 @@ public sealed class AiToolkitConfigBuilder {
             Repeats = config.Repeats,
             BatchSize = config.BatchSize,
             GradientAccumulationSteps = config.GradientAccumulationSteps,
-            SaveEveryNEpochs = config.SaveEveryNEpochs
+            SaveEveryNEpochs = config.SaveEveryNEpochs,
+            FlipAug = config.FlipAug,
+            ShuffleTokens = config.ShuffleTokens,
+            KeepTokens = Math.Max(0, config.KeepTokens),
+            ClipSkip = config.ClipSkip
         };
     }
 
@@ -250,11 +275,17 @@ public sealed class AiToolkitConfigBuilder {
 
     public static int CalculateSaveEverySteps(TrainingConfig config) {
         ArgumentNullException.ThrowIfNull(config);
+        int safeSaveEpochs = Math.Max(1, config.SaveEveryNEpochs);
+
+        if (config.TotalSteps.HasValue && config.TotalSteps.Value > 0 && config.MaxTrainEpochs > 0) {
+            int derivedStepsPerEpoch = Math.Max(1, (int)Math.Round((double)config.TotalSteps.Value / config.MaxTrainEpochs));
+            return Math.Max(1, Math.Min(config.TotalSteps.Value, safeSaveEpochs * derivedStepsPerEpoch));
+        }
+
         int imageCount = CountDatasetImages(config.DatasetDirectory);
         int safeImages = imageCount > 0 ? imageCount : 50;
         int safeBatch = Math.Max(1, config.BatchSize);
         int safeGradAccum = Math.Max(1, config.GradientAccumulationSteps);
-        int safeSaveEpochs = Math.Max(1, config.SaveEveryNEpochs);
         int safeRepeats = Math.Max(1, config.Repeats);
 
         int stepsPerEpoch = Math.Max(1, (int)Math.Ceiling((double)(safeImages * safeRepeats) / (safeBatch * safeGradAccum)));
