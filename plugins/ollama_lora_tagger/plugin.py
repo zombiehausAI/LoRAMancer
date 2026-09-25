@@ -18,7 +18,7 @@ import zipfile
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 VISION_MODEL_HINTS = [
-    "vision", "llava", "minicpm", "qwen2-vl", "moondream", "bakllava", "cogvlm"
+    "vision", "llava", "minicpm", "qwen2-vl", "qwen3-vl", "qwen", "vl", "moondream", "bakllava", "cogvlm"
 ]
 
 DEFAULT_TAG_PROMPT = (
@@ -53,10 +53,24 @@ def ping_ollama(url: str = "http://localhost:11434", api_key: str = "") -> dict:
             with urllib.request.urlopen(req, timeout=8) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
-                    models = [m.get("name", "") for m in data.get("models", [])]
-                    vision_models = [
-                        m for m in models if any(hint in m.lower() for hint in VISION_MODEL_HINTS)
-                    ]
+                    raw_models = data.get("models", [])
+                    models = [m.get("name", "") for m in raw_models]
+                    vision_models = []
+                    for m in raw_models:
+                        name = m.get("name", "")
+                        caps = m.get("capabilities", [])
+                        details = m.get("details", {})
+                        is_vis = (
+                            "vision" in caps
+                            or any(hint in name.lower() for hint in VISION_MODEL_HINTS)
+                            or "vl" in details.get("family", "").lower()
+                        )
+                        if is_vis and name and name not in vision_models:
+                            vision_models.append(name)
+
+                    if not vision_models and models:
+                        vision_models = list(models)
+
                     return {
                         "reachable": True,
                         "url": candidate,

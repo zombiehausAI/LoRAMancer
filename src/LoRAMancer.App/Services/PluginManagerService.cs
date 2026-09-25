@@ -449,11 +449,21 @@ public sealed class PluginManagerService {
             return PluginResult.Fail($"C# plugin '{pluginId}' is not active.");
         }
 
-        // Python plugin execution inside its own .venv
+        // Python plugin execution inside its own .venv or fallback to app venv / system python
         string venvPath = Path.Combine(manifest.DirectoryPath, ".venv");
         string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
         if (!File.Exists(pythonExe)) {
-            return PluginResult.Fail($"Plugin '{manifest.Name}' has not provisioned its .venv yet.");
+            string appVenv = Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe");
+            if (File.Exists(appVenv)) {
+                pythonExe = appVenv;
+            } else {
+                string currentVenv = Path.Combine(Directory.GetCurrentDirectory(), ".venv", "Scripts", "python.exe");
+                if (File.Exists(currentVenv)) {
+                    pythonExe = currentVenv;
+                } else {
+                    pythonExe = "python.exe";
+                }
+            }
         }
 
         string scriptPath = Path.Combine(manifest.DirectoryPath, manifest.EntryPoint);

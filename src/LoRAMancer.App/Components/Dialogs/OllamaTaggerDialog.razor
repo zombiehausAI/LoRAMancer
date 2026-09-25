@@ -1,6 +1,7 @@
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @using System.Text.Json
+@inject HttpClient Http
 @inject PluginManagerService PluginManager
 @inject SettingsService Settings
 @inject NativeFileDialogService FileDialogService
@@ -215,52 +216,140 @@
         _errorMessage = string.Empty;
         StateHasChanged();
 
-        try {
-            var result = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "check_ollama", new Dictionary<string, object?> {
-                ["ollama_url"] = _ollamaUrl.Trim(),
-                ["api_key"] = _apiKey.Trim()
-            });
+        string cleanUrl = (_ollamaUrl ?? "http://localhost:11434").Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(cleanUrl)) {
+            cleanUrl = "http://localhost:11434";
+        }
 
-            if (!result.Success) {
-                _ollamaReachable = false;
-                _errorMessage = result.Message;
-                return;
-            }
+        var candidates = new List<string> { cleanUrl };
+        if (cleanUrl.Contains("localhost")) {
+            candidates.Add(cleanUrl.Replace("localhost", "127.0.0.1"));
+        } else if (cleanUrl.Contains("127.0.0.1")) {
+            candidates.Add(cleanUrl.Replace("127.0.0.1", "localhost"));
+        }
 
-            string dataStr = result.Data?.ToString() ?? string.Empty;
-            if (!string.IsNullOrEmpty(dataStr)) {
-                using JsonDocument doc = JsonDocument.Parse(dataStr);
-                JsonElement root = doc.RootElement;
-                _ollamaReachable = root.TryGetProperty("reachable", out var reachElem) && reachElem.GetBoolean();
+        bool connected = false;
+        string lastError = string.Empty;
 
-                if (!_ollamaReachable && root.TryGetProperty("error", out var errElem)) {
-                    _errorMessage = errElem.GetString() ?? string.Empty;
+        foreach (string candidate in candidates) {
+            try {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{candidate}/api/tags");
+                request.Headers.Add("User-Agent", "LoRAMancer-Tagger/1.0");
+                if (!string.IsNullOrWhiteSpace(_apiKey)) {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey.Trim());
                 }
 
-                _visionModels.Clear();
-                if (root.TryGetProperty("vision_models", out var vElem) && vElem.ValueKind == JsonValueKind.Array) {
-                    foreach (var item in vElem.EnumerateArray()) {
-                        string m = item.GetString() ?? string.Empty;
-                        if (!string.IsNullOrEmpty(m)) {
+                using var response = await Http.SendAsync(request, cts.Token);
+                if (response.IsSuccessStatusCode) {
+                    string json = await response.Content.ReadAsStringAsync(cts.Token);
+                    using var doc = JsonDocument.Parse(json);
+
+                    _visionModels.Clear();
+                    var allModels = new List<string>();
+
+                    if (doc.RootElement.TryGetProperty("models", out var modelsElem) && modelsElem.ValueKind == JsonValueKind.Array) {
+                        foreach (var m in modelsElem.EnumerateArray()) {
+                            string name = m.TryGetProperty("name", out var nElem) ? (nElem.GetString() ?? "") : "";
+                            if (!string.IsNullOrWhiteSpace(name)) {
+                                allModels.Add(name);
+
+                                bool isVision = false;
+                                string nameLower = name.ToLowerInvariant();
+                                if (nameLower.Contains("vision") || nameLower.Contains("vl") || nameLower.Contains("llava") ||
+                                    nameLower.Contains("minicpm") || nameLower.Contains("moondream") || nameLower.Contains("cogvlm") ||
+                                    nameLower.Contains("bakllava") || nameLower.Contains("qwen")) {
+                                    isVision = true;
+                                }
+
+                                if (!isVision && m.TryGetProperty("capabilities", out var capElem) && capElem.ValueKind == JsonValueKind.Array) {
+                                    foreach (var cap in capElem.EnumerateArray()) {
+                                        if (string.Equals(cap.GetString(), "vision", StringComparison.OrdinalIgnoreCase)) {
+                                            isVision = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (!isVision && m.TryGetProperty("details", out var detElem) && detElem.TryGetProperty("family", out var famElem)) {
+                                    string fam = (famElem.GetString() ?? "").ToLowerInvariant();
+                                    if (fam.Contains("vl") || fam.Contains("clip") || fam.Contains("vision")) {
+                                        isVision = true;
+                                    }
+                                }
+
+                                if (isVision) {
+                                    _visionModels.Add(name);
+                                }
+                            }
+                        }
+                    }
+
+                    if (_visionModels.Count == 0 && allModels.Count > 0) {
+                        foreach (string m in allModels) {
                             _visionModels.Add(m);
                         }
                     }
-                }
 
-                if (root.TryGetProperty("default_model", out var defElem)) {
-                    string def = defElem.GetString() ?? string.Empty;
-                    if (!string.IsNullOrEmpty(def) && string.IsNullOrWhiteSpace(_selectedModel)) {
-                        _selectedModel = def;
+                    if (_visionModels.Count > 0 && (string.IsNullOrWhiteSpace(_selectedModel) || !_visionModels.Contains(_selectedModel))) {
+                        _selectedModel = _visionModels[0];
+                    }
+
+                    _ollamaReachable = true;
+                    _ollamaUrl = candidate;
+                    connected = true;
+                    break;
+                } else {
+                    lastError = $"Ollama returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+                }
+            } catch (Exception ex) {
+                lastError = ex.Message;
+            }
+        }
+
+        if (!connected) {
+            // Fallback to plugin check in case of custom transport
+            try {
+                var result = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "check_ollama", new Dictionary<string, object?> {
+                    ["ollama_url"] = _ollamaUrl.Trim(),
+                    ["api_key"] = _apiKey.Trim()
+                });
+
+                if (result.Success && result.Data != null) {
+                    using JsonDocument doc = JsonDocument.Parse(result.Data.ToString() ?? "{}");
+                    JsonElement root = doc.RootElement;
+                    _ollamaReachable = root.TryGetProperty("reachable", out var reachElem) && reachElem.GetBoolean();
+                    if (_ollamaReachable) {
+                        _visionModels.Clear();
+                        if (root.TryGetProperty("vision_models", out var vElem) && vElem.ValueKind == JsonValueKind.Array) {
+                            foreach (var item in vElem.EnumerateArray()) {
+                                string m = item.GetString() ?? string.Empty;
+                                if (!string.IsNullOrEmpty(m)) {
+                                    _visionModels.Add(m);
+                                }
+                            }
+                        }
+                        if (root.TryGetProperty("default_model", out var defElem)) {
+                            string def = defElem.GetString() ?? string.Empty;
+                            if (!string.IsNullOrEmpty(def) && string.IsNullOrWhiteSpace(_selectedModel)) {
+                                _selectedModel = def;
+                            }
+                        }
+                        connected = true;
                     }
                 }
-            }
-        } catch (Exception ex) {
-            _ollamaReachable = false;
-            _errorMessage = ex.Message;
-        } finally {
-            _isCheckingOllama = false;
-            StateHasChanged();
+            } catch { }
         }
+
+        if (!connected) {
+            _ollamaReachable = false;
+            _errorMessage = !string.IsNullOrWhiteSpace(lastError)
+                ? $"Could not connect to Ollama ({lastError}). Please verify Ollama is running (`ollama serve`)."
+                : $"Could not reach Ollama at {_ollamaUrl}.";
+        }
+
+        _isCheckingOllama = false;
+        StateHasChanged();
     }
 
     private async Task BrowseInputFolderAsync() {
