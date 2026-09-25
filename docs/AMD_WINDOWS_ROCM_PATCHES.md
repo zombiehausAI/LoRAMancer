@@ -298,11 +298,14 @@ ModuleNotFoundError: No module named 'torch._C._distributed_c10d'; 'torch._C' is
 4. Because Windows ROCm PyTorch wheels are compiled with `USE_DISTRIBUTED=0`, the binary extension `torch._C._distributed_c10d` does not exist.
 
 ### The Patch
-`AmdVenvProvisioner.PatchTorchaoDistributedUtils` applies a three-layer defense in depth before starting any training run:
-1. **`sitecustomize.py`**: Injects a global fallback module into `sys.modules["torch._C._distributed_c10d"]` at Python interpreter startup so that any subsequent import anywhere in the environment succeeds immediately with a stub object.
-2. **`torch/distributed/tensor/__init__.py`**: Wraps the package imports in a `try...except Exception:` block that defines `class DTensor: pass` when distributed ops cannot load.
-3. **`accelerate/utils/other.py`**: Guards `def model_has_dtensor(model)` with a `try...except Exception: return False` block.
+`AmdVenvProvisioner.PatchTorchaoDistributedUtils` applies targeted guards before starting any training run:
+1. **`torch/distributed/tensor/__init__.py`**: Wraps the package imports in a `try...except Exception:` block that defines `class DTensor: pass` when distributed ops cannot load.
+2. **`accelerate/utils/other.py`**: Guards `def model_has_dtensor(model)` with a `try...except Exception: return False` block.
 On single-GPU training, models never contain distributed tensors, allowing `accelerator.prepare()` to smoothly move models and VAEs to the ROCm GPU device without triggering distributed code paths.
+
+> [!NOTE]
+> Global mock modules in `sys.modules` (e.g. via `sitecustomize.py`) must be avoided because standard Python introspection utilities (`inspect.getmodule()`, `inspect.findsource()`) traverse `sys.modules.values()` and expect valid module attributes (`__file__` as string or `None`). Targeted patches in `torch.distributed.tensor` and `accelerate.utils.other` keep the Python runtime pristine while completely bypassing the missing c10d binaries.
+
 
 
 

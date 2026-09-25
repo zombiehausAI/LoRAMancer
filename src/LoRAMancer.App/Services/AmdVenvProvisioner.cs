@@ -519,29 +519,12 @@ public sealed class AmdVenvProvisioner {
         }
 
         string siteCustomizePath = Path.Combine(venvPath, "Lib", "site-packages", "sitecustomize.py");
-        if (!File.Exists(siteCustomizePath) || !File.ReadAllText(siteCustomizePath).Contains("# [loramancer] windows-rocm-sitecustomize")) {
-            string siteCustomizeStub = @"# [loramancer] windows-rocm-sitecustomize
-import sys
-import types
-
-class _MockC10d(types.ModuleType):
-    def __getattr__(self, name):
-        class _Stub:
-            def __init__(self, *args, **kwargs):
-                pass
-            def __call__(self, *args, **kwargs):
-                return self
-        return _Stub
-
-if ""torch._C._distributed_c10d"" not in sys.modules:
-    sys.modules[""torch._C._distributed_c10d""] = _MockC10d(""torch._C._distributed_c10d"")
-";
-            if (File.Exists(siteCustomizePath)) {
-                File.AppendAllText(siteCustomizePath, "\n" + siteCustomizeStub);
-            } else {
-                File.WriteAllText(siteCustomizePath, siteCustomizeStub);
+        if (File.Exists(siteCustomizePath)) {
+            string scContent = File.ReadAllText(siteCustomizePath);
+            if (scContent.Contains("# [loramancer] windows-rocm-sitecustomize")) {
+                File.Delete(siteCustomizePath);
+                onProgress?.Invoke("[Patch] Cleaned up legacy sitecustomize.py stub.");
             }
-            onProgress?.Invoke("[Patch] Installed sitecustomize.py global c10d stub for Windows ROCm.");
         }
     }
 
