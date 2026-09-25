@@ -79,7 +79,7 @@ public sealed class AiToolkitConfigBuilder {
                         },
                         ["save"] = new Dictionary<string, object> {
                             ["dtype"] = sanitized.Precision,
-                            ["save_every"] = sanitized.SaveEveryNEpochs,
+                            ["save_every"] = sanitized.SaveEveryNEpochs > 10 ? sanitized.SaveEveryNEpochs : 200,
                             ["max_step_saves_to_keep"] = 4
                         },
                         ["datasets"] = new List<object> {
