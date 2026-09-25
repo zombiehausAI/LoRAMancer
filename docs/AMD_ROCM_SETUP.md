@@ -4,6 +4,10 @@
 
 LoRAMancer targets AMD Radeon GPUs on Windows utilizing official AMD ROCm wheels. The application requires **Python 3.12+ (prefer 3.12)** and establishes a dedicated `.venv` in the application environment without modifying any existing external tools (such as ComfyUI).
 
+> [!NOTE]
+> **Performance Expectation (AMD ROCm vs. NVIDIA CUDA)**:
+> Native Windows AMD ROCm training may currently run slower than native NVIDIA CUDA training due to current Windows driver maturity, attention kernel implementations (SDPA vs. Flash Attention), and PyTorch Windows ROCm runtime tuning. However, it is **fully working natively on Windows** without requiring dual-boot Linux configurations, heavy WSL2 virtual machines, or restrictive DirectML fallbacks.
+
 ## Multi-Vendor Accelerator Auto-Detection
 
 While LoRAMancer specializes in solving the AMD ROCm tooling gap on Windows, `AmdVenvProvisioner` automatically detects the host hardware accelerator and installs the appropriate PyTorch distribution:

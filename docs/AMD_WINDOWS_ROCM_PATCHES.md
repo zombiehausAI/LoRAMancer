@@ -2,6 +2,10 @@
 
 This document serves as a comprehensive, running technical log of issues, architectural quirks, and runtime patches required to execute modern diffusion LoRA training (AI-Toolkit, Kohya) using AMD ROCm on Windows hosts.
 
+> [!NOTE]
+> **Performance Expectation (AMD ROCm vs. NVIDIA CUDA)**:
+> Native Windows AMD ROCm training may currently run slower than native NVIDIA CUDA training due to early Windows ROCm driver maturity, attention kernel differences (SDPA vs. Flash Attention), and PyTorch Windows ROCm runtime tuning. However, with the patches documented below, it is **fully working and stable natively on Windows** without requiring dual-boot Linux configurations, heavy WSL2 virtual machines, or restrictive DirectML fallbacks.
+
 ---
 
 ## Environment Baseline
