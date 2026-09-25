@@ -37,6 +37,17 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
+            using (var walCmd = connection.CreateCommand()) {
+                walCmd.CommandText = @"
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA busy_timeout = 5000;
+                    PRAGMA synchronous = NORMAL;
+                    PRAGMA temp_store = MEMORY;
+                    PRAGMA cache_size = -64000;
+                ";
+                await walCmd.ExecuteNonQueryAsync();
+            }
+
             const string createTableSql = @"
                 CREATE TABLE IF NOT EXISTS Loras (
                     FilePath TEXT PRIMARY KEY,
@@ -79,6 +90,7 @@ public sealed class LoraDatabaseService : IDisposable {
                 CREATE INDEX IF NOT EXISTS idx_loras_dir ON Loras(DirectoryPath);
                 CREATE INDEX IF NOT EXISTS idx_loras_fav ON Loras(IsFavorite);
                 CREATE INDEX IF NOT EXISTS idx_loras_base ON Loras(BaseModel);
+                CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
 
                 CREATE TABLE IF NOT EXISTS Libraries (
                     Id TEXT PRIMARY KEY,
@@ -114,18 +126,36 @@ public sealed class LoraDatabaseService : IDisposable {
                 await alterCmd.ExecuteNonQueryAsync();
             }
 
+            using (var idxCmd = connection.CreateCommand()) {
+                idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);";
+                await idxCmd.ExecuteNonQueryAsync();
+            }
+
             _initialized = true;
         } finally {
             _lock.Release();
         }
     }
 
+    private async Task<SqliteConnection> OpenConnectionAsync() {
+        var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            PRAGMA busy_timeout = 5000;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA cache_size = -64000;
+        ";
+        await cmd.ExecuteNonQueryAsync();
+        return connection;
+    }
+
     public async Task<List<LoraMetadata>> GetAllAsync() {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
@@ -145,8 +175,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
@@ -188,8 +217,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
@@ -216,8 +244,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "DELETE FROM Libraries WHERE Id = $Id;";
@@ -232,8 +259,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             if (!string.IsNullOrWhiteSpace(libraryId) && !string.IsNullOrWhiteSpace(folderPath)) {
@@ -265,8 +291,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "SELECT FilePath, LastModifiedUtc, FileSizeBytes FROM Loras;";
@@ -290,8 +315,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
             using var transaction = connection.BeginTransaction();
 
             const string sql = @"
@@ -464,8 +488,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "UPDATE Loras SET IsFavorite = $IsFavorite, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
@@ -482,8 +505,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "UPDATE Loras SET UserBaseModel = $UserBaseModel, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
@@ -500,8 +522,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "DELETE FROM Loras WHERE FilePath = $FilePath;";
@@ -516,8 +537,7 @@ public sealed class LoraDatabaseService : IDisposable {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
         try {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             var existingSet = new HashSet<string>(existingPaths, StringComparer.OrdinalIgnoreCase);
             using var selectCmd = connection.CreateCommand();
