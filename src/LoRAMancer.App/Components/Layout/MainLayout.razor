@@ -8,7 +8,16 @@
 
 <MudThemeProvider IsDarkMode="@ThemeManager.CurrentTheme.IsDark" Theme="@ThemeManager.GetMudTheme()" />
 <MudPopoverProvider />
-<MudDialogProvider />
+<ErrorBoundary>
+    <ChildContent>
+        <MudDialogProvider />
+    </ChildContent>
+    <ErrorContent Context="dlgEx">
+        <MudAlert Severity="Severity.Error" Dense="true" Class="m-2">
+            Dialog display error: @dlgEx.Message
+        </MudAlert>
+    </ErrorContent>
+</ErrorBoundary>
 <MudSnackbarProvider />
 
 <style>

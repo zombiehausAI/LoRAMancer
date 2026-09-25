@@ -101,4 +101,13 @@ A central feature of LoRAMancer is borrowing the mathematical settings from high
   - Custom imported themes are persisted to `~/.LoRAMancer/themes/<id>.json` and load seamlessly at runtime.
   - Import themes directly from `.json` files or paste raw JSON in the Settings page.
 
+---
 
+## 6. UI Resilience, Thread-Safe Search & Error Containment
+
+To ensure complete stability across large model collections and rapid user interactions:
+- **Thread-Safe Search & Filter Isolation**: All collection counts and paginated model queries synchronize across background workers with `_filterLock`. Materialized snapshots (`FilteredLorasSnapshot`, `PagedLoras`) prevent `InvalidOperationException` collection modification errors when typing in search while background tasks or thumbnails update.
+- **Debounced Search Dispatch**: Keystrokes in the global search bar cancel pending query delays via atomic cancellation tokens (`_searchLock`), avoiding thread collisions and unnecessary renders.
+- **Application & Dialog Error Boundaries**:
+  - Modal dialogs (such as the Training Wizard and Config Cloner) are guarded by dedicated `<ErrorBoundary>` wrappers in `MainLayout.razor`, isolating any rendering or calculation issues and preventing global WebView2 circuit reload crashes.
+  - The **"Use Settings"** action defensively validates donor files and model architectures, providing non-intrusive warning snackbars if metadata attributes are incomplete.

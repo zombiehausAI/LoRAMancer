@@ -135,9 +135,9 @@
                 @if (_showAllFlat) {
                     <span>Showing all @LibraryService.Items.Count LoRAs (Flat View)</span>
                 } else if (!string.IsNullOrWhiteSpace(_searchQuery)) {
-                    <span>Searching across all subfolders (@_filteredLoras.Count results)</span>
+                    <span>Searching across all subfolders (@FilteredCount results)</span>
                 } else {
-                    <span>@_filteredLoras.Count LoRA@((_filteredLoras.Count == 1 ? "" : "s")) in this folder (@LibraryService.Items.Count total indexed)</span>
+                    <span>@FilteredCount LoRA@((FilteredCount == 1 ? "" : "s")) in this folder (@LibraryService.Items.Count total indexed)</span>
                 }
             </MudText>
 
@@ -436,7 +436,7 @@
         </div>
     }
 
-    <MudTable Items="_filteredLoras" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" RowsPerPage="25" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+    <MudTable Items="FilteredLorasSnapshot" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="1" RowsPerPage="25" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
         <HeaderContent>
             <MudTh Style="width: 48px;">Fav</MudTh>
             <MudTh>File Name</MudTh>
@@ -540,6 +540,22 @@
     private List<LoraMetadata> _filteredLoras = new();
     private string? _cachedSubfolderPath;
 
+    private int FilteredCount {
+        get {
+            lock (_filterLock) {
+                return _filteredLoras.Count;
+            }
+        }
+    }
+
+    private IReadOnlyList<LoraMetadata> FilteredLorasSnapshot {
+        get {
+            lock (_filterLock) {
+                return _filteredLoras.ToList();
+            }
+        }
+    }
+
     private int TotalPages {
         get {
             lock (_filterLock) {
@@ -566,15 +582,22 @@
         }
     }
 
+    private readonly object _searchLock = new();
+
     private void TriggerDebouncedSearch() {
-        try {
-            _searchCts?.Cancel();
-        } catch { }
-        var cts = new CancellationTokenSource();
-        _searchCts = cts;
+        CancellationTokenSource cts;
+        lock (_searchLock) {
+            try {
+                _searchCts?.Cancel();
+                _searchCts?.Dispose();
+            } catch { }
+            cts = new CancellationTokenSource();
+            _searchCts = cts;
+        }
+
         _ = Task.Run(async () => {
             try {
-                await Task.Delay(180, cts.Token);
+                await Task.Delay(250, cts.Token);
                 if (!cts.IsCancellationRequested && !_disposed) {
                     await SafeInvokeAsync(() => {
                         _currentPage = 1;
@@ -1084,16 +1107,24 @@
     }
 
     private async Task UseLoraTrainingSettings(LoraMetadata lora) {
-        DialogParameters parameters = new() {
-            ["DonorLora"] = lora
-        };
-        DialogOptions options = new() {
-            CloseOnEscapeKey = true,
-            MaxWidth = MaxWidth.Large,
-            FullWidth = true
-        };
+        if (lora == null) {
+            return;
+        }
 
-        await DialogService.ShowAsync<TrainingWizardDialog>("New Training Run (Using Cloned Recipe)", parameters, options);
+        try {
+            DialogParameters parameters = new() {
+                ["DonorLora"] = lora
+            };
+            DialogOptions options = new() {
+                CloseOnEscapeKey = true,
+                MaxWidth = MaxWidth.Large,
+                FullWidth = true
+            };
+
+            await DialogService.ShowAsync<TrainingWizardDialog>("New Training Run (Using Cloned Recipe)", parameters, options);
+        } catch (Exception ex) {
+            Snackbar.Add($"Unable to launch Training Wizard: {ex.Message}", Severity.Error);
+        }
     }
 
     private void InspectLora(LoraMetadata lora) {

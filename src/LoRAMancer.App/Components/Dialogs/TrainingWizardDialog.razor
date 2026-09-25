@@ -28,7 +28,7 @@
     <DialogContent>
         @if (DonorLora != null) {
             <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
-                <b>Cloned Recipe:</b> Using hyperparameters from donor <code>@DonorLora.FileName</code> (Rank: @_networkDim, Alpha: @_networkAlpha, LR: @_learningRate.ToString("0.#####e+00")). Please provide your unique run name, dataset, and trigger word below.
+                <b>Cloned Recipe:</b> Using hyperparameters from donor <code>@(DonorLora.FileName ?? "donor")</code> (Rank: @_networkDim, Alpha: @_networkAlpha, LR: @_learningRate.ToString("0.#####e+00")). Please provide your unique run name, dataset, and trigger word below.
             </MudAlert>
         } else if (HistoryRecord != null) {
             <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(249, 226, 175, 0.15); color: #f9e2af;">
@@ -276,80 +276,87 @@
     private PreFlightCheckResult _preFlight = new();
 
     protected override void OnInitialized() {
-        _presets = EstimationService.GetSubjectPresets();
-        SubjectPreset defaultPreset = _presets.First();
-        ApplyPreset(defaultPreset);
+        try {
+            _presets = EstimationService.GetSubjectPresets();
+            SubjectPreset defaultPreset = _presets.First();
+            ApplyPreset(defaultPreset);
 
-        if (DonorLora != null) {
-            _selectedSubject = TrainingSubjectType.Custom;
-            _isProMode = true;
-            if (!string.IsNullOrWhiteSpace(DonorLora.BaseModel) && DonorLora.BaseModel != "Unknown") {
-                _targetBaseModel = DonorLora.BaseModel;
-            }
-            if (DonorLora.NetworkDim.HasValue) {
-                _networkDim = DonorLora.NetworkDim.Value;
-            }
-            if (DonorLora.NetworkAlpha.HasValue) {
-                _networkAlpha = DonorLora.NetworkAlpha.Value;
-            }
-            if (DonorLora.LearningRate.HasValue) {
-                _learningRate = DonorLora.LearningRate.Value;
-            }
-            if (DonorLora.Epochs.HasValue) {
-                _epochs = DonorLora.Epochs.Value;
-            }
-            _runName = $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_fork";
-        } else if (HistoryRecord != null) {
-            _selectedSubject = TrainingSubjectType.Custom;
-            _isProMode = true;
-            _runName = HistoryRecord.Name;
-            _networkDim = HistoryRecord.Dim;
-            _networkAlpha = HistoryRecord.Alpha;
-            _learningRate = HistoryRecord.LearningRate;
-            _epochs = HistoryRecord.Epochs;
-            _triggerWord = HistoryRecord.TriggerWord;
+            if (DonorLora != null) {
+                _selectedSubject = TrainingSubjectType.Custom;
+                _isProMode = true;
+                if (!string.IsNullOrWhiteSpace(DonorLora.EffectiveBaseModel) && DonorLora.EffectiveBaseModel != "Unknown") {
+                    var resolvedArch = ConfigBuilder.ResolveArchitecture(DonorLora.EffectiveBaseModel);
+                    _targetBaseModel = resolvedArch.DisplayName;
+                }
+                if (DonorLora.NetworkDim.HasValue) {
+                    _networkDim = DonorLora.NetworkDim.Value;
+                }
+                if (DonorLora.NetworkAlpha.HasValue) {
+                    _networkAlpha = DonorLora.NetworkAlpha.Value;
+                }
+                if (DonorLora.LearningRate.HasValue) {
+                    _learningRate = DonorLora.LearningRate.Value;
+                }
+                if (DonorLora.Epochs.HasValue) {
+                    _epochs = DonorLora.Epochs.Value;
+                }
+                _runName = !string.IsNullOrWhiteSpace(DonorLora.FileName)
+                    ? $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_fork"
+                    : "cloned_lora_run";
+            } else if (HistoryRecord != null) {
+                _selectedSubject = TrainingSubjectType.Custom;
+                _isProMode = true;
+                _runName = HistoryRecord.Name;
+                _networkDim = HistoryRecord.Dim;
+                _networkAlpha = HistoryRecord.Alpha;
+                _learningRate = HistoryRecord.LearningRate;
+                _epochs = HistoryRecord.Epochs;
+                _triggerWord = HistoryRecord.TriggerWord;
 
-            var matchedArch = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
-                string.Equals(a.Family, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(a.Id, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(a.DisplayName, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase));
-            if (matchedArch != null) {
-                _targetBaseModel = matchedArch.DisplayName;
-            }
+                var matchedArch = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
+                    string.Equals(a.Family, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.Id, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a.DisplayName, HistoryRecord.BaseArchitecture, StringComparison.OrdinalIgnoreCase));
+                if (matchedArch != null) {
+                    _targetBaseModel = matchedArch.DisplayName;
+                }
 
-            if (!string.IsNullOrWhiteSpace(HistoryRecord.DatasetPath)) {
-                _datasetDirectory = HistoryRecord.DatasetPath;
-            }
+                if (!string.IsNullOrWhiteSpace(HistoryRecord.DatasetPath)) {
+                    _datasetDirectory = HistoryRecord.DatasetPath;
+                }
 
-            if (!string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath)) {
-                _outputDirectory = Path.GetDirectoryName(HistoryRecord.ConfigYamlPath) ?? string.Empty;
-            }
+                if (!string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath)) {
+                    _outputDirectory = Path.GetDirectoryName(HistoryRecord.ConfigYamlPath) ?? string.Empty;
+                }
 
-            if (HistoryRecord.SamplePrompts != null && HistoryRecord.SamplePrompts.Count > 0) {
-                _samplePrompt = HistoryRecord.SamplePrompts[0];
-            }
+                if (HistoryRecord.SamplePrompts != null && HistoryRecord.SamplePrompts.Count > 0) {
+                    _samplePrompt = HistoryRecord.SamplePrompts[0];
+                }
 
-            string yamlSource = HistoryRecord.ConfigYamlContent;
-            if (string.IsNullOrWhiteSpace(yamlSource) && !string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath) && File.Exists(HistoryRecord.ConfigYamlPath)) {
-                try {
-                    yamlSource = File.ReadAllText(HistoryRecord.ConfigYamlPath);
-                } catch { }
-            }
+                string yamlSource = HistoryRecord.ConfigYamlContent;
+                if (string.IsNullOrWhiteSpace(yamlSource) && !string.IsNullOrWhiteSpace(HistoryRecord.ConfigYamlPath) && File.Exists(HistoryRecord.ConfigYamlPath)) {
+                    try {
+                        yamlSource = File.ReadAllText(HistoryRecord.ConfigYamlPath);
+                    } catch { }
+                }
 
-            if (!string.IsNullOrWhiteSpace(yamlSource)) {
-                foreach (string line in yamlSource.Split('\n')) {
-                    string trimmed = line.Trim();
-                    if (trimmed.StartsWith("name_or_path:")) {
-                        string val = trimmed.Substring("name_or_path:".Length).Trim().Trim('"', '\'');
-                        if (File.Exists(val) || val.Contains('/') || val.Contains('\\')) {
-                            _customBaseModelPath = val;
+                if (!string.IsNullOrWhiteSpace(yamlSource)) {
+                    foreach (string line in yamlSource.Split('\n')) {
+                        string trimmed = line.Trim();
+                        if (trimmed.StartsWith("name_or_path:")) {
+                            string val = trimmed.Substring("name_or_path:".Length).Trim().Trim('"', '\'');
+                            if (File.Exists(val) || val.Contains('/') || val.Contains('\\')) {
+                                _customBaseModelPath = val;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        RecalculateEstimates();
+            RecalculateEstimates(updateState: false);
+        } catch (Exception ex) {
+            Snackbar.Add($"Initialization notice: {ex.Message}", Severity.Warning);
+        }
     }
 
     private async Task PickCustomBaseModelAsync() {
@@ -464,18 +471,22 @@
         _datasetReport = await DatasetInspector.InspectDatasetAsync(_datasetDirectory);
     }
 
-    private void RecalculateEstimates() {
-        int imgCount = _datasetReport?.TotalImages ?? 25;
-        _estimates = EstimationService.CalculateEstimates(
-            _targetBaseModel,
-            imgCount,
-            _repeats,
-            _epochs,
-            _batchSize,
-            _networkDim
-        );
-        _preFlight = EstimationService.RunPreFlightCheck(_targetBaseModel, _outputDirectory, _batchSize);
-        StateHasChanged();
+    private void RecalculateEstimates(bool updateState = true) {
+        try {
+            int imgCount = _datasetReport?.TotalImages ?? 25;
+            _estimates = EstimationService.CalculateEstimates(
+                _targetBaseModel,
+                imgCount,
+                _repeats,
+                _epochs,
+                _batchSize,
+                _networkDim
+            );
+            _preFlight = EstimationService.RunPreFlightCheck(_targetBaseModel, _outputDirectory, _batchSize);
+            if (updateState) {
+                StateHasChanged();
+            }
+        } catch { }
     }
 
     private TrainingConfig BuildConfig() {
