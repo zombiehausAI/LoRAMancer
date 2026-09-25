@@ -8,9 +8,10 @@
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = "$env:LOCALAPPDATA\LoRAMancer",
+    [string]$InstallPath = "",
     [switch]$SkipPrereqCheck,
-    [switch]$CreateDesktopShortcut = $true
+    [switch]$CreateDesktopShortcut = $true,
+    [switch]$Unattended
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,9 +72,68 @@ if (-not $SkipPrereqCheck) {
     }
 }
 
-# 2. Directory Provisioning
-Write-Host "`n[2/4] Provisioning installation directory..." -ForegroundColor Cyan
-Write-Host "  > Target path: $InstallPath"
+# 2. Directory Provisioning & Custom Path Selection
+Write-Host "`n[2/4] Selecting and provisioning installation directory..." -ForegroundColor Cyan
+
+$defaultInstallPath = "$env:LOCALAPPDATA\LoRAMancer"
+
+if ([string]::IsNullOrWhiteSpace($InstallPath)) {
+    if ($Unattended -or [Console]::IsInputRedirected) {
+        $InstallPath = $defaultInstallPath
+    } else {
+        Write-Host "Choose where to install LoRAMancer (can be on any drive, e.g. D:\LoRAMancer):" -ForegroundColor Yellow
+        Write-Host "  [Enter]  Use default: $defaultInstallPath" -ForegroundColor Gray
+        Write-Host "  [B]      Browse for a folder with Windows dialog" -ForegroundColor Gray
+        Write-Host "  Or type a custom path directly (e.g. D:\AI\LoRAMancer)" -ForegroundColor Gray
+
+        $userInput = Read-Host "`nInstall path [Default: $defaultInstallPath]"
+        if ([string]::IsNullOrWhiteSpace($userInput)) {
+            $InstallPath = $defaultInstallPath
+        } elseif ($userInput.Trim() -eq "B" -or $userInput.Trim() -eq "b") {
+            try {
+                Add-Type -AssemblyName System.Windows.Forms
+                $browser = New-Object System.Windows.Forms.FolderBrowserDialog
+                $browser.Description = "Select LoRAMancer Installation Folder (Any Drive)"
+                $browser.UseDescriptionForTitle = $true
+                $browser.ShowNewFolderButton = $true
+                if ($browser.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK -and -not [string]::IsNullOrWhiteSpace($browser.SelectedPath)) {
+                    $InstallPath = $browser.SelectedPath
+                } else {
+                    Write-Host "  > No folder selected in dialog. Using default." -ForegroundColor Yellow
+                    $InstallPath = $defaultInstallPath
+                }
+            } catch {
+                Write-Warning "GUI folder picker unavailable. Using default: $defaultInstallPath"
+                $InstallPath = $defaultInstallPath
+            }
+        } else {
+            $InstallPath = $userInput.Trim().Trim('"', "'")
+        }
+    }
+}
+
+# Resolve full path and check target drive space
+try {
+    $InstallPath = [System.IO.Path]::GetFullPath($InstallPath)
+} catch {
+    Write-Warning "Invalid path provided. Falling back to default: $defaultInstallPath"
+    $InstallPath = $defaultInstallPath
+}
+
+Write-Host "  > Target path: $InstallPath" -ForegroundColor Green
+
+# Query target drive and display free disk space
+try {
+    $driveRoot = [System.IO.Path]::GetPathRoot($InstallPath)
+    if ($driveRoot) {
+        $driveLetter = $driveRoot.Substring(0, 1)
+        $diskInfo = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$driveLetter:'" -ErrorAction SilentlyContinue
+        if ($diskInfo -and $diskInfo.FreeSpace) {
+            $freeGb = [math]::Round($diskInfo.FreeSpace / 1GB, 1)
+            Write-Host "  > Target Drive ($driveLetter`:): $freeGb GB free space available" -ForegroundColor Gray
+        }
+    }
+} catch { }
 
 $binPath = Join-Path $InstallPath "bin"
 $pluginsPath = Join-Path $InstallPath "plugins"

@@ -3,8 +3,8 @@
 ## Overview
 
 LoRAMancer includes automated deployment packaging and in-app update mechanisms:
-1. **PowerShell Bootstrap Installer (`installer/Install-LoRAMancer.ps1`)**: Handles prerequisite detection (.NET 10, Python 3.12, AMD GPU/ROCm drivers), directory setup, and desktop shortcut generation.
-2. **Inno Setup Script (`installer/LoRAMancer.iss`)**: Generates an enterprise-ready Windows standalone installer executable.
+1. **PowerShell Bootstrap Installer (`installer/Install-LoRAMancer.ps1`)**: Handles prerequisite detection (.NET 10, Python 3.12, AMD GPU/ROCm drivers), directory setup with custom destination drive/folder selection (via interactive prompt, GUI folder picker, or `-InstallPath`), and desktop shortcut generation.
+2. **Inno Setup Script (`installer/LoRAMancer.iss`)**: Generates an enterprise-ready Windows standalone installer executable with full destination folder and drive selection (`DisableDirPage=no`).
 3. **In-App Auto-Update Service (`AutoUpdateService.cs`)**: Checks remote release manifests, displays update notes, and manages zero-friction background download and restart transitions.
 
 ## In-App Auto-Update Flow

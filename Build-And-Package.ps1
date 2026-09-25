@@ -29,7 +29,7 @@ param(
     [string]$Configuration = "Release",
     [switch]$SkipTests,
     [switch]$Install,
-    [string]$InstallPath = "$env:LOCALAPPDATA\LoRAMancer",
+    [string]$InstallPath = "",
     [string]$OutputDir = "artifacts"
 )
 
