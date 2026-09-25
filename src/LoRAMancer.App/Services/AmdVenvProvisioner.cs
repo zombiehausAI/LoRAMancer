@@ -489,6 +489,60 @@ public sealed class AmdVenvProvisioner {
                 }
             }
         }
+
+        string distTensorInitPath = Path.Combine(venvPath, "Lib", "site-packages", "torch", "distributed", "tensor", "__init__.py");
+        if (File.Exists(distTensorInitPath)) {
+            string content = File.ReadAllText(distTensorInitPath);
+            if (!content.Contains("# [loramancer] windows-dtensor-guard")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string[] lines = normalized.Split('\n');
+                string indented = string.Join("\n", lines.Select(l => string.IsNullOrWhiteSpace(l) ? l : "    " + l));
+                string patched = "# [loramancer] windows-dtensor-guard\ntry:\n" + indented + "\nexcept Exception:\n    class DTensor:\n        pass\n";
+                File.WriteAllText(distTensorInitPath, patched);
+                onProgress?.Invoke("[Patch] Patched torch.distributed.tensor for Windows ROCm.");
+            }
+        }
+
+        string accOtherPath = Path.Combine(venvPath, "Lib", "site-packages", "accelerate", "utils", "other.py");
+        if (File.Exists(accOtherPath)) {
+            string content = File.ReadAllText(accOtherPath);
+            if (!content.Contains("# [loramancer] windows-dtensor-guard")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target = "def model_has_dtensor(model):";
+                if (normalized.Contains(target)) {
+                    string replacement = "# [loramancer] windows-dtensor-guard\ndef model_has_dtensor(model):\n    try:\n        from torch.distributed.tensor import DTensor\n        return any(isinstance(param, DTensor) for param in model.parameters())\n    except Exception:\n        return False\n\ndef _unpatched_model_has_dtensor(model):";
+                    normalized = normalized.Replace(target, replacement);
+                    File.WriteAllText(accOtherPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched accelerate model_has_dtensor for Windows ROCm.");
+                }
+            }
+        }
+
+        string siteCustomizePath = Path.Combine(venvPath, "Lib", "site-packages", "sitecustomize.py");
+        if (!File.Exists(siteCustomizePath) || !File.ReadAllText(siteCustomizePath).Contains("# [loramancer] windows-rocm-sitecustomize")) {
+            string siteCustomizeStub = @"# [loramancer] windows-rocm-sitecustomize
+import sys
+import types
+
+class _MockC10d(types.ModuleType):
+    def __getattr__(self, name):
+        class _Stub:
+            def __init__(self, *args, **kwargs):
+                pass
+            def __call__(self, *args, **kwargs):
+                return self
+        return _Stub
+
+if ""torch._C._distributed_c10d"" not in sys.modules:
+    sys.modules[""torch._C._distributed_c10d""] = _MockC10d(""torch._C._distributed_c10d"")
+";
+            if (File.Exists(siteCustomizePath)) {
+                File.AppendAllText(siteCustomizePath, "\n" + siteCustomizeStub);
+            } else {
+                File.WriteAllText(siteCustomizePath, siteCustomizeStub);
+            }
+            onProgress?.Invoke("[Patch] Installed sitecustomize.py global c10d stub for Windows ROCm.");
+        }
     }
 
     public async Task<VenvPackageStatus> GetVenvPackageInfoAsync(string targetDirectory, CancellationToken cancellationToken = default) {

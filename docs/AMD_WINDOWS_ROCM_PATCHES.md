@@ -263,3 +263,46 @@ Unlike Kohya or scripts that accept compound strings like `adamw_bf16`, `paged_a
 - `adamw_bf16`, `paged_adamw_8bit`, `adamw8bit`, `adamw_8bit`, etc., are mapped directly to `"adamw"`.
 - `TrainingWizardDialog.razor` defaults the optimizer dropdown to `"adamw"`.
 
+---
+
+## 10. `torch.distributed.tensor` (`DTensor`) & Accelerate `model_has_dtensor`
+
+### The Problem
+During the pre-train hook (`self.hook_before_train_loop()`), `ai-toolkit` invokes `accelerator.prepare(self.sd.vae)`:
+```text
+  File "accelerate\accelerator.py", line 1802, in prepare_model
+    and not model_has_dtensor(model)
+  File "accelerate\utils\other.py", line 243, in model_has_dtensor
+    from torch.distributed.tensor import DTensor
+  File "torch\distributed\tensor\__init__.py", line 4, in <module>
+    import torch.distributed.tensor._ops
+  File "torch\distributed\tensor\_ops\__init__.py", line 2, in <module>
+    from ._conv_ops import *
+  File "torch\distributed\tensor\_ops\_conv_ops.py", line 5, in <module>
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+  File "torch\distributed\tensor\_dtensor_spec.py", line 6, in <module>
+    from torch.distributed.tensor.placement_types import (
+  File "torch\distributed\tensor\placement_types.py", line 8, in <module>
+    import torch.distributed._functional_collectives as funcol
+  File "torch\distributed\_functional_collectives.py", line 9, in <module>
+    import torch.distributed.distributed_c10d as c10d
+  File "torch\distributed\distributed_c10d.py", line 23, in <module>
+    from torch._C._distributed_c10d import (
+ModuleNotFoundError: No module named 'torch._C._distributed_c10d'; 'torch._C' is not a package
+```
+
+### The Cause
+1. In `accelerate.prepare_model()`, Accelerate checks `if not model_has_dtensor(model): model.to(device)`.
+2. Inside `accelerate.utils.other.model_has_dtensor()`, it unconditionally runs `from torch.distributed.tensor import DTensor`.
+3. In PyTorch 2.x, `torch.distributed.tensor.__init__` unconditionally executes `import torch.distributed.tensor._ops`, which cascades into `_functional_collectives` -> `distributed_c10d.py` -> `from torch._C._distributed_c10d import ...`.
+4. Because Windows ROCm PyTorch wheels are compiled with `USE_DISTRIBUTED=0`, the binary extension `torch._C._distributed_c10d` does not exist.
+
+### The Patch
+`AmdVenvProvisioner.PatchTorchaoDistributedUtils` applies a three-layer defense in depth before starting any training run:
+1. **`sitecustomize.py`**: Injects a global fallback module into `sys.modules["torch._C._distributed_c10d"]` at Python interpreter startup so that any subsequent import anywhere in the environment succeeds immediately with a stub object.
+2. **`torch/distributed/tensor/__init__.py`**: Wraps the package imports in a `try...except Exception:` block that defines `class DTensor: pass` when distributed ops cannot load.
+3. **`accelerate/utils/other.py`**: Guards `def model_has_dtensor(model)` with a `try...except Exception: return False` block.
+On single-GPU training, models never contain distributed tensors, allowing `accelerator.prepare()` to smoothly move models and VAEs to the ROCm GPU device without triggering distributed code paths.
+
+
+
