@@ -64,3 +64,16 @@ If you already have a functional ComfyUI setup on your PC:
 1. Navigate to **Environment Setup** (`/environment`).
 2. Provide your ComfyUI runner script (`comfyui.ps1` or `run_gpu.bat`) or ComfyUI Python directory.
 3. LoRAMancer extracts the exact Python executable, local wheel directories, and ROCm/CUDA parameters to provision an environment identical to your proven ComfyUI runtime.
+
+---
+
+## User Profile & Home Directory Isolation
+
+LoRAMancer strictly prevents training dependencies and AI-Toolkit engines from polluting your Windows user profile (`C:\Users\<username>`):
+- **Dedicated Application `.venv`**: All packages and PyTorch distributions are installed inside the dedicated `.venv` in the application install directory (e.g., `D:\AI\LoRAMancer\.venv`). Under no circumstance will the global system Python be used.
+- **Isolated Build & Temp Directory**: `TEMP`, `TMP`, and `TMPDIR` are explicitly redirected to `<InstallDir>\cache\temp`, ensuring temporary git clones (like diffusers) and wheel compilations never write to `AppData\Local\Temp`.
+- **Isolated Package & Model Caches**:
+  - `PIP_CACHE_DIR`: `<InstallDir>\cache\pip`
+  - `HF_HOME`: `<InstallDir>\cache\huggingface` (or custom configured path in Settings)
+  - `TORCH_HOME`: `<InstallDir>\cache\torch`
+- **User Site-Packages Disabled**: `PYTHONNOUSERSITE=1` and `pip install --no-user` are enforced on all subprocess runs, preventing packages from touching `AppData\Roaming\Python` or user-level site-packages.

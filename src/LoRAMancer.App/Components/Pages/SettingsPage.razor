@@ -1112,7 +1112,7 @@
         _toolkitLogs.Add("[LoRAMancer] Updating AI-Toolkit via Git...");
 
         try {
-            string venvPath = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
+            string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
             await ToolkitSetup.UpdateAiToolkitAsync(venvPath, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);
@@ -1135,7 +1135,7 @@
         _toolkitLogs.Add("[LoRAMancer] Initiating AI-Toolkit automated setup...");
 
         try {
-            string venvPath = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
+            string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
             await ToolkitSetup.SetupAiToolkitAsync(venvPath, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);

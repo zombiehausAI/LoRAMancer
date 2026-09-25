@@ -6,10 +6,66 @@ namespace LoRAMancer.App.Services;
 public sealed class AiToolkitSetupService {
     private readonly ProcessRunner _processRunner;
     private readonly SettingsService _settingsService;
+    private readonly AmdVenvProvisioner? _venvProvisioner;
 
-    public AiToolkitSetupService(ProcessRunner processRunner, SettingsService settingsService) {
+    public AiToolkitSetupService(
+        ProcessRunner processRunner,
+        SettingsService settingsService,
+        AmdVenvProvisioner? venvProvisioner = null
+    ) {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+        _venvProvisioner = venvProvisioner;
+    }
+
+    public static string GetApplicationRoot() {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (baseDir.EndsWith("bin", StringComparison.OrdinalIgnoreCase)) {
+            string? parent = Directory.GetParent(baseDir)?.FullName;
+            if (!string.IsNullOrEmpty(parent)) {
+                return parent;
+            }
+        }
+        return baseDir;
+    }
+
+    public static string GetDefaultVenvPath() {
+        return Path.Combine(GetApplicationRoot(), ".venv");
+    }
+
+    public Dictionary<string, string> GetIsolatedEnvironmentVariables() {
+        string appRoot = GetApplicationRoot();
+        string cacheRoot = Path.Combine(appRoot, "cache");
+        string tempDir = Path.Combine(cacheRoot, "temp");
+        string pipCacheDir = Path.Combine(cacheRoot, "pip");
+        string hfCacheDir = !string.IsNullOrWhiteSpace(_settingsService.Current.HfHomeCachePath)
+            ? _settingsService.Current.HfHomeCachePath
+            : Path.Combine(cacheRoot, "huggingface");
+        string torchCacheDir = Path.Combine(cacheRoot, "torch");
+
+        Directory.CreateDirectory(tempDir);
+        Directory.CreateDirectory(pipCacheDir);
+        Directory.CreateDirectory(hfCacheDir);
+        Directory.CreateDirectory(torchCacheDir);
+
+        var env = new Dictionary<string, string> {
+            ["TEMP"] = tempDir,
+            ["TMP"] = tempDir,
+            ["TMPDIR"] = tempDir,
+            ["PIP_CACHE_DIR"] = pipCacheDir,
+            ["HF_HOME"] = hfCacheDir,
+            ["TORCH_HOME"] = torchCacheDir,
+            ["PYTHONNOUSERSITE"] = "1",
+            ["PIP_NO_WARN_SCRIPT_LOCATION"] = "0"
+        };
+
+        string hfToken = _settingsService.Current.HuggingFaceToken?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(hfToken)) {
+            env["HF_TOKEN"] = hfToken;
+            env["HUGGING_FACE_HUB_TOKEN"] = hfToken;
+        }
+
+        return env;
     }
 
     public string GetInstallDirectory() {
@@ -18,7 +74,7 @@ public sealed class AiToolkitSetupService {
             return customPath;
         }
 
-        string defaultPath = Path.Combine(AppContext.BaseDirectory, "tools", "ai-toolkit");
+        string defaultPath = Path.Combine(GetApplicationRoot(), "tools", "ai-toolkit");
         return defaultPath;
     }
 
@@ -47,7 +103,7 @@ public sealed class AiToolkitSetupService {
             "git.exe",
             "log -1 --format=\"%h (%cd) - %s\" --date=short",
             installDir,
-            null,
+            GetIsolatedEnvironmentVariables(),
             line => {
                 if (string.IsNullOrEmpty(commit)) {
                     commit = line.Trim();
@@ -66,6 +122,7 @@ public sealed class AiToolkitSetupService {
         CancellationToken cancellationToken = default
     ) {
         string installDir = GetInstallDirectory();
+        var envVars = GetIsolatedEnvironmentVariables();
 
         if (!Directory.Exists(installDir) || !IsGitRepository()) {
             onProgress?.Invoke("[AI-Toolkit] Repository not found. Performing full setup instead...");
@@ -78,7 +135,7 @@ public sealed class AiToolkitSetupService {
             "git.exe",
             "pull --recurse-submodules",
             installDir,
-            null,
+            envVars,
             line => onProgress?.Invoke($"[git] {line}"),
             line => onProgress?.Invoke($"[git err] {line}"),
             cancellationToken
@@ -93,15 +150,29 @@ public sealed class AiToolkitSetupService {
             "git.exe",
             "submodule update --init --recursive",
             installDir,
-            null,
+            envVars,
             line => onProgress?.Invoke($"[git] {line}"),
             _ => { },
             cancellationToken
         );
 
-        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        string effectiveVenv = !string.IsNullOrWhiteSpace(venvPath) && Directory.Exists(venvPath)
+            ? venvPath
+            : GetDefaultVenvPath();
+
+        string pythonExe = Path.Combine(effectiveVenv, "Scripts", "python.exe");
         if (!File.Exists(pythonExe)) {
-            pythonExe = "python.exe";
+            if (_venvProvisioner != null) {
+                onProgress?.Invoke($"[AI-Toolkit] Dedicated .venv not found at {effectiveVenv}. Provisioning compute environment first...");
+                await _venvProvisioner.ProvisionVenvAsync(GetApplicationRoot(), onProgress, cancellationToken: cancellationToken);
+                pythonExe = Path.Combine(effectiveVenv, "Scripts", "python.exe");
+            }
+        }
+
+        if (!File.Exists(pythonExe)) {
+            throw new InvalidOperationException(
+                $"Cannot update AI-Toolkit: Dedicated virtual environment was not found at '{effectiveVenv}'. " +
+                "Please provision the compute environment from the Compute Environment page first to prevent polluting your home directory.");
         }
 
         string reqFile = Path.Combine(installDir, "requirements.txt");
@@ -109,16 +180,16 @@ public sealed class AiToolkitSetupService {
             onProgress?.Invoke("[AI-Toolkit] Updating dependencies in .venv (protecting PyTorch wheels)...");
             await _processRunner.RunAsync(
                 pythonExe,
-                $"-m pip install --no-cache-dir -r \"{reqFile}\" sympy networkx jinja2",
+                $"-m pip install --no-cache-dir --no-user -r \"{reqFile}\" sympy networkx jinja2",
                 installDir,
-                null,
+                envVars,
                 line => onProgress?.Invoke($"[pip] {line}"),
                 line => onProgress?.Invoke($"[pip err] {line}"),
                 cancellationToken
             );
 
             // Patch torchao distributed_utils for Windows ROCm (so both torchao and diffusers work)
-            AmdVenvProvisioner.PatchTorchaoDistributedUtils(venvPath, onProgress);
+            AmdVenvProvisioner.PatchTorchaoDistributedUtils(effectiveVenv, onProgress);
         }
 
         onProgress?.Invoke("[AI-Toolkit] AI-Toolkit successfully updated to latest version!");
@@ -130,13 +201,14 @@ public sealed class AiToolkitSetupService {
         CancellationToken cancellationToken = default
     ) {
         string installDir = GetInstallDirectory();
+        var envVars = GetIsolatedEnvironmentVariables();
         string repoUrl = string.IsNullOrWhiteSpace(_settingsService.Current.AiToolkitRepoUrl)
             ? "https://github.com/ostris/ai-toolkit.git"
             : _settingsService.Current.AiToolkitRepoUrl;
 
         onProgress?.Invoke($"[AI-Toolkit] Target installation directory: {installDir}");
 
-        string parentDir = Path.GetDirectoryName(installDir) ?? AppContext.BaseDirectory;
+        string parentDir = Path.GetDirectoryName(installDir) ?? GetApplicationRoot();
         if (!Directory.Exists(parentDir)) {
             Directory.CreateDirectory(parentDir);
         }
@@ -147,7 +219,7 @@ public sealed class AiToolkitSetupService {
                 "git.exe",
                 $"clone --recurse-submodules \"{repoUrl}\" \"{installDir}\"",
                 parentDir,
-                null,
+                envVars,
                 line => onProgress?.Invoke($"[git] {line}"),
                 line => onProgress?.Invoke($"[git err] {line}"),
                 cancellationToken
@@ -162,16 +234,30 @@ public sealed class AiToolkitSetupService {
                 "git.exe",
                 "submodule update --init --recursive",
                 installDir,
-                null,
+                envVars,
                 line => onProgress?.Invoke($"[git] {line}"),
                 _ => { },
                 cancellationToken
             );
         }
 
-        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        string effectiveVenv = !string.IsNullOrWhiteSpace(venvPath) && Directory.Exists(venvPath)
+            ? venvPath
+            : GetDefaultVenvPath();
+
+        string pythonExe = Path.Combine(effectiveVenv, "Scripts", "python.exe");
         if (!File.Exists(pythonExe)) {
-            pythonExe = "python.exe";
+            if (_venvProvisioner != null) {
+                onProgress?.Invoke($"[AI-Toolkit] Dedicated .venv not found at {effectiveVenv}. Provisioning compute environment first...");
+                await _venvProvisioner.ProvisionVenvAsync(GetApplicationRoot(), onProgress, cancellationToken: cancellationToken);
+                pythonExe = Path.Combine(effectiveVenv, "Scripts", "python.exe");
+            }
+        }
+
+        if (!File.Exists(pythonExe)) {
+            throw new InvalidOperationException(
+                $"Cannot setup AI-Toolkit: Dedicated virtual environment was not found at '{effectiveVenv}'. " +
+                "Please provision the compute environment from the Compute Environment page first to prevent polluting your home directory.");
         }
 
         string reqFile = Path.Combine(installDir, "requirements.txt");
@@ -181,9 +267,9 @@ public sealed class AiToolkitSetupService {
             // Install dependencies protecting torch binaries (without --upgrade to preserve ROCm torch)
             int pipExit = await _processRunner.RunAsync(
                 pythonExe,
-                $"-m pip install --no-cache-dir -r \"{reqFile}\" sympy networkx jinja2",
+                $"-m pip install --no-cache-dir --no-user -r \"{reqFile}\" sympy networkx jinja2",
                 installDir,
-                null,
+                envVars,
                 line => onProgress?.Invoke($"[pip] {line}"),
                 line => onProgress?.Invoke($"[pip err] {line}"),
                 cancellationToken
@@ -194,7 +280,7 @@ public sealed class AiToolkitSetupService {
             }
 
             // Patch torchao distributed_utils for Windows ROCm (so both torchao and diffusers work)
-            AmdVenvProvisioner.PatchTorchaoDistributedUtils(venvPath, onProgress);
+            AmdVenvProvisioner.PatchTorchaoDistributedUtils(effectiveVenv, onProgress);
         }
 
         if (IsInstalled()) {

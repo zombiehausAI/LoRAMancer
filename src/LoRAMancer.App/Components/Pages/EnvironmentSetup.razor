@@ -229,7 +229,7 @@
     }
 
     private async Task RefreshPackageStatusAsync() {
-        _packageStatus = await Provisioner.GetVenvPackageInfoAsync(Directory.GetCurrentDirectory());
+        _packageStatus = await Provisioner.GetVenvPackageInfoAsync(AiToolkitSetupService.GetApplicationRoot());
         StateHasChanged();
     }
 
@@ -258,7 +258,7 @@
         _provisioningLogs.Add($"[LoRAMancer] Starting {effectiveVendor} virtual environment provisioning...");
 
         try {
-            string targetDir = Directory.GetCurrentDirectory();
+            string targetDir = AiToolkitSetupService.GetApplicationRoot();
             await Provisioner.ProvisionVenvAsync(targetDir, line => {
                 InvokeAsync(() => {
                     _provisioningLogs.Add(line);
@@ -279,7 +279,7 @@
         _isMaintenanceBusy = true;
         _provisioningLogs.Add("[Maintenance] Initiating pip upgrade...");
         try {
-            await Provisioner.UpgradePipAsync(Directory.GetCurrentDirectory(), line => {
+            await Provisioner.UpgradePipAsync(AiToolkitSetupService.GetApplicationRoot(), line => {
                 InvokeAsync(() => {
                     _provisioningLogs.Add(line);
                     StateHasChanged();
@@ -297,7 +297,7 @@
 
     private async Task SwitchPyTorchAsync() {
         _isMaintenanceBusy = true;
-        string targetDir = Directory.GetCurrentDirectory();
+        string targetDir = AiToolkitSetupService.GetApplicationRoot();
 
         (string pkgSpec, string? indexUrl) = _selectedTorchPreset switch {
             "AMD ROCm 7.2.1" => (string.Join(" ", Provisioner.CurrentPyTorchWheels.Select(w => $"\"{w}\"")), null),

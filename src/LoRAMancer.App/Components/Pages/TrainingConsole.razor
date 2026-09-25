@@ -173,7 +173,7 @@
     public bool? QueryAutoStart { get; set; }
 
     private string _configYamlPath = string.Empty;
-    private string _venvPath = Path.Combine(AppContext.BaseDirectory, ".venv");
+    private string _venvPath = AiToolkitSetupService.GetDefaultVenvPath();
     private readonly List<string> _logs = new();
     private readonly object _logsLock = new();
     private const int MaxLogLines = 2000;
@@ -200,10 +200,7 @@
         }
 
         if (!Directory.Exists(_venvPath)) {
-            string repoVenv = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
-            if (Directory.Exists(repoVenv)) {
-                _venvPath = repoVenv;
-            }
+            _venvPath = AiToolkitSetupService.GetDefaultVenvPath();
         }
     }
 
