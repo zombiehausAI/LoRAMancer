@@ -169,5 +169,40 @@ public sealed class AiToolkitConfigBuilderTests {
         Assert.Equal(0.0005, cloned.LearningRate);
         Assert.Equal(20, cloned.MaxTrainEpochs);
     }
+
+    [Fact]
+    public void BuildAiToolkitYaml_CarriesAllDonorHyperparametersAccurately() {
+        AiToolkitConfigBuilder builder = new();
+        LoraMetadata donor = new() {
+            FileName = "Kelsey_Kernstine_Chroma_V1.safetensors",
+            FilePath = "D:\\AI\\Models\\Kelsey_Kernstine_Chroma_V1.safetensors",
+            BaseModel = "FLUX.1-dev",
+            NetworkDim = 2,
+            NetworkAlpha = 16.0,
+            LearningRate = 0.0005,
+            UnetLearningRate = 0.0005,
+            TextEncoderLearningRate = 0,
+            Optimizer = "bitsandbytes.optim.adamw.AdamW8bit(weight_decay=0.01,eps=1e-08,betas=(0.9, 0.999))",
+            LrScheduler = "cosine_with_restarts",
+            Epochs = 20,
+            TotalSteps = 1200,
+            Precision = "bf16"
+        };
+
+        TrainingConfig config = builder.CloneFromDonor(donor, "miku_chroma_run", "D:\\datasets\\miku", "D:\\output\\miku");
+        string yaml = builder.BuildAiToolkitYaml(config);
+
+        Assert.Contains("linear: 2", yaml);
+        Assert.Contains("linear_alpha: 16", yaml);
+        Assert.Contains("lr: 0.0005", yaml);
+        Assert.Contains("unet_lr: 0.0005", yaml);
+        Assert.Contains("text_encoder_lr: 0", yaml);
+        Assert.Contains("lr_scheduler: cosine_with_restarts", yaml);
+        Assert.Contains("optimizer: adamw", yaml);
+        Assert.Contains("steps: 1200", yaml);
+        Assert.Contains("dtype: bf16", yaml);
+        Assert.Contains("train_text_encoder: false", yaml);
+    }
 }
+
 

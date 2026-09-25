@@ -117,10 +117,12 @@
 
     private void OnArchitectureChanged(string selectedDisplayName) {
         Config.TargetBaseModel = selectedDisplayName;
-        var arch = ConfigBuilder.ResolveArchitecture(selectedDisplayName);
-        Config.NetworkDim = arch.DefaultDim;
-        Config.NetworkAlpha = arch.DefaultAlpha;
-        Config.LearningRate = arch.DefaultLearningRate;
+        if (DonorLora == null) {
+            var arch = ConfigBuilder.ResolveArchitecture(selectedDisplayName);
+            Config.NetworkDim = arch.DefaultDim;
+            Config.NetworkAlpha = arch.DefaultAlpha;
+            Config.LearningRate = arch.DefaultLearningRate;
+        }
     }
 
     private async Task PickDatasetDirectoryAsync() {
