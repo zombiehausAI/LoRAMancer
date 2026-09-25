@@ -44,7 +44,7 @@ public sealed class AiToolkitConfigBuilder {
             Optimizer = sanitizedOptimizer,
             LrScheduler = string.IsNullOrWhiteSpace(donor.LrScheduler) ? "cosine" : donor.LrScheduler,
             AttentionMechanism = "sdpa",
-            Precision = "bf16",
+            Precision = !string.IsNullOrWhiteSpace(donor.Precision) ? donor.Precision : "bf16",
             Quantize = false,
             CacheLatentsToDisk = true,
             TriggerWord = string.Empty,
@@ -53,6 +53,7 @@ public sealed class AiToolkitConfigBuilder {
                 : new List<string> { arch.RecommendedSamplePrompt },
             NegativePrompt = arch.RecommendedNegativePrompt,
             MaxTrainEpochs = donor.Epochs ?? 10,
+            TotalSteps = donor.TotalSteps,
             SaveEveryNEpochs = 1,
             Repeats = 1
         };
@@ -84,6 +85,28 @@ public sealed class AiToolkitConfigBuilder {
                             ["prompts"] = validPrompts
                         };
 
+                        var trainDict = new Dictionary<string, object> {
+                            ["batch_size"] = sanitized.BatchSize,
+                            ["steps"] = totalSteps,
+                            ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
+                            ["train_unet"] = true,
+                            ["train_text_encoder"] = !archInfo.IsFlux && !string.Equals(archInfo.Family, "Chroma", StringComparison.OrdinalIgnoreCase) && (sanitized.TextEncoderLearningRate == null || sanitized.TextEncoderLearningRate > 0),
+                            ["gradient_checkpointing"] = true,
+                            ["noise_scheduler"] = archInfo.NoiseScheduler,
+                            ["optimizer"] = sanitized.Optimizer,
+                            ["lr_scheduler"] = string.IsNullOrWhiteSpace(sanitized.LrScheduler) ? "cosine" : sanitized.LrScheduler,
+                            ["lr"] = sanitized.LearningRate,
+                            ["attention_mechanism"] = sanitized.AttentionMechanism,
+                            ["dtype"] = sanitized.Precision,
+                            ["quantize"] = sanitized.Quantize
+                        };
+                        if (sanitized.UnetLearningRate.HasValue && sanitized.UnetLearningRate.Value > 0) {
+                            trainDict["unet_lr"] = sanitized.UnetLearningRate.Value;
+                        }
+                        if (sanitized.TextEncoderLearningRate.HasValue) {
+                            trainDict["text_encoder_lr"] = sanitized.TextEncoderLearningRate.Value;
+                        }
+
                         var trainerProcess = new Dictionary<string, object> {
                             ["type"] = "sd_trainer",
                             ["training_folder"] = sanitized.OutputDirectory,
@@ -108,20 +131,7 @@ public sealed class AiToolkitConfigBuilder {
                                     ["resolution"] = new List<int> { archInfo.DefaultResolution }
                                 }
                             },
-                            ["train"] = new Dictionary<string, object> {
-                                ["batch_size"] = sanitized.BatchSize,
-                                ["steps"] = totalSteps,
-                                ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
-                                ["train_unet"] = true,
-                                ["train_text_encoder"] = !archInfo.IsFlux && !string.Equals(archInfo.Family, "Chroma", StringComparison.OrdinalIgnoreCase) && (sanitized.TextEncoderLearningRate == null || sanitized.TextEncoderLearningRate > 0),
-                                ["gradient_checkpointing"] = true,
-                                ["noise_scheduler"] = archInfo.NoiseScheduler,
-                                ["optimizer"] = sanitized.Optimizer,
-                                ["lr"] = sanitized.LearningRate,
-                                ["attention_mechanism"] = sanitized.AttentionMechanism,
-                                ["dtype"] = sanitized.Precision,
-                                ["quantize"] = sanitized.Quantize
-                            },
+                            ["train"] = trainDict,
                             ["model"] = new Dictionary<string, object> {
                                 ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
                                 ["is_flux"] = archInfo.IsFlux,
@@ -193,13 +203,14 @@ public sealed class AiToolkitConfigBuilder {
             Optimizer = SanitizeOptimizer(config.Optimizer),
             LrScheduler = config.LrScheduler,
             AttentionMechanism = "sdpa",
-            Precision = "bf16",
+            Precision = !string.IsNullOrWhiteSpace(config.Precision) ? config.Precision : "bf16",
             Quantize = false,
             CacheLatentsToDisk = true,
             TriggerWord = config.TriggerWord,
             SamplePrompts = new List<string>(config.SamplePrompts),
             NegativePrompt = config.NegativePrompt ?? string.Empty,
             MaxTrainEpochs = config.MaxTrainEpochs,
+            TotalSteps = config.TotalSteps,
             Repeats = config.Repeats,
             BatchSize = config.BatchSize,
             GradientAccumulationSteps = config.GradientAccumulationSteps,
@@ -223,6 +234,9 @@ public sealed class AiToolkitConfigBuilder {
 
     public static int CalculateTotalSteps(TrainingConfig config) {
         ArgumentNullException.ThrowIfNull(config);
+        if (config.TotalSteps.HasValue && config.TotalSteps.Value > 0) {
+            return config.TotalSteps.Value;
+        }
         int imageCount = CountDatasetImages(config.DatasetDirectory);
         int safeImages = imageCount > 0 ? imageCount : 50;
         int safeBatch = Math.Max(1, config.BatchSize);

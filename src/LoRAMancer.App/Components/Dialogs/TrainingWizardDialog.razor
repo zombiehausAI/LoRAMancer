@@ -223,6 +223,50 @@
                             <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" HelperText="Per-image epoch multiplier" />
                         </MudTooltip>
                     </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="Optimizer: Gradient optimization algorithm. AdamW is universal; Prodigy auto-tunes learning rates; Lion uses less memory.">
+                            <MudSelect @bind-Value="_optimizer" Label="Optimizer" Variant="Variant.Outlined" Dense="true" HelperText="Optimization algorithm">
+                                <MudSelectItem Value="@("adamw")">AdamW (Standard AMD/ROCm)</MudSelectItem>
+                                <MudSelectItem Value="@("prodigy")">Prodigy (Adaptive LR)</MudSelectItem>
+                                <MudSelectItem Value="@("adafactor")">Adafactor (Low VRAM)</MudSelectItem>
+                                <MudSelectItem Value="@("lion")">Lion (Fast Convergence)</MudSelectItem>
+                            </MudSelect>
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="LR Scheduler: Learning rate decay schedule across training steps. Cosine with restarts periodic warm restarts can help escape local minima.">
+                            <MudSelect @bind-Value="_lrScheduler" Label="LR Scheduler" Variant="Variant.Outlined" Dense="true" HelperText="Decay curve">
+                                <MudSelectItem Value="@("cosine")">Cosine</MudSelectItem>
+                                <MudSelectItem Value="@("cosine_with_restarts")">Cosine with Restarts</MudSelectItem>
+                                <MudSelectItem Value="@("linear")">Linear</MudSelectItem>
+                                <MudSelectItem Value="@("constant")">Constant</MudSelectItem>
+                                <MudSelectItem Value="@("constant_with_warmup")">Constant with Warmup</MudSelectItem>
+                            </MudSelect>
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="Total Steps (Override): Specify exact number of training steps. Leave empty to compute automatically from epochs, repeats, and dataset size.">
+                            <MudNumericField @bind-Value="_totalSteps" Label="Total Steps (Override)" Variant="Variant.Outlined" Min="1" Max="100000" Clearable="true" TextChanged="RecalculateEstimates" HelperText="Optional explicit step limit" />
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="Precision / Dtype: Training precision. bf16 is optimal for modern AMD ROCm RDNA GPUs (RX 7000/6000).">
+                            <MudSelect @bind-Value="_precision" Label="Precision (Dtype)" Variant="Variant.Outlined" Dense="true" HelperText="Compute precision">
+                                <MudSelectItem Value="@("bf16")">bf16 (Recommended for ROCm)</MudSelectItem>
+                                <MudSelectItem Value="@("fp16")">fp16 (Half precision)</MudSelectItem>
+                            </MudSelect>
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="UNet Learning Rate: Specific learning rate for the diffusion backbone (optional). Leave empty to use primary LR.">
+                            <MudNumericField @bind-Value="_unetLearningRate" Label="UNet LR (Optional)" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="Leave empty to use primary LR" />
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudTooltip Text="Text Encoder LR: Specific learning rate for CLIP/T5 text encoders. Set to 0 to freeze text encoder training.">
+                            <MudNumericField @bind-Value="_textEncoderLearningRate" Label="Text Encoder LR" Variant="Variant.Outlined" Format="0.#####e+00" Clearable="true" HelperText="0 freezes text encoder" />
+                        </MudTooltip>
+                    </MudItem>
                     <!-- Sample Generation Prompts & Negative Prompt -->
                     <MudItem xs="12">
                         <MudDivider Class="my-2" />
@@ -288,6 +332,12 @@
     private int _networkDim = 16;
     private double _networkAlpha = 16.0;
     private double _learningRate = 1e-4;
+    private double? _unetLearningRate;
+    private double? _textEncoderLearningRate;
+    private string _optimizer = "adamw";
+    private string _lrScheduler = "cosine_with_restarts";
+    private string _precision = "bf16";
+    private int? _totalSteps;
     private int _epochs = 10;
     private int _repeats = 10;
     private int _batchSize = 1;
@@ -319,8 +369,26 @@
                 if (DonorLora.LearningRate.HasValue) {
                     _learningRate = DonorLora.LearningRate.Value;
                 }
+                if (DonorLora.UnetLearningRate.HasValue) {
+                    _unetLearningRate = DonorLora.UnetLearningRate.Value;
+                }
+                if (DonorLora.TextEncoderLearningRate.HasValue) {
+                    _textEncoderLearningRate = DonorLora.TextEncoderLearningRate.Value;
+                }
+                if (!string.IsNullOrWhiteSpace(DonorLora.Optimizer)) {
+                    _optimizer = AiToolkitConfigBuilder.SanitizeOptimizer(DonorLora.Optimizer);
+                }
+                if (!string.IsNullOrWhiteSpace(DonorLora.LrScheduler)) {
+                    _lrScheduler = DonorLora.LrScheduler;
+                }
+                if (!string.IsNullOrWhiteSpace(DonorLora.Precision)) {
+                    _precision = DonorLora.Precision;
+                }
                 if (DonorLora.Epochs.HasValue) {
                     _epochs = DonorLora.Epochs.Value;
+                }
+                if (DonorLora.TotalSteps.HasValue) {
+                    _totalSteps = DonorLora.TotalSteps.Value;
                 }
                 _runName = string.Empty;
                 _triggerWord = string.Empty;
@@ -403,11 +471,13 @@
     }
 
     private void ApplyPreset(SubjectPreset preset) {
-        _networkDim = preset.DefaultDim;
-        _networkAlpha = preset.DefaultAlpha;
-        _learningRate = preset.DefaultLearningRate;
-        _epochs = preset.DefaultEpochs;
-        _repeats = preset.DefaultRepeats;
+        if (DonorLora == null && HistoryRecord == null) {
+            _networkDim = preset.DefaultDim;
+            _networkAlpha = preset.DefaultAlpha;
+            _learningRate = preset.DefaultLearningRate;
+            _epochs = preset.DefaultEpochs;
+            _repeats = preset.DefaultRepeats;
+        }
 
         _samplePrompt1 = preset.RecommendedPromptTemplate;
         ModelArchitectureInfo arch = ConfigBuilder.ResolveArchitecture(_targetBaseModel);
@@ -418,7 +488,7 @@
     private void OnArchitectureChanged(string selectedDisplayName) {
         _targetBaseModel = selectedDisplayName;
         ModelArchitectureInfo arch = ConfigBuilder.ResolveArchitecture(selectedDisplayName);
-        if (_selectedSubject == TrainingSubjectType.Custom) {
+        if (DonorLora == null && HistoryRecord == null && _selectedSubject != TrainingSubjectType.Custom) {
             _networkDim = arch.DefaultDim;
             _networkAlpha = arch.DefaultAlpha;
             _learningRate = arch.DefaultLearningRate;
@@ -524,6 +594,9 @@
                 _batchSize,
                 _networkDim
             );
+            if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+                _estimates.TotalSteps = _totalSteps.Value;
+            }
             _preFlight = EstimationService.RunPreFlightCheck(_targetBaseModel, _outputDirectory, _batchSize);
             if (updateState) {
                 StateHasChanged();
@@ -545,17 +618,23 @@
         string modelTarget = !string.IsNullOrWhiteSpace(_customBaseModelPath) ? _customBaseModelPath.Trim() : _targetBaseModel;
         return new TrainingConfig {
             RunName = _runName,
+            DonorLoraPath = DonorLora?.FilePath ?? string.Empty,
             TargetBaseModel = modelTarget,
             DatasetDirectory = _datasetDirectory,
             OutputDirectory = _outputDirectory,
             TriggerWord = _triggerWord,
             MaxTrainEpochs = _epochs,
+            TotalSteps = _totalSteps,
             Repeats = _repeats,
             NetworkDim = _networkDim,
             NetworkAlpha = _networkAlpha,
             LearningRate = _learningRate,
+            UnetLearningRate = _unetLearningRate,
+            TextEncoderLearningRate = _textEncoderLearningRate,
             BatchSize = _batchSize,
-            Optimizer = "adamw",
+            Optimizer = _optimizer,
+            LrScheduler = _lrScheduler,
+            Precision = _precision,
             SamplePrompts = prompts,
             NegativePrompt = _negativePrompt
         };
