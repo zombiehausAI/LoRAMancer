@@ -117,6 +117,7 @@ public sealed class AiToolkitConfigBuilder {
                             ["sample_every"] = 200,
                             ["width"] = archInfo.DefaultResolution,
                             ["height"] = archInfo.DefaultResolution,
+                            ["neg"] = "",
                             ["prompts"] = sanitized.SamplePrompts.Count > 0 ? sanitized.SamplePrompts : new List<string> {
                                 string.IsNullOrEmpty(sanitized.TriggerWord) ? archInfo.RecommendedSamplePrompt : $"{sanitized.TriggerWord}, {archInfo.RecommendedSamplePrompt}"
                             }

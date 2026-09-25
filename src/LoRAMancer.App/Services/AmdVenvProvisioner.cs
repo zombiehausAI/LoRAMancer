@@ -526,6 +526,30 @@ public sealed class AmdVenvProvisioner {
                 onProgress?.Invoke("[Patch] Cleaned up legacy sitecustomize.py stub.");
             }
         }
+
+        PatchChromaModel(venvPath, onProgress);
+    }
+
+    public static void PatchChromaModel(string venvPath, Action<string>? onProgress) {
+        string rootDir = Path.GetDirectoryName(venvPath) ?? string.Empty;
+        string chromaPath = Path.Combine(rootDir, "tools", "ai-toolkit", "extensions_built_in", "diffusion_models", "chroma", "chroma_model.py");
+        if (!File.Exists(chromaPath)) {
+            chromaPath = Path.Combine(AppContext.BaseDirectory, "tools", "ai-toolkit", "extensions_built_in", "diffusion_models", "chroma", "chroma_model.py");
+        }
+
+        if (File.Exists(chromaPath)) {
+            string content = File.ReadAllText(chromaPath);
+            if (!content.Contains("# [loramancer] chroma-prompt-guard")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target = "text_inputs = self.tokenizer[1](";
+                if (normalized.Contains(target)) {
+                    string replacement = "# [loramancer] chroma-prompt-guard\n        if prompt is None:\n            prompt = \"\"\n        elif isinstance(prompt, list):\n            prompt = [p if p is not None else \"\" for p in prompt]\n        text_inputs = self.tokenizer[1](";
+                    normalized = normalized.Replace(target, replacement);
+                    File.WriteAllText(chromaPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched chroma_model.py prompt embeds guard.");
+                }
+            }
+        }
     }
 
     public async Task<VenvPackageStatus> GetVenvPackageInfoAsync(string targetDirectory, CancellationToken cancellationToken = default) {

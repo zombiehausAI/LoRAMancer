@@ -306,6 +306,38 @@ On single-GPU training, models never contain distributed tensors, allowing `acce
 > [!NOTE]
 > Global mock modules in `sys.modules` (e.g. via `sitecustomize.py`) must be avoided because standard Python introspection utilities (`inspect.getmodule()`, `inspect.findsource()`) traverse `sys.modules.values()` and expect valid module attributes (`__file__` as string or `None`). Targeted patches in `torch.distributed.tensor` and `accelerate.utils.other` keep the Python runtime pristine while completely bypassing the missing c10d binaries.
 
+---
+
+## 11. Chroma Architecture: Negative Prompt Tokenization Guard
+
+### The Problem
+During step 0 baseline validation image generation (`self.sample(0)`):
+```text
+  File "ai-toolkit\toolkit\models\base_model.py", line 693, in generate_images
+    unconditional_embeds = self.encode_prompt(neg_prompt)
+  File "ai-toolkit\extensions_built_in\diffusion_models\chroma\chroma_model.py", line 353, in get_prompt_embeds
+    text_inputs = self.tokenizer[1](prompt)
+  File "transformers\tokenization_utils_base.py", line 2498, in __call__
+ValueError: text input must be of type `str` (single example), `list[str]` (batch or single pretokenized example)...
+```
+
+### The Cause
+When generating sample images without an explicit negative prompt configured, AI-Toolkit's `BaseSDTrainProcess` passes `neg_prompt = None` into `encode_prompt()`. In `chroma_model.py`, `get_prompt_embeds()` directly passed `prompt` into the Hugging Face tokenizer without verifying whether it was `None`. The tokenizer strictly rejects `None` with a `ValueError`.
+
+### The Solution
+1. **Targeted Engine Patch (`AmdVenvProvisioner.PatchChromaModel`)**:
+   Automatically patches `chroma_model.py` before training begins:
+   ```python
+   # [loramancer] chroma-prompt-guard
+   if prompt is None:
+       prompt = ""
+   elif isinstance(prompt, list):
+       prompt = [p if p is not None else "" for p in prompt]
+   ```
+2. **Config Builder Default**:
+   `AiToolkitConfigBuilder` explicitly injects `neg: ""` into the generated `sample:` YAML configuration block.
+
+
 
 
 
