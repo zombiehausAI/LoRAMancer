@@ -103,7 +103,9 @@
 
     protected override void OnInitialized() {
         if (DonorLora != null) {
-            Config = ConfigBuilder.CloneFromDonor(DonorLora, $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_clone", string.Empty, string.Empty);
+            Config = ConfigBuilder.CloneFromDonor(DonorLora, string.Empty, string.Empty, string.Empty);
+            Config.RunName = string.Empty;
+            Config.TriggerWord = string.Empty;
         } else {
             var defaultArch = ArchitectureRegistry.GetOrDefault("flux_1_dev");
             Config.TargetBaseModel = defaultArch.DisplayName;
@@ -136,6 +138,11 @@
     }
 
     private async Task SaveConfigAsync() {
+        if (string.IsNullOrWhiteSpace(Config.RunName)) {
+            Snackbar.Add("Please enter a unique run name for your new model.", Severity.Warning);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(Config.DatasetDirectory)) {
             Snackbar.Add("Please select a dataset directory.", Severity.Warning);
             return;
@@ -154,6 +161,11 @@
     }
 
     private async Task SaveAndLaunchTrainingAsync() {
+        if (string.IsNullOrWhiteSpace(Config.RunName)) {
+            Snackbar.Add("Please enter a unique run name for your new model.", Severity.Warning);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(Config.DatasetDirectory)) {
             Snackbar.Add("Please select a dataset directory.", Severity.Warning);
             return;

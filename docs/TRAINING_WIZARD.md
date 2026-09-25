@@ -52,3 +52,21 @@ Failed or past training runs can be reopened directly in the visual Training Wiz
 ## 6. Standalone & Custom Base Model Checkpoint Support
 
 While standard models (FLUX.1, SDXL, SD 1.5) download their pipeline from Hugging Face automatically, standalone models (such as **Chroma1-HD**) require a local `.safetensors` file. The Training Wizard includes a dedicated **Custom Base Checkpoint File** browser to select local model files directly from disk.
+
+## 7. Dual Periodic Sample Prompts & Customizable Negative Prompts
+
+During training, AI-Toolkit periodically pauses to generate preview images to verify that your concept or style is learning properly without overbaking:
+- **1 or 2 Sample Prompts**:
+  - **Sample Prompt 1 (Primary)**: Required prompt to evaluate primary subject recall and trigger activation.
+  - **Sample Prompt 2 (Optional)**: Optional second prompt with a different camera angle, backdrop, or lighting. If left blank, only Sample Prompt 1 is submitted to AI-Toolkit.
+  - **`{trigger}` Token Substitution**: Both prompt fields support the `{trigger}` placeholder, which is automatically substituted with your chosen trigger word upon saving or starting training.
+- **Architecture-Calibrated Negative Prompts**:
+  - Default negative values are automatically populated based on the chosen model architecture (e.g. standard negative embeddings for SDXL, Pony, Illustrious, and SD 1.5, or clean/empty defaults for flow-matching models like FLUX.1 and Chroma).
+  - Users have full freedom to modify, replace, or completely clear the negative values.
+  - A **"Reset Defaults"** button is provided to instantly revert both sample prompts and negative values to the model architecture's recommended defaults.
+
+## 8. Donor LoRA Recipe Cloning & Identity Hygiene
+
+When cloning or borrowing training parameters from an existing "donor" LoRA (via **Use Training Settings** in LoRA Manager or **Clone Configuration** in Metadata Inspector):
+- **Mathematical Hyperparameter Extraction**: Network Rank (Dim), Network Alpha, Learning Rates (UNet and Text Encoder), Optimizer algorithm, and Epochs are extracted and converted into AMD ROCm safe standards.
+- **Identity Isolation**: The donor's name/filename and activation trigger words are strictly omitted and left empty. This guarantees that your new project starts with a clean slate, prompting you to provide a unique run name and trigger word tailored specifically to your new dataset without polluting it with donor tags or naming schemes.

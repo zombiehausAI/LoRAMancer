@@ -13,5 +13,7 @@ public sealed class ModelArchitectureInfo {
     public bool IsFlux { get; init; }
     public string DefaultTriggerWord { get; init; } = string.Empty;
     public string RecommendedSamplePrompt { get; init; } = "masterpiece, 1girl, highly detailed";
+    public string RecommendedSamplePrompt2 { get; init; } = string.Empty;
+    public string RecommendedNegativePrompt { get; init; } = string.Empty;
     public IReadOnlyList<string> DetectionKeywords { get; init; } = Array.Empty<string>();
 }

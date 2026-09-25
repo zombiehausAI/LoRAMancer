@@ -223,9 +223,29 @@
                             <MudNumericField @bind-Value="_repeats" Label="Repeats per Image" Variant="Variant.Outlined" Min="1" Max="50" TextChanged="RecalculateEstimates" HelperText="Per-image epoch multiplier" />
                         </MudTooltip>
                     </MudItem>
-                    <MudItem xs="12" sm="6">
-                        <MudTooltip Text="Periodic Test Prompt: Generates test images during training to visually inspect learning progress without interrupting the run. Use {trigger}.">
-                            <MudTextField @bind-Value="_samplePrompt" Label="Periodic Sample Generation Prompt" Variant="Variant.Outlined" Placeholder="e.g. a photo of {trigger}, cinematic lighting..." HelperText="Test prompt with {trigger} token" />
+                    <!-- Sample Generation Prompts & Negative Prompt -->
+                    <MudItem xs="12">
+                        <MudDivider Class="my-2" />
+                        <div class="d-flex align-center justify-space-between mb-1">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Style="font-weight: 600;">Periodic Sample Prompts & Negative Prompt</MudText>
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetSamplePromptsToDefault">
+                                Reset Defaults
+                            </MudButton>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTooltip Text="Sample Prompt 1 (Primary): Evaluates subject recall during training at regular intervals. Use {trigger} to insert your trigger keyword.">
+                            <MudTextField @bind-Value="_samplePrompt1" Label="Sample Prompt 1 (Primary)" Variant="Variant.Outlined" Placeholder="e.g. a photo of {trigger}, cinematic lighting..." HelperText="Primary periodic test prompt with {trigger} token" Lines="2" />
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTooltip Text="Sample Prompt 2 (Optional): A second test prompt with a different angle, style, or lighting. If left blank, only sample prompt 1 will be used.">
+                            <MudTextField @bind-Value="_samplePrompt2" Label="Sample Prompt 2 (Optional)" Variant="Variant.Outlined" Placeholder="e.g. close-up portrait of {trigger}, natural daylight... (optional)" HelperText="Second test prompt (leave blank to only use one)" Lines="2" />
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTooltip Text="Negative Prompt: Undesired visual features to penalize during sample image generation. Default values are pre-filled based on model architecture, and you can freely customize or clear them.">
+                            <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt (Samples)" Variant="Variant.Outlined" Placeholder="e.g. blurry, low quality, distorted, bad anatomy..." HelperText="Negative prompt values for samples (editable or can be cleared)" Lines="2" />
                         </MudTooltip>
                     </MudItem>
                 </MudGrid>
@@ -261,7 +281,9 @@
     private string _triggerWord = string.Empty;
     private string _datasetDirectory = string.Empty;
     private string _outputDirectory = string.Empty;
-    private string _samplePrompt = string.Empty;
+    private string _samplePrompt1 = string.Empty;
+    private string _samplePrompt2 = string.Empty;
+    private string _negativePrompt = string.Empty;
 
     private int _networkDim = 16;
     private double _networkAlpha = 16.0;
@@ -300,9 +322,8 @@
                 if (DonorLora.Epochs.HasValue) {
                     _epochs = DonorLora.Epochs.Value;
                 }
-                _runName = !string.IsNullOrWhiteSpace(DonorLora.FileName)
-                    ? $"{Path.GetFileNameWithoutExtension(DonorLora.FileName)}_fork"
-                    : "cloned_lora_run";
+                _runName = string.Empty;
+                _triggerWord = string.Empty;
             } else if (HistoryRecord != null) {
                 _selectedSubject = TrainingSubjectType.Custom;
                 _isProMode = true;
@@ -330,7 +351,10 @@
                 }
 
                 if (HistoryRecord.SamplePrompts != null && HistoryRecord.SamplePrompts.Count > 0) {
-                    _samplePrompt = HistoryRecord.SamplePrompts[0];
+                    _samplePrompt1 = HistoryRecord.SamplePrompts[0];
+                    if (HistoryRecord.SamplePrompts.Count > 1) {
+                        _samplePrompt2 = HistoryRecord.SamplePrompts[1];
+                    }
                 }
 
                 string yamlSource = HistoryRecord.ConfigYamlContent;
@@ -385,9 +409,10 @@
         _epochs = preset.DefaultEpochs;
         _repeats = preset.DefaultRepeats;
 
-        if (string.IsNullOrWhiteSpace(_samplePrompt) || _samplePrompt.Contains("{trigger}")) {
-            _samplePrompt = preset.RecommendedPromptTemplate;
-        }
+        _samplePrompt1 = preset.RecommendedPromptTemplate;
+        ModelArchitectureInfo arch = ConfigBuilder.ResolveArchitecture(_targetBaseModel);
+        _samplePrompt2 = arch.RecommendedSamplePrompt2;
+        _negativePrompt = arch.RecommendedNegativePrompt;
     }
 
     private void OnArchitectureChanged(string selectedDisplayName) {
@@ -398,7 +423,22 @@
             _networkAlpha = arch.DefaultAlpha;
             _learningRate = arch.DefaultLearningRate;
         }
+        if (string.IsNullOrWhiteSpace(_samplePrompt1) || _samplePrompt1.Contains("{trigger}")) {
+            _samplePrompt1 = arch.RecommendedSamplePrompt;
+        }
+        if (string.IsNullOrWhiteSpace(_samplePrompt2)) {
+            _samplePrompt2 = arch.RecommendedSamplePrompt2;
+        }
+        _negativePrompt = arch.RecommendedNegativePrompt;
         RecalculateEstimates();
+    }
+
+    private void ResetSamplePromptsToDefault() {
+        ModelArchitectureInfo arch = ConfigBuilder.ResolveArchitecture(_targetBaseModel);
+        _samplePrompt1 = arch.RecommendedSamplePrompt;
+        _samplePrompt2 = arch.RecommendedSamplePrompt2;
+        _negativePrompt = arch.RecommendedNegativePrompt;
+        Snackbar.Add("Sample and negative prompts reset to model defaults.", Severity.Info);
     }
 
     private void OnTriggerWordChanged(string newTrigger) {
@@ -471,7 +511,9 @@
         _datasetReport = await DatasetInspector.InspectDatasetAsync(_datasetDirectory);
     }
 
-    private void RecalculateEstimates(bool updateState = true) {
+    private void RecalculateEstimates() => RecalculateEstimates(true);
+
+    private void RecalculateEstimates(bool updateState) {
         try {
             int imgCount = _datasetReport?.TotalImages ?? 25;
             _estimates = EstimationService.CalculateEstimates(
@@ -490,7 +532,16 @@
     }
 
     private TrainingConfig BuildConfig() {
-        string effectivePrompt = _samplePrompt.Replace("{trigger}", string.IsNullOrWhiteSpace(_triggerWord) ? "subject" : _triggerWord);
+        string trig = string.IsNullOrWhiteSpace(_triggerWord) ? "subject" : _triggerWord;
+        var prompts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(_samplePrompt1)) {
+            prompts.Add(_samplePrompt1.Replace("{trigger}", trig));
+        }
+        if (!string.IsNullOrWhiteSpace(_samplePrompt2)) {
+            prompts.Add(_samplePrompt2.Replace("{trigger}", trig));
+        }
+
         string modelTarget = !string.IsNullOrWhiteSpace(_customBaseModelPath) ? _customBaseModelPath.Trim() : _targetBaseModel;
         return new TrainingConfig {
             RunName = _runName,
@@ -505,11 +556,17 @@
             LearningRate = _learningRate,
             BatchSize = _batchSize,
             Optimizer = "adamw",
-            SamplePrompts = new List<string> { effectivePrompt }
+            SamplePrompts = prompts,
+            NegativePrompt = _negativePrompt
         };
     }
 
     private async Task<string?> GenerateYamlAsync() {
+        if (string.IsNullOrWhiteSpace(_runName)) {
+            Snackbar.Add("Please enter a unique run name for your new model.", Severity.Warning);
+            return null;
+        }
+
         if (string.IsNullOrWhiteSpace(_datasetDirectory)) {
             Snackbar.Add("Please select a training dataset directory.", Severity.Warning);
             return null;

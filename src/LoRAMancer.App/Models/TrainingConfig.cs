@@ -19,6 +19,7 @@ public sealed class TrainingConfig {
     public bool CacheLatentsToDisk { get; set; } = true;
     public string TriggerWord { get; set; } = string.Empty;
     public List<string> SamplePrompts { get; set; } = new();
+    public string NegativePrompt { get; set; } = string.Empty;
     public int MaxTrainEpochs { get; set; } = 10;
     public int Repeats { get; set; } = 1;
     public int BatchSize { get; set; } = 1;

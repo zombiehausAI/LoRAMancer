@@ -111,4 +111,63 @@ public sealed class AiToolkitConfigBuilderTests {
         Assert.Equal("ChromaHD-1", chromaArch.DisplayName);
         Assert.Equal("Chroma", chromaArch.Family);
     }
+
+    [Fact]
+    public void BuildAiToolkitYaml_WithSingleSamplePrompt_OutputsSinglePrompt() {
+        AiToolkitConfigBuilder builder = new();
+        TrainingConfig config = new() {
+            RunName = "single_prompt_run",
+            TargetBaseModel = "FLUX.1-dev",
+            SamplePrompts = new List<string> { "photo of ohwx person in a garden" },
+            NegativePrompt = ""
+        };
+
+        string yaml = builder.BuildAiToolkitYaml(config);
+        Assert.Contains("photo of ohwx person in a garden", yaml);
+        Assert.DoesNotContain("close up portrait", yaml);
+    }
+
+    [Fact]
+    public void BuildAiToolkitYaml_WithTwoSamplePromptsAndNegative_OutputsBothAndNeg() {
+        AiToolkitConfigBuilder builder = new();
+        TrainingConfig config = new() {
+            RunName = "dual_prompt_run",
+            TargetBaseModel = "Illustrious-XL",
+            SamplePrompts = new List<string> {
+                "masterpiece, 1girl, solo, portrait",
+                "masterpiece, 1girl, full body, cinematic lighting"
+            },
+            NegativePrompt = "blurry, worst quality, low quality"
+        };
+
+        string yaml = builder.BuildAiToolkitYaml(config);
+        Assert.Contains("masterpiece, 1girl, solo, portrait", yaml);
+        Assert.Contains("masterpiece, 1girl, full body, cinematic lighting", yaml);
+        Assert.Contains("blurry, worst quality, low quality", yaml);
+    }
+
+    [Fact]
+    public void CloneFromDonor_DoesNotImportNameOrActivationTag() {
+        AiToolkitConfigBuilder builder = new();
+        LoraMetadata donor = new() {
+            FileName = "Kelsey_Kernstine_Chroma_V1.safetensors",
+            FilePath = "D:\\AI\\Models\\Kelsey_Kernstine_Chroma_V1.safetensors",
+            BaseModel = "FLUX.1-dev",
+            NetworkDim = 4,
+            NetworkAlpha = 16.0,
+            LearningRate = 0.0005,
+            Epochs = 20,
+            TrainedWords = new List<string> { "kelsey", "woman" }
+        };
+
+        TrainingConfig cloned = builder.CloneFromDonor(donor);
+
+        Assert.Equal(string.Empty, cloned.RunName);
+        Assert.Equal(string.Empty, cloned.TriggerWord);
+        Assert.Equal(4, cloned.NetworkDim);
+        Assert.Equal(16.0, cloned.NetworkAlpha);
+        Assert.Equal(0.0005, cloned.LearningRate);
+        Assert.Equal(20, cloned.MaxTrainEpochs);
+    }
 }
+

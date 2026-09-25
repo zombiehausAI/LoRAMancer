@@ -24,15 +24,14 @@ public sealed class AiToolkitConfigBuilder {
         return _registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = targetBaseModel });
     }
 
-    public TrainingConfig CloneFromDonor(LoraMetadata donor, string runName, string datasetDirectory, string outputDirectory) {
+    public TrainingConfig CloneFromDonor(LoraMetadata donor, string runName = "", string datasetDirectory = "", string outputDirectory = "") {
         ArgumentNullException.ThrowIfNull(donor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(runName);
 
         ModelArchitectureInfo arch = ResolveArchitecture(donor.BaseModel);
         string sanitizedOptimizer = SanitizeOptimizer(donor.Optimizer);
 
         return new TrainingConfig {
-            RunName = runName,
+            RunName = runName ?? string.Empty,
             DonorLoraPath = donor.FilePath,
             DatasetDirectory = datasetDirectory,
             OutputDirectory = outputDirectory,
@@ -49,7 +48,10 @@ public sealed class AiToolkitConfigBuilder {
             Quantize = false,
             CacheLatentsToDisk = true,
             TriggerWord = string.Empty,
-            SamplePrompts = new List<string>(),
+            SamplePrompts = !string.IsNullOrWhiteSpace(arch.RecommendedSamplePrompt2)
+                ? new List<string> { arch.RecommendedSamplePrompt, arch.RecommendedSamplePrompt2 }
+                : new List<string> { arch.RecommendedSamplePrompt },
+            NegativePrompt = arch.RecommendedNegativePrompt,
             MaxTrainEpochs = donor.Epochs ?? 10,
             SaveEveryNEpochs = 1,
             Repeats = 1
@@ -66,69 +68,76 @@ public sealed class AiToolkitConfigBuilder {
         int saveEverySteps = CalculateSaveEverySteps(sanitized);
         int sampleEvery = Math.Max(20, Math.Min(200, totalSteps / 5));
 
-        var root = new Dictionary<string, object> {
-            ["job"] = "extension",
-            ["config"] = new Dictionary<string, object> {
-                ["name"] = sanitized.RunName,
-                ["process"] = new List<object> {
-                    new Dictionary<string, object> {
-                        ["type"] = "sd_trainer",
-                        ["training_folder"] = sanitized.OutputDirectory,
-                        ["device"] = "cuda:0", // PyTorch ROCm maps AMD GPU as cuda:0
-                        ["network"] = new Dictionary<string, object> {
-                            ["type"] = "lora",
-                            ["linear"] = sanitized.NetworkDim,
-                            ["linear_alpha"] = sanitized.NetworkAlpha
-                        },
-                        ["save"] = new Dictionary<string, object> {
-                            ["dtype"] = sanitized.Precision,
-                            ["save_every"] = saveEverySteps,
-                            ["max_step_saves_to_keep"] = 4
-                        },
-                        ["datasets"] = new List<object> {
-                            new Dictionary<string, object> {
-                                ["folder_path"] = sanitized.DatasetDirectory,
-                                ["caption_ext"] = "txt",
-                                ["caption_dropout_rate"] = 0.05,
-                                ["shuffle_tokens"] = false,
-                                ["cache_latents_to_disk"] = sanitized.CacheLatentsToDisk,
-                                ["resolution"] = new List<int> { archInfo.DefaultResolution }
-                            }
-                        },
-                        ["train"] = new Dictionary<string, object> {
-                            ["batch_size"] = sanitized.BatchSize,
-                            ["steps"] = totalSteps,
-                            ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
-                            ["train_unet"] = true,
-                            ["train_text_encoder"] = !archInfo.IsFlux && !string.Equals(archInfo.Family, "Chroma", StringComparison.OrdinalIgnoreCase) && (sanitized.TextEncoderLearningRate == null || sanitized.TextEncoderLearningRate > 0),
-                            ["gradient_checkpointing"] = true,
-                            ["noise_scheduler"] = archInfo.NoiseScheduler,
-                            ["optimizer"] = sanitized.Optimizer,
-                            ["lr"] = sanitized.LearningRate,
-                            ["attention_mechanism"] = sanitized.AttentionMechanism,
-                            ["dtype"] = sanitized.Precision,
-                            ["quantize"] = sanitized.Quantize
-                        },
-                        ["model"] = new Dictionary<string, object> {
-                            ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
-                            ["is_flux"] = archInfo.IsFlux,
-                            ["quantize"] = false,
-                            ["arch"] = archInfo.Family.ToLowerInvariant()
-                        },
-                        ["sample"] = new Dictionary<string, object> {
+                        var validPrompts = sanitized.SamplePrompts
+                            .Where(p => !string.IsNullOrWhiteSpace(p))
+                            .ToList();
+                        if (validPrompts.Count == 0) {
+                            validPrompts.Add(string.IsNullOrEmpty(sanitized.TriggerWord) ? archInfo.RecommendedSamplePrompt : $"{sanitized.TriggerWord}, {archInfo.RecommendedSamplePrompt}");
+                        }
+
+                        var sampleDict = new Dictionary<string, object> {
                             ["sampler"] = "euler",
                             ["sample_every"] = 200,
                             ["width"] = archInfo.DefaultResolution,
                             ["height"] = archInfo.DefaultResolution,
-                            ["neg"] = "",
-                            ["prompts"] = sanitized.SamplePrompts.Count > 0 ? sanitized.SamplePrompts : new List<string> {
-                                string.IsNullOrEmpty(sanitized.TriggerWord) ? archInfo.RecommendedSamplePrompt : $"{sanitized.TriggerWord}, {archInfo.RecommendedSamplePrompt}"
+                            ["neg"] = sanitized.NegativePrompt ?? string.Empty,
+                            ["prompts"] = validPrompts
+                        };
+
+                        var trainerProcess = new Dictionary<string, object> {
+                            ["type"] = "sd_trainer",
+                            ["training_folder"] = sanitized.OutputDirectory,
+                            ["device"] = "cuda:0", // PyTorch ROCm maps AMD GPU as cuda:0
+                            ["network"] = new Dictionary<string, object> {
+                                ["type"] = "lora",
+                                ["linear"] = sanitized.NetworkDim,
+                                ["linear_alpha"] = sanitized.NetworkAlpha
+                            },
+                            ["save"] = new Dictionary<string, object> {
+                                ["dtype"] = sanitized.Precision,
+                                ["save_every"] = saveEverySteps,
+                                ["max_step_saves_to_keep"] = 4
+                            },
+                            ["datasets"] = new List<object> {
+                                new Dictionary<string, object> {
+                                    ["folder_path"] = sanitized.DatasetDirectory,
+                                    ["caption_ext"] = "txt",
+                                    ["caption_dropout_rate"] = 0.05,
+                                    ["shuffle_tokens"] = false,
+                                    ["cache_latents_to_disk"] = sanitized.CacheLatentsToDisk,
+                                    ["resolution"] = new List<int> { archInfo.DefaultResolution }
+                                }
+                            },
+                            ["train"] = new Dictionary<string, object> {
+                                ["batch_size"] = sanitized.BatchSize,
+                                ["steps"] = totalSteps,
+                                ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
+                                ["train_unet"] = true,
+                                ["train_text_encoder"] = !archInfo.IsFlux && !string.Equals(archInfo.Family, "Chroma", StringComparison.OrdinalIgnoreCase) && (sanitized.TextEncoderLearningRate == null || sanitized.TextEncoderLearningRate > 0),
+                                ["gradient_checkpointing"] = true,
+                                ["noise_scheduler"] = archInfo.NoiseScheduler,
+                                ["optimizer"] = sanitized.Optimizer,
+                                ["lr"] = sanitized.LearningRate,
+                                ["attention_mechanism"] = sanitized.AttentionMechanism,
+                                ["dtype"] = sanitized.Precision,
+                                ["quantize"] = sanitized.Quantize
+                            },
+                            ["model"] = new Dictionary<string, object> {
+                                ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
+                                ["is_flux"] = archInfo.IsFlux,
+                                ["quantize"] = false,
+                                ["arch"] = archInfo.Family.ToLowerInvariant()
+                            },
+                            ["sample"] = sampleDict
+                        };
+
+                        var root = new Dictionary<string, object> {
+                            ["job"] = "extension",
+                            ["config"] = new Dictionary<string, object> {
+                                ["name"] = sanitized.RunName,
+                                ["process"] = new List<object> { trainerProcess }
                             }
-                        }
-                    }
-                }
-            }
-        };
+                        };
 
         ISerializer serializer = new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
@@ -189,6 +198,7 @@ public sealed class AiToolkitConfigBuilder {
             CacheLatentsToDisk = true,
             TriggerWord = config.TriggerWord,
             SamplePrompts = new List<string>(config.SamplePrompts),
+            NegativePrompt = config.NegativePrompt ?? string.Empty,
             MaxTrainEpochs = config.MaxTrainEpochs,
             Repeats = config.Repeats,
             BatchSize = config.BatchSize,

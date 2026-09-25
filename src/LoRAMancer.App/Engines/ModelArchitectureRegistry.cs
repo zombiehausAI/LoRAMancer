@@ -65,6 +65,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = true,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "photo of a subject, highly detailed, sharp focus",
+            RecommendedSamplePrompt2 = "close up portrait of a subject, natural lighting, sharp focus",
+            RecommendedNegativePrompt = string.Empty,
             DetectionKeywords = new[] { "flux.1-dev", "flux-dev", "flux.1", "flux" }
         });
 
@@ -81,6 +83,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = true,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "photo of a subject, highly detailed",
+            RecommendedSamplePrompt2 = "portrait of a subject, sharp focus, 8k",
+            RecommendedNegativePrompt = string.Empty,
             DetectionKeywords = new[] { "flux.1-schnell", "flux-schnell", "schnell" }
         });
 
@@ -97,6 +101,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = false,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "score_9, score_8_up, score_7_up, source_anime, 1girl, solo, masterpiece",
+            RecommendedSamplePrompt2 = "score_9, score_8_up, score_7_up, 1girl, portrait, dynamic lighting, masterpiece",
+            RecommendedNegativePrompt = "score_4, score_5, score_6, source_furry, source_pony, rating_safe, deformed, blurry, bad anatomy",
             DetectionKeywords = new[] { "pony", "ponyxl", "ponyv6", "pony_v6", "v6xl" }
         });
 
@@ -113,6 +119,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = false,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "masterpiece, newest, anime, 1girl, high quality",
+            RecommendedSamplePrompt2 = "masterpiece, 1girl, solo, portrait, sharp eyes, detailed background",
+            RecommendedNegativePrompt = "worst quality, low quality, bad anatomy, bad hands, blurry, distorted",
             DetectionKeywords = new[] { "illustrious", "illustrious-xl", "illustrious_xl", "noobai" }
         });
 
@@ -129,6 +137,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = false,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "photograph of a majestic mountain landscape, 8k resolution",
+            RecommendedSamplePrompt2 = "cinematic portrait of a person, dramatic studio lighting, 8k",
+            RecommendedNegativePrompt = "blurry, low quality, distorted, deformed, bad anatomy, worst quality",
             DetectionKeywords = new[] { "sdxl", "stable-diffusion-xl" }
         });
 
@@ -145,6 +155,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = false,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "portrait of a subject, highly detailed, 4k",
+            RecommendedSamplePrompt2 = "full shot of a subject, masterpiece, sharp focus",
+            RecommendedNegativePrompt = "blurry, low quality, distorted, deformed, bad anatomy, worst quality",
             DetectionKeywords = new[] { "v1-5", "sd15", "sd1.5", "stable-diffusion-v1-5" }
         });
 
@@ -161,6 +173,8 @@ public sealed class ModelArchitectureRegistry {
             IsFlux = false,
             DefaultTriggerWord = string.Empty,
             RecommendedSamplePrompt = "photo of a subject, highly detailed, sharp focus",
+            RecommendedSamplePrompt2 = "close-up portrait of a subject, natural lighting, professional photography",
+            RecommendedNegativePrompt = string.Empty,
             DetectionKeywords = new[] { "chroma", "chromahd", "chroma1", "chroma1-hd", "chromahd-1" }
         });
     }
