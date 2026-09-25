@@ -142,7 +142,7 @@
         <MudCard Elevation="0" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); padding: 12px; border-radius: 8px;">
             <MudText Typo="Typo.caption" Color="Color.Secondary">Elapsed / ETA</MudText>
             <MudText Typo="Typo.h6" Style="font-weight: 700; color: var(--accent-purple);">
-                @TrainingRunner.CurrentProgress.Elapsed.ToString(@"hh\:mm\:ss") / @TrainingRunner.CurrentProgress.EstimatedRemaining.ToString(@"hh\:mm\:ss")
+                @FormatTimeSpan(TrainingRunner.CurrentProgress.Elapsed) / @FormatTimeSpan(TrainingRunner.CurrentProgress.EstimatedRemaining)
             </MudText>
         </MudCard>
     </MudItem>
@@ -179,6 +179,7 @@
     private const int MaxLogLines = 2000;
     private bool _autoStarted;
     private bool _disposed;
+    private bool _renderScheduled;
 
     private string[] GetLogsSnapshot() {
         lock (_logsLock) {
@@ -209,43 +210,47 @@
         }
     }
 
+    private void RequestRender() {
+        if (_disposed || _renderScheduled) {
+            return;
+        }
+        _renderScheduled = true;
+        try {
+            _ = InvokeAsync(async () => {
+                try {
+                    await Task.Delay(100);
+                    _renderScheduled = false;
+                    if (!_disposed) {
+                        StateHasChanged();
+                    }
+                } catch {
+                    _renderScheduled = false;
+                }
+            });
+        } catch {
+            _renderScheduled = false;
+        }
+    }
+
     private void HandleLogReceived(string line) {
         if (_disposed) {
             return;
         }
 
-        try {
-            InvokeAsync(() => {
-                if (_disposed) {
-                    return;
-                }
-                lock (_logsLock) {
-                    _logs.Add(line);
-                    if (_logs.Count > MaxLogLines) {
-                        _logs.RemoveRange(0, 100);
-                    }
-                }
-                StateHasChanged();
-            });
-        } catch {
-            // Suppress background UI dispatch errors
+        lock (_logsLock) {
+            _logs.Add(line ?? string.Empty);
+            if (_logs.Count > MaxLogLines) {
+                _logs.RemoveRange(0, 100);
+            }
         }
+        RequestRender();
     }
 
     private void HandleProgressUpdated(TrainingProgress progress) {
         if (_disposed) {
             return;
         }
-
-        try {
-            InvokeAsync(() => {
-                if (!_disposed) {
-                    StateHasChanged();
-                }
-            });
-        } catch {
-            // Suppress background UI dispatch errors
-        }
+        RequestRender();
     }
 
     private async Task BrowseConfigFileAsync() {
@@ -291,23 +296,30 @@
                     _ = Task.Run(async () => {
                         try {
                             await RemoteClient.StartTelemetryStreamAsync(telemetry => {
-                                InvokeAsync(() => {
-                                    if (telemetry.EventType == "log" && !string.IsNullOrWhiteSpace(telemetry.Message)) {
+                                if (_disposed) {
+                                    return;
+                                }
+                                if (telemetry.EventType == "log" && !string.IsNullOrWhiteSpace(telemetry.Message)) {
+                                    lock (_logsLock) {
                                         _logs.Add(telemetry.Message);
-                                    } else if (telemetry.EventType == "step") {
-                                        TrainingRunner.CurrentProgress.CurrentStep = telemetry.Step;
-                                        TrainingRunner.CurrentProgress.TotalSteps = telemetry.TotalSteps;
-                                        TrainingRunner.CurrentProgress.CurrentLoss = telemetry.Loss;
-                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Training;
-                                        StateHasChanged();
-                                    } else if (telemetry.EventType == "failed") {
-                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
-                                        StateHasChanged();
-                                    } else if (telemetry.EventType == "completed") {
-                                        TrainingRunner.CurrentProgress.Status = TrainingStatus.Completed;
-                                        StateHasChanged();
+                                        if (_logs.Count > MaxLogLines) {
+                                            _logs.RemoveRange(0, 100);
+                                        }
                                     }
-                                });
+                                    RequestRender();
+                                } else if (telemetry.EventType == "step") {
+                                    TrainingRunner.CurrentProgress.CurrentStep = telemetry.Step;
+                                    TrainingRunner.CurrentProgress.TotalSteps = telemetry.TotalSteps;
+                                    TrainingRunner.CurrentProgress.CurrentLoss = telemetry.Loss;
+                                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Training;
+                                    RequestRender();
+                                } else if (telemetry.EventType == "failed") {
+                                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
+                                    RequestRender();
+                                } else if (telemetry.EventType == "completed") {
+                                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Completed;
+                                    RequestRender();
+                                }
                             }, CancellationToken.None);
                         } catch {
                             // Telemetry disconnected
@@ -328,7 +340,9 @@
                 }
             }
 
-            _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
+            lock (_logsLock) {
+                _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
+            }
             await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
         } catch (Exception ex) {
             TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
@@ -337,10 +351,12 @@
     }
 
     private async Task RetryTrainingAsync() {
-        _logs.Add(string.Empty);
-        _logs.Add("================================================================================");
-        _logs.Add($"[RETRY] Resubmitting training job for: {_configYamlPath}");
-        _logs.Add("================================================================================");
+        lock (_logsLock) {
+            _logs.Add(string.Empty);
+            _logs.Add("================================================================================");
+            _logs.Add($"[RETRY] Resubmitting training job for: {_configYamlPath}");
+            _logs.Add("================================================================================");
+        }
         TrainingRunner.CurrentProgress.Status = TrainingStatus.Initializing;
         await StartTrainingAsync();
     }
@@ -357,7 +373,9 @@
     }
 
     private void ClearLogs() {
-        _logs.Clear();
+        lock (_logsLock) {
+            _logs.Clear();
+        }
     }
 
     private async Task OpenTrainingWizardAsync() {
@@ -406,7 +424,18 @@
         _ => Color.Default
     };
 
-    private static string GetLogClass(string log) {
+    private static string FormatTimeSpan(TimeSpan ts) {
+        if (ts <= TimeSpan.Zero) {
+            return "00:00:00";
+        }
+        int hours = (int)ts.TotalHours;
+        return $"{hours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}";
+    }
+
+    private static string GetLogClass(string? log) {
+        if (string.IsNullOrEmpty(log)) {
+            return string.Empty;
+        }
         if (log.Contains("error", StringComparison.OrdinalIgnoreCase) || log.Contains("exception", StringComparison.OrdinalIgnoreCase)) {
             return "error";
         }
@@ -423,6 +452,7 @@
     }
 
     public void Dispose() {
+        _disposed = true;
         TrainingRunner.OnLogReceived -= HandleLogReceived;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
     }

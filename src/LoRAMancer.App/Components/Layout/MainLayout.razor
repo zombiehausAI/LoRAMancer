@@ -149,13 +149,32 @@
     </MudDrawer>
 
     <MudMainContent Style="@($"background-color: {ThemeManager.CurrentTheme.Background}; min-height: 100vh; padding-top: calc(var(--mud-appbar-height, 48px) + 1.25rem) !important; padding-left: 1.5rem; padding-right: 1.5rem; padding-bottom: 2rem;")">
-        @Body
+        <ErrorBoundary @ref="_errorBoundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="my-4" ShowCloseIcon="false">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                        <div>
+                            <MudText Typo="Typo.h6">An unexpected UI error occurred</MudText>
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@ex.Message</MudText>
+                        </div>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Inherit" OnClick="RecoverFromError" StartIcon="@Icons.Material.Filled.Refresh">
+                            Recover View
+                        </MudButton>
+                    </div>
+                </MudAlert>
+            </ErrorContent>
+        </ErrorBoundary>
     </MudMainContent>
 </MudLayout>
 
 @code {
     private bool _drawerOpen = true;
     private AmdEnvironmentInfo? _envInfo;
+    private ErrorBoundary? _errorBoundary;
+    private bool _disposed;
 
     protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
@@ -165,6 +184,14 @@
         } catch {
             // Fallback non-critical
         }
+    }
+
+    protected override void OnParametersSet() {
+        _errorBoundary?.Recover();
+    }
+
+    private void RecoverFromError() {
+        _errorBoundary?.Recover();
     }
 
     private string GetAcceleratorLabel() {
@@ -216,14 +243,37 @@
     }
 
     private void HandleProgressUpdated(TrainingProgress progress) {
-        InvokeAsync(StateHasChanged);
+        if (_disposed) {
+            return;
+        }
+        try {
+            _ = InvokeAsync(() => {
+                if (!_disposed) {
+                    StateHasChanged();
+                }
+            });
+        } catch {
+            // Defensive suppression during teardown
+        }
     }
 
     private void HandleThemeChanged() {
-        InvokeAsync(StateHasChanged);
+        if (_disposed) {
+            return;
+        }
+        try {
+            _ = InvokeAsync(() => {
+                if (!_disposed) {
+                    StateHasChanged();
+                }
+            });
+        } catch {
+            // Defensive suppression during teardown
+        }
     }
 
     public void Dispose() {
+        _disposed = true;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
         ThemeManager.OnThemeChanged -= HandleThemeChanged;
     }
