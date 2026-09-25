@@ -8,11 +8,34 @@
 
 [CmdletBinding()]
 param(
+    [Parameter(Position = 0)]
     [string]$InstallPath = "",
     [switch]$SkipPrereqCheck,
     [switch]$CreateDesktopShortcut = $true,
-    [switch]$Unattended
+    [switch]$Unattended,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ExtraArgs
 )
+
+# Normalize POSIX/double-dash flags (--Unattended, --SkipPrereqCheck, --skip-prereq-check, etc.)
+$allPositional = @($InstallPath) + @($ExtraArgs)
+if ($InstallPath -match '^--') {
+    $InstallPath = ""
+}
+
+foreach ($arg in $allPositional) {
+    if ($arg -match '^--(unattended|u)$') {
+        $Unattended = [switch]::Present
+    } elseif ($arg -match '^--(skipprereqcheck|skip-prereq-check|skip-prereq)$') {
+        $SkipPrereqCheck = [switch]::Present
+    } elseif ($arg -match '^--(nodesktopshortcut|no-desktop-shortcut)$') {
+        $CreateDesktopShortcut = [switch]::Present
+    } elseif ($arg -match '^--(installpath|install-path)=(.*)$') {
+        $InstallPath = $Matches[2]
+    } elseif (-not [string]::IsNullOrWhiteSpace($arg) -and -not ($arg -match '^--')) {
+        $InstallPath = $arg
+    }
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -79,38 +102,68 @@ $defaultInstallPath = "$env:LOCALAPPDATA\LoRAMancer"
 $existingInstall = $null
 $isUpdate = $false
 
-# Check for existing installation across Registry, Inno Setup, Desktop Shortcut, or Default Path
+function Find-LoRAMancerExe($folder) {
+    if ([string]::IsNullOrWhiteSpace($folder)) {
+        return $null
+    }
+    $candidates = @(
+        (Join-Path $folder "LoRAMancer.App.exe"),
+        (Join-Path $folder "bin\LoRAMancer.App.exe")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) {
+            return $c
+        }
+    }
+    return $null
+}
+
+# Check for existing installation across Registry, Inno Setup, Shortcuts, or Default Path
 try {
     $regPath = (Get-ItemProperty -Path "HKCU:\Software\LoRAMancer" -Name "InstallPath" -ErrorAction SilentlyContinue).InstallPath
-    if ($regPath -and (Test-Path (Join-Path $regPath "bin\LoRAMancer.App.exe"))) {
-        $existingInstall = $regPath
+    if ($regPath -and (Find-LoRAMancerExe $regPath)) {
+        $existingInstall = $regPath.TrimEnd('\', '/')
     }
 } catch { }
 
 if (-not $existingInstall) {
     try {
-        $innoReg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D37E88F9-6E53-4872-8C84-B09257C95B32}_is1",
-                                          "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D37E88F9-6E53-4872-8C84-B09257C95B32}_is1" -ErrorAction SilentlyContinue |
-                   Where-Object { $_.InstallLocation -and (Test-Path (Join-Path $_.InstallLocation "bin\LoRAMancer.App.exe")) } |
+        $innoReg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                                          "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+                   Where-Object {
+                       ($_.PSChildName -match "D37E88F9-6E53-4872-8C84-B09257C95B32" -or $_.DisplayName -match "LoRAMancer") -and
+                       $_.InstallLocation -and (Find-LoRAMancerExe $_.InstallLocation)
+                   } |
                    Select-Object -First 1
         if ($innoReg) {
-            $existingInstall = $innoReg.InstallLocation
+            $existingInstall = $innoReg.InstallLocation.TrimEnd('\', '/')
         }
     } catch { }
 }
 
 if (-not $existingInstall) {
     try {
-        $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
-        $shortcutFile = Join-Path $desktop "LoRAMancer.lnk"
-        if (Test-Path $shortcutFile) {
-            $wshShell = New-Object -ComObject WScript.Shell
-            $sc = $wshShell.CreateShortcut($shortcutFile)
-            if ($sc.TargetPath -and (Test-Path $sc.TargetPath)) {
-                $scBinDir = Split-Path $sc.TargetPath -Parent
-                $scBase = Split-Path $scBinDir -Parent
-                if (Test-Path (Join-Path $scBase "bin\LoRAMancer.App.exe")) {
-                    $existingInstall = $scBase
+        $shortcutDirs = @(
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop),
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory),
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs),
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
+        )
+        $wshShell = New-Object -ComObject WScript.Shell
+        foreach ($sDir in $shortcutDirs) {
+            if (-not (Test-Path $sDir)) { continue }
+            $matchingLnk = Get-ChildItem -Path $sDir -Filter "*LoRAMancer*.lnk" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($matchingLnk) {
+                $sc = $wshShell.CreateShortcut($matchingLnk.FullName)
+                if ($sc.TargetPath -and (Test-Path $sc.TargetPath)) {
+                    $targetDir = Split-Path $sc.TargetPath -Parent
+                    if (Test-Path (Join-Path $targetDir "LoRAMancer.App.exe")) {
+                        $existingInstall = $targetDir
+                        break
+                    } elseif (Test-Path (Join-Path (Split-Path $targetDir -Parent) "bin\LoRAMancer.App.exe")) {
+                        $existingInstall = Split-Path $targetDir -Parent
+                        break
+                    }
                 }
             }
         }
@@ -118,8 +171,18 @@ if (-not $existingInstall) {
 }
 
 if (-not $existingInstall) {
-    if (Test-Path (Join-Path $defaultInstallPath "bin\LoRAMancer.App.exe")) {
+    if (Find-LoRAMancerExe $defaultInstallPath) {
         $existingInstall = $defaultInstallPath
+    }
+}
+
+if (-not $existingInstall) {
+    $commonCandidates = @("D:\AI\LoRAMancer", "C:\AI\LoRAMancer", "D:\LoRAMancer", "E:\LoRAMancer")
+    foreach ($cand in $commonCandidates) {
+        if (Find-LoRAMancerExe $cand) {
+            $existingInstall = $cand
+            break
+        }
     }
 }
 
@@ -131,10 +194,10 @@ if (-not [string]::IsNullOrWhiteSpace($InstallPath)) {
 } elseif ($existingInstall) {
     # An existing install was found!
     $existingVer = "Unknown"
-    $exeCheck = Join-Path $existingInstall "bin\LoRAMancer.App.exe"
-    if (Test-Path $exeCheck) {
+    $foundExe = Find-LoRAMancerExe $existingInstall
+    if ($foundExe) {
         try {
-            $existingVer = (Get-Item $exeCheck).VersionInfo.ProductVersion
+            $existingVer = (Get-Item $foundExe).VersionInfo.ProductVersion
         } catch { }
     }
 
@@ -225,7 +288,11 @@ try {
     }
 } catch { }
 
-$binPath = Join-Path $InstallPath "bin"
+if (Test-Path (Join-Path $InstallPath "LoRAMancer.App.exe")) {
+    $binPath = $InstallPath
+} else {
+    $binPath = Join-Path $InstallPath "bin"
+}
 $pluginsPath = Join-Path $InstallPath "plugins"
 
 New-Item -ItemType Directory -Path $binPath -Force | Out-Null
@@ -237,7 +304,7 @@ $sourceRoot = Split-Path $PSScriptRoot -Parent
 $appCsproj = Join-Path $sourceRoot "src\LoRAMancer.App\LoRAMancer.App.csproj"
 
 if (Test-Path $appCsproj) {
-    & dotnet publish $appCsproj -c Release -o $binPath --no-self-contained
+    & dotnet publish $appCsproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 -o $binPath --no-self-contained
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to publish LoRAMancer application."
         exit $LASTEXITCODE

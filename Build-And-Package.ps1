@@ -26,12 +26,37 @@
 
 [CmdletBinding()]
 param(
+    [Parameter(Position = 0)]
     [string]$Configuration = "Release",
     [switch]$SkipTests,
     [switch]$Install,
     [string]$InstallPath = "",
-    [string]$OutputDir = "artifacts"
+    [string]$OutputDir = "artifacts",
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ExtraArgs
 )
+
+# Normalize POSIX/double-dash flags (--Install, --SkipTests, --skip-tests, etc.)
+$allPositional = @($Configuration) + @($ExtraArgs)
+if ($Configuration -match '^--') {
+    $Configuration = "Release"
+}
+
+foreach ($arg in $allPositional) {
+    if ($arg -match '^--(install|i)$') {
+        $Install = [switch]::Present
+    } elseif ($arg -match '^--(skiptests|skip-tests|skip)$') {
+        $SkipTests = [switch]::Present
+    } elseif ($arg -match '^--(config|configuration)=(.*)$') {
+        $Configuration = $Matches[2]
+    } elseif ($arg -match '^--(installpath|install-path)=(.*)$') {
+        $InstallPath = $Matches[2]
+    } elseif ($arg -match '^--(outputdir|output-dir)=(.*)$') {
+        $OutputDir = $Matches[2]
+    } elseif ($arg -match '^(Release|Debug)$') {
+        $Configuration = $arg
+    }
+}
 
 $ErrorActionPreference = "Stop"
 
