@@ -191,6 +191,14 @@
         TrainingRunner.OnLogReceived += HandleLogReceived;
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
 
+        var existingLogs = TrainingRunner.GetRecentLogs();
+        if (existingLogs.Count > 0) {
+            lock (_logsLock) {
+                _logs.Clear();
+                _logs.AddRange(existingLogs);
+            }
+        }
+
         if (!Directory.Exists(_venvPath)) {
             string repoVenv = Path.Combine(Directory.GetCurrentDirectory(), ".venv");
             if (Directory.Exists(repoVenv)) {
@@ -343,7 +351,20 @@
             lock (_logsLock) {
                 _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
             }
-            await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
+
+            _ = Task.Run(async () => {
+                try {
+                    await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
+                } catch (Exception ex) {
+                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
+                    if (!_disposed) {
+                        await InvokeAsync(() => {
+                            Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
+                            RequestRender();
+                        });
+                    }
+                }
+            });
         } catch (Exception ex) {
             TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
             Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
@@ -373,6 +394,7 @@
     }
 
     private void ClearLogs() {
+        TrainingRunner.ClearLogs();
         lock (_logsLock) {
             _logs.Clear();
         }

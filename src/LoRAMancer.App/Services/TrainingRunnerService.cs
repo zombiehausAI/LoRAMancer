@@ -12,11 +12,16 @@ public sealed class TrainingRunnerService {
     private readonly AiToolkitSetupService? _toolkitSetupService;
     private readonly LoraHistoryService? _historyService;
 
+    private readonly List<string> _recentLogs = new();
+    private readonly object _logsLock = new();
+    private const int MaxLogHistory = 2000;
+    private DateTime _lastProcessExitTime = DateTime.MinValue;
+
     public TrainingProgress CurrentProgress { get; } = new();
     public event Action<TrainingProgress>? OnProgressUpdated;
     public event Action<string>? OnLogReceived;
 
-    public bool IsRunning => CurrentProgress.Status == TrainingStatus.Training || CurrentProgress.Status == TrainingStatus.Initializing;
+    public bool IsRunning => _currentProcess != null && !_currentProcess.HasExited && (CurrentProgress.Status == TrainingStatus.Training || CurrentProgress.Status == TrainingStatus.Initializing);
 
     public TrainingRunnerService(
         SettingsService? settingsService = null,
@@ -26,6 +31,22 @@ public sealed class TrainingRunnerService {
         _settingsService = settingsService;
         _toolkitSetupService = toolkitSetupService;
         _historyService = historyService;
+
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => {
+            KillCurrentProcess();
+        };
+    }
+
+    public IReadOnlyList<string> GetRecentLogs() {
+        lock (_logsLock) {
+            return _recentLogs.ToList();
+        }
+    }
+
+    public void ClearLogs() {
+        lock (_logsLock) {
+            _recentLogs.Clear();
+        }
     }
 
     public async Task StartTrainingAsync(
@@ -37,8 +58,16 @@ public sealed class TrainingRunnerService {
         ArgumentException.ThrowIfNullOrWhiteSpace(venvPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(configYamlPath);
 
-        if (IsRunning) {
-            throw new InvalidOperationException("A training job is already running.");
+        if (_currentProcess != null && !_currentProcess.HasExited) {
+            KillCurrentProcess();
+            await Task.Delay(1500, CancellationToken.None);
+        }
+
+        var elapsedSinceLastRun = DateTime.UtcNow - _lastProcessExitTime;
+        if (elapsedSinceLastRun < TimeSpan.FromSeconds(2)) {
+            var waitTime = TimeSpan.FromSeconds(2) - elapsedSinceLastRun;
+            OnLogReceived?.Invoke($"[HOST] Waiting {waitTime.TotalSeconds:F1}s for GPU VRAM and driver resources to clear...");
+            await Task.Delay(waitTime, CancellationToken.None);
         }
 
         string effectiveScriptPath = toolkitScriptPath ?? string.Empty;
@@ -61,6 +90,7 @@ public sealed class TrainingRunnerService {
         }
 
         DateTime startedAt = DateTime.UtcNow;
+        _trainingCts?.Dispose();
         _trainingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CurrentProgress.Status = TrainingStatus.Initializing;
         CurrentProgress.CurrentStep = 0;
@@ -146,7 +176,9 @@ public sealed class TrainingRunnerService {
 
             await _currentProcess.WaitForExitAsync(_trainingCts.Token);
 
-            if (_currentProcess.ExitCode == 0) {
+            if (_trainingCts.Token.IsCancellationRequested) {
+                CurrentProgress.Status = TrainingStatus.Cancelled;
+            } else if (_currentProcess.ExitCode == 0) {
                 CurrentProgress.Status = TrainingStatus.Completed;
             } else {
                 CurrentProgress.Status = TrainingStatus.Failed;
@@ -158,6 +190,7 @@ public sealed class TrainingRunnerService {
             CurrentProgress.Status = TrainingStatus.Failed;
             OnLogReceived?.Invoke($"[ERROR] Training runner failed: {ex.Message}");
         } finally {
+            _lastProcessExitTime = DateTime.UtcNow;
             _stopwatch.Stop();
             CurrentProgress.Elapsed = _stopwatch.Elapsed;
             OnProgressUpdated?.Invoke(CurrentProgress);
@@ -184,23 +217,40 @@ public sealed class TrainingRunnerService {
     }
 
     public void CancelTraining() {
-        if (_trainingCts != null && !_trainingCts.IsCancellationRequested) {
-            _trainingCts.Cancel();
-            KillCurrentProcess();
-        }
+        try {
+            if (_trainingCts != null && !_trainingCts.IsCancellationRequested) {
+                _trainingCts.Cancel();
+            }
+        } catch { }
+
+        KillCurrentProcess();
+        CurrentProgress.Status = TrainingStatus.Cancelled;
+        OnProgressUpdated?.Invoke(CurrentProgress);
     }
 
     private void KillCurrentProcess() {
         try {
             if (_currentProcess != null && !_currentProcess.HasExited) {
                 _currentProcess.Kill(entireProcessTree: true);
+                _currentProcess.WaitForExit(3000);
             }
         } catch {
             // Suppress process kill errors during cleanup
         }
     }
 
-    private void ParseLogLine(string line) {
+    private void ParseLogLine(string? line) {
+        if (string.IsNullOrEmpty(line)) {
+            return;
+        }
+
+        lock (_logsLock) {
+            _recentLogs.Add(line);
+            if (_recentLogs.Count > MaxLogHistory) {
+                _recentLogs.RemoveRange(0, 100);
+            }
+        }
+
         OnLogReceived?.Invoke(line);
 
         // Parse patterns like: "Step: 120/1000, Loss: 0.0842, LR: 1.00e-04" or "[120/1000] loss=0.0842"

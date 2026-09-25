@@ -84,3 +84,12 @@ To prevent UI crowding and provide an intuitive workflow, Pro Mode organizes adv
   - **Keep Initial Tokens (`keep_tokens`)**: Sets how many initial tags (such as `{trigger}` or `score_9, score_8_up`) remain anchored at the front of the prompt while the remaining tags are shuffled.
   - **CLIP Skip (`clip_skip`)**: Configures the penultimate text encoder layer skip. Automatically defaults to `2` for Pony Diffusion V6 XL and Illustrious architectures.
 - **Sample Prompts**: Dual test prompts with `{trigger}` substitution and architecture-calibrated negative prompts.
+
+## 10. Background Execution & GPU Resource Lifecycle Management
+
+Training execution is decoupled from page navigation and UI lifecycle:
+- **Decoupled Background Execution**: When training starts, the Python process runs on an asynchronous worker pool managed by `TrainingRunnerService`. Navigating away from `/training` (e.g. browsing your LoRA library, inspecting metadata, or checking history) does not interrupt or abort the active training run.
+- **Log Buffering & Seamless Reconnection**: Log streams and step progression are buffered in-memory. Returning to the Training Console immediately repopulates the console window with prior terminal output.
+- **Synchronous Process Tree Termination**: Clicking **Stop Training** halts Python and its worker tree synchronously (`WaitForExit`), preventing orphaned PyTorch processes.
+- **GPU Driver & VRAM Cooldown**: Windows ROCm / HIP driver context teardown requires 1–2 seconds to release pinned allocations. LoRAMancer enforces an automatic cooldown guard before initializing a new training run, preventing `HIP error` or `CUDA OutOfMemory` failures when stopping and quickly restarting.
+
