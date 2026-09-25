@@ -521,6 +521,8 @@
     private int _currentPage = 1;
     private const int _pageSize = 24;
 
+    private bool _disposed;
+    private readonly object _filterLock = new();
     private CancellationTokenSource? _searchCts;
     private static readonly ConcurrentDictionary<string, string> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> _loadingThumbnails = new(StringComparer.OrdinalIgnoreCase);
@@ -532,28 +534,72 @@
     private List<LoraMetadata> _filteredLoras = new();
     private string? _cachedSubfolderPath;
 
-    private int TotalPages => Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
-    private IEnumerable<LoraMetadata> PagedLoras => _filteredLoras.Skip((_currentPage - 1) * _pageSize).Take(_pageSize);
+    private int TotalPages {
+        get {
+            lock (_filterLock) {
+                return Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
+            }
+        }
+    }
+
+    private IReadOnlyList<LoraMetadata> PagedLoras {
+        get {
+            lock (_filterLock) {
+                return _filteredLoras.Skip((_currentPage - 1) * _pageSize).Take(_pageSize).ToList();
+            }
+        }
+    }
 
     private string SearchQuery {
         get => _searchQuery;
         set {
             if (_searchQuery != value) {
                 _searchQuery = value;
-                _searchCts?.Cancel();
-                _searchCts?.Dispose();
-                _searchCts = new CancellationTokenSource();
-                var token = _searchCts.Token;
-                Task.Delay(180, token).ContinueWith(t => {
-                    if (!t.IsCanceled) {
-                        InvokeAsync(() => {
-                            _currentPage = 1;
-                            UpdateFilteredList();
-                            StateHasChanged();
-                        });
-                    }
-                }, TaskScheduler.Default);
+                TriggerDebouncedSearch();
             }
+        }
+    }
+
+    private void TriggerDebouncedSearch() {
+        try {
+            _searchCts?.Cancel();
+        } catch { }
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        _ = Task.Run(async () => {
+            try {
+                await Task.Delay(180, cts.Token);
+                if (!cts.IsCancellationRequested && !_disposed) {
+                    await SafeInvokeAsync(() => {
+                        _currentPage = 1;
+                        UpdateFilteredList();
+                        StateHasChanged();
+                    });
+                }
+            } catch (OperationCanceledException) {
+                // Expected when user continues typing
+            } catch {
+                // Suppress background search dispatch errors
+            }
+        });
+    }
+
+    private Task SafeInvokeAsync(Action action) {
+        if (_disposed) {
+            return Task.CompletedTask;
+        }
+        try {
+            return InvokeAsync(() => {
+                if (!_disposed) {
+                    try {
+                        action();
+                    } catch {
+                        // Suppress UI action exceptions
+                    }
+                }
+            });
+        } catch {
+            return Task.CompletedTask;
         }
     }
 
@@ -576,7 +622,7 @@
             string query = _searchQuery?.Trim() ?? string.Empty;
             string arch = _selectedArchitecture ?? "all";
 
-            _filteredLoras = items.Where(l => {
+            var filtered = items.Where(l => {
                 if (l == null) {
                     return false;
                 }
@@ -608,7 +654,13 @@
                     bool matchName = l.FileName != null && l.FileName.Contains(query, StringComparison.OrdinalIgnoreCase);
                     bool matchModel = l.CivitaiInfo?.ModelName != null && l.CivitaiInfo.ModelName.Contains(query, StringComparison.OrdinalIgnoreCase);
                     bool matchPath = l.FilePath != null && l.FilePath.Contains(query, StringComparison.OrdinalIgnoreCase);
-                    bool matchTriggers = l.TrainedWords != null && l.TrainedWords.Any(w => w != null && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+                    bool matchTriggers = false;
+                    try {
+                        var triggers = l.TrainedWords?.ToArray();
+                        if (triggers != null && triggers.Length > 0) {
+                            matchTriggers = triggers.Any(w => w != null && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+                        }
+                    } catch { }
 
                     if (!matchName && !matchModel && !matchPath && !matchTriggers) {
                         return false;
@@ -618,11 +670,17 @@
                 return true;
             }).ToList();
 
+            lock (_filterLock) {
+                _filteredLoras = filtered;
+            }
+
             if (_currentPage > TotalPages) {
                 _currentPage = Math.Max(1, TotalPages);
             }
         } catch {
-            _filteredLoras = new List<LoraMetadata>();
+            lock (_filterLock) {
+                _filteredLoras = new List<LoraMetadata>();
+            }
             _currentSubfolders = new List<SubfolderItem>();
         }
     }
@@ -649,7 +707,7 @@
                 return list.OrderBy(s => s.Name).ToList();
             });
 
-            await InvokeAsync(() => {
+            await SafeInvokeAsync(() => {
                 _currentSubfolders = subList;
                 StateHasChanged();
             });
@@ -840,7 +898,7 @@
                 try {
                     var info = await LibraryService.EnrichFromCivitaiAsync(meta);
                     if (info != null) {
-                        await InvokeAsync(() => {
+                        await SafeInvokeAsync(() => {
                             UpdateFilteredList();
                             StateHasChanged();
                         });
@@ -871,59 +929,64 @@
         UpdateFilteredList();
     }
 
-    private async void HandleLibrariesChanged() {
+    private void HandleLibrariesChanged() {
         _cachedSubfolderPath = null;
-        await InvokeAsync(() => {
+        _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
         });
     }
 
-    private async void HandleLibraryUpdated() {
+    private void HandleLibraryUpdated() {
         _cachedSubfolderPath = null;
-        await InvokeAsync(() => {
+        _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
         });
     }
 
-    private async void HandleScanProgress(string file, int current, int total) {
-        await InvokeAsync(StateHasChanged);
+    private void HandleScanProgress(string file, int current, int total) {
+        _ = SafeInvokeAsync(StateHasChanged);
     }
 
-    private async void HandleScanStateChanged(bool isScanning) {
+    private void HandleScanStateChanged(bool isScanning) {
         if (!isScanning) {
             _cachedSubfolderPath = null;
         }
-        await InvokeAsync(() => {
+        _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
         });
     }
 
-    private async void HandleEnrichProgress(string file, int current, int total) {
-        await InvokeAsync(StateHasChanged);
+    private void HandleEnrichProgress(string file, int current, int total) {
+        _ = SafeInvokeAsync(StateHasChanged);
     }
 
-    private async void HandleEnrichStateChanged(bool isEnriching) {
-        await InvokeAsync(() => {
+    private void HandleEnrichStateChanged(bool isEnriching) {
+        _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
         });
     }
 
-    private async void HandleLoraEnriched(LoraMetadata meta) {
-        await InvokeAsync(() => {
+    private void HandleLoraEnriched(LoraMetadata meta) {
+        _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
         });
     }
 
-    private async void HandleUpdaterStateChanged() {
-        await InvokeAsync(StateHasChanged);
+    private void HandleUpdaterStateChanged() {
+        _ = SafeInvokeAsync(StateHasChanged);
     }
 
     public void Dispose() {
+        _disposed = true;
+        try {
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+        } catch { }
         LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
         LibraryService.OnLibrariesChanged -= HandleLibrariesChanged;
         LibraryService.OnScanProgress -= HandleScanProgress;
@@ -932,8 +995,6 @@
         LibraryService.OnEnrichProgress -= HandleEnrichProgress;
         LibraryService.OnLoraEnriched -= HandleLoraEnriched;
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
-        _searchCts?.Cancel();
-        _searchCts?.Dispose();
     }
 
     private async Task SwitchActiveLibraryAsync(string libraryId) {
@@ -981,7 +1042,7 @@
         _ = Task.Run(async () => {
             try {
                 var info = await LibraryService.EnrichFromCivitaiAsync(lora);
-                await InvokeAsync(() => {
+                await SafeInvokeAsync(() => {
                     if (info != null) {
                         Snackbar.Add($"Identified as '{info.ModelName}' from Civitai!", Severity.Success);
                     } else {
@@ -1062,7 +1123,7 @@
     }
 
     private string GetImageSrc(string? path) {
-        if (string.IsNullOrWhiteSpace(path)) {
+        if (string.IsNullOrWhiteSpace(path) || _disposed) {
             return string.Empty;
         }
         if (_thumbnailCache.TryGetValue(path, out var cached)) {
@@ -1071,7 +1132,7 @@
         if (_loadingThumbnails.TryAdd(path, 0)) {
             _ = Task.Run(async () => {
                 try {
-                    if (File.Exists(path)) {
+                    if (!_disposed && File.Exists(path)) {
                         byte[] bytes = await File.ReadAllBytesAsync(path);
                         string ext = Path.GetExtension(path).ToLowerInvariant();
                         string mime = ext switch {
@@ -1081,7 +1142,7 @@
                         };
                         string dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
                         _thumbnailCache[path] = dataUri;
-                        await InvokeAsync(StateHasChanged);
+                        await SafeInvokeAsync(StateHasChanged);
                     }
                 } catch {
                     // Graceful fallback to prevent unhandled exception if file is locked or unreadable
