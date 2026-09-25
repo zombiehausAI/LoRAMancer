@@ -153,10 +153,13 @@
 
 <!-- Real-time Terminal Window -->
 <div class="terminal-window p-3" style="height: 480px; overflow-y: auto;" id="terminal-log-box">
-    @if (_logs.Count == 0) {
+    @{
+        string[] logs = GetLogsSnapshot();
+    }
+    @if (logs.Length == 0) {
         <div class="text-secondary" style="font-style: italic;">Awaiting training job initiation... Output and telemetry will stream here in real-time.</div>
     } else {
-        @foreach (string log in _logs) {
+        @foreach (string log in logs) {
             <div class="terminal-line @GetLogClass(log)">@log</div>
         }
     }
@@ -172,8 +175,16 @@
     private string _configYamlPath = string.Empty;
     private string _venvPath = Path.Combine(AppContext.BaseDirectory, ".venv");
     private readonly List<string> _logs = new();
+    private readonly object _logsLock = new();
     private const int MaxLogLines = 2000;
     private bool _autoStarted;
+    private bool _disposed;
+
+    private string[] GetLogsSnapshot() {
+        lock (_logsLock) {
+            return _logs.ToArray();
+        }
+    }
 
     protected override void OnInitialized() {
         TrainingRunner.OnLogReceived += HandleLogReceived;
@@ -199,17 +210,42 @@
     }
 
     private void HandleLogReceived(string line) {
-        InvokeAsync(() => {
-            _logs.Add(line);
-            if (_logs.Count > MaxLogLines) {
-                _logs.RemoveRange(0, 100);
-            }
-            StateHasChanged();
-        });
+        if (_disposed) {
+            return;
+        }
+
+        try {
+            InvokeAsync(() => {
+                if (_disposed) {
+                    return;
+                }
+                lock (_logsLock) {
+                    _logs.Add(line);
+                    if (_logs.Count > MaxLogLines) {
+                        _logs.RemoveRange(0, 100);
+                    }
+                }
+                StateHasChanged();
+            });
+        } catch {
+            // Suppress background UI dispatch errors
+        }
     }
 
     private void HandleProgressUpdated(TrainingProgress progress) {
-        InvokeAsync(StateHasChanged);
+        if (_disposed) {
+            return;
+        }
+
+        try {
+            InvokeAsync(() => {
+                if (!_disposed) {
+                    StateHasChanged();
+                }
+            });
+        } catch {
+            // Suppress background UI dispatch errors
+        }
     }
 
     private async Task BrowseConfigFileAsync() {

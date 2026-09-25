@@ -20,6 +20,7 @@ public sealed class TrainingConfig {
     public string TriggerWord { get; set; } = string.Empty;
     public List<string> SamplePrompts { get; set; } = new();
     public int MaxTrainEpochs { get; set; } = 10;
+    public int Repeats { get; set; } = 1;
     public int BatchSize { get; set; } = 1;
     public int GradientAccumulationSteps { get; set; } = 1;
     public int SaveEveryNEpochs { get; set; } = 1;

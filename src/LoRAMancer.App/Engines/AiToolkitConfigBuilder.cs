@@ -51,9 +51,8 @@ public sealed class AiToolkitConfigBuilder {
             TriggerWord = string.Empty,
             SamplePrompts = new List<string>(),
             MaxTrainEpochs = donor.Epochs ?? 10,
-            BatchSize = 1,
-            GradientAccumulationSteps = 1,
-            SaveEveryNEpochs = 1
+            SaveEveryNEpochs = 1,
+            Repeats = 1
         };
     }
 
@@ -62,6 +61,10 @@ public sealed class AiToolkitConfigBuilder {
 
         TrainingConfig sanitized = SanitizeForAmd(config);
         ModelArchitectureInfo archInfo = ResolveArchitecture(sanitized.TargetBaseModel);
+
+        int totalSteps = CalculateTotalSteps(sanitized);
+        int saveEverySteps = CalculateSaveEverySteps(sanitized);
+        int sampleEvery = Math.Max(20, Math.Min(200, totalSteps / 5));
 
         var root = new Dictionary<string, object> {
             ["job"] = "extension",
@@ -79,7 +82,7 @@ public sealed class AiToolkitConfigBuilder {
                         },
                         ["save"] = new Dictionary<string, object> {
                             ["dtype"] = sanitized.Precision,
-                            ["save_every"] = sanitized.SaveEveryNEpochs > 10 ? sanitized.SaveEveryNEpochs : 200,
+                            ["save_every"] = saveEverySteps,
                             ["max_step_saves_to_keep"] = 4
                         },
                         ["datasets"] = new List<object> {
@@ -94,7 +97,7 @@ public sealed class AiToolkitConfigBuilder {
                         },
                         ["train"] = new Dictionary<string, object> {
                             ["batch_size"] = sanitized.BatchSize,
-                            ["steps"] = sanitized.MaxTrainEpochs * 100,
+                            ["steps"] = totalSteps,
                             ["gradient_accumulation_steps"] = sanitized.GradientAccumulationSteps,
                             ["train_unet"] = true,
                             ["train_text_encoder"] = !archInfo.IsFlux,
@@ -187,10 +190,51 @@ public sealed class AiToolkitConfigBuilder {
             TriggerWord = config.TriggerWord,
             SamplePrompts = new List<string>(config.SamplePrompts),
             MaxTrainEpochs = config.MaxTrainEpochs,
+            Repeats = config.Repeats,
             BatchSize = config.BatchSize,
             GradientAccumulationSteps = config.GradientAccumulationSteps,
             SaveEveryNEpochs = config.SaveEveryNEpochs
         };
+    }
+
+    public static int CountDatasetImages(string? directoryPath) {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath)) {
+            return 0;
+        }
+
+        try {
+            string[] imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+            return Directory.EnumerateFiles(directoryPath, "*.*", SearchOption.AllDirectories)
+                .Count(file => imageExtensions.Contains(Path.GetExtension(file).ToLowerInvariant()));
+        } catch {
+            return 0;
+        }
+    }
+
+    public static int CalculateTotalSteps(TrainingConfig config) {
+        ArgumentNullException.ThrowIfNull(config);
+        int imageCount = CountDatasetImages(config.DatasetDirectory);
+        int safeImages = imageCount > 0 ? imageCount : 50;
+        int safeBatch = Math.Max(1, config.BatchSize);
+        int safeGradAccum = Math.Max(1, config.GradientAccumulationSteps);
+        int safeEpochs = Math.Max(1, config.MaxTrainEpochs);
+        int safeRepeats = Math.Max(1, config.Repeats);
+
+        int stepsPerEpoch = Math.Max(1, (int)Math.Ceiling((double)(safeImages * safeRepeats) / (safeBatch * safeGradAccum)));
+        return Math.Max(1, safeEpochs * stepsPerEpoch);
+    }
+
+    public static int CalculateSaveEverySteps(TrainingConfig config) {
+        ArgumentNullException.ThrowIfNull(config);
+        int imageCount = CountDatasetImages(config.DatasetDirectory);
+        int safeImages = imageCount > 0 ? imageCount : 50;
+        int safeBatch = Math.Max(1, config.BatchSize);
+        int safeGradAccum = Math.Max(1, config.GradientAccumulationSteps);
+        int safeSaveEpochs = Math.Max(1, config.SaveEveryNEpochs);
+        int safeRepeats = Math.Max(1, config.Repeats);
+
+        int stepsPerEpoch = Math.Max(1, (int)Math.Ceiling((double)(safeImages * safeRepeats) / (safeBatch * safeGradAccum)));
+        return Math.Max(1, safeSaveEpochs * stepsPerEpoch);
     }
 
     public static string ResolveModelPath(string? targetBaseModel, ModelArchitectureInfo archInfo) {

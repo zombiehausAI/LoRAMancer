@@ -14,14 +14,20 @@ Rather than requiring users to manually tune arcane hyperparameters, the Trainin
 
 ## 2. Live Resource & Duration Estimators
 
-Before launching training, LoRAMancer calculates live predictions:
+Before launching training, LoRAMancer calculates live predictions and generates exact step and checkpoint math:
 
-$$\text{Total Steps} = \frac{\text{Images} \times \text{Repeats} \times \text{Epochs}}{\text{Batch Size}}$$
+$$\text{Steps per Epoch} = \left\lceil \frac{\text{Images} \times \text{Repeats}}{\text{Batch Size} \times \text{Gradient Accumulation}} \right\rceil$$
 
+$$\text{Total Training Steps} = \text{Epochs} \times \text{Steps per Epoch}$$
+
+$$\text{Save Every (Steps)} = \text{SaveEveryNEpochs} \times \text{Steps per Epoch}$$
+
+- **Dynamic Epoch-to-Step Translation**: Users specify the intuitive number of **Epochs** (cycles through the dataset) and **Repeats per Image**. LoRAMancer scans the dataset folder, detects the image count, and computes the exact total steps and checkpoint save intervals for AI-Toolkit.
 - **Total Steps**: Shows exact iteration budget and checkpoint save intervals.
-- **Estimated VRAM**: Evaluates GPU memory requirements for the target architecture (FLUX.1: ~14 GB, SDXL/Pony/Illustrious: ~9.2 GB, SD 1.5: ~5.2 GB) against the user's detected AMD Radeon GPU.
+- **Estimated VRAM**: Evaluates GPU memory requirements for the target architecture (Chroma1-HD: ~16 GB, FLUX.1: ~14 GB, SDXL/Pony/Illustrious: ~9.2 GB, SD 1.5: ~5.2 GB) against the user's detected AMD Radeon GPU.
 - **Estimated Output File Size**: Calculates final `.safetensors` file size from network rank ($dim$).
-- **Estimated Training Time**: Projects training duration based on AMD RDNA2 / RDNA3 step velocity benchmarks.
+- **Estimated Training Time**: Projects training duration based on AMD RDNA2 / RDNA3 / RDNA4 step velocity benchmarks.
+
 
 ## 3. Dataset Health Inspector & Auto-Tagging
 
