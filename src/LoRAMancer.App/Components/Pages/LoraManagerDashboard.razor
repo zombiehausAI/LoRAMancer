@@ -77,7 +77,7 @@
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
             <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="SearchQuery" Placeholder="Search by file name, model title, trigger word, or path..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+                <MudTextField @bind-Value="SearchQuery" Placeholder="Search by file name, model title, trigger word, or path (press Enter or pause)..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="ExecuteSearchNow" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" DebounceInterval="1500" OnKeyDown="@HandleSearchKeyDown" />
             </MudItem>
             <MudItem xs="6" md="3">
                 <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Library" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
@@ -243,8 +243,8 @@
     <!-- Visual Card Grid -->
     <MudGrid>
         <!-- Subfolder Cards -->
-        @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && _currentSubfolders.Count > 0) {
-            @foreach (var sub in _currentSubfolders) {
+        @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfoldersSnapshot.Count > 0) {
+            @foreach (var sub in CurrentSubfoldersSnapshot) {
                 <MudItem xs="12" sm="6" md="4" lg="3">
                     <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
                         <div class="d-flex align-center justify-space-between mb-2">
@@ -335,9 +335,9 @@
                     </div>
 
                     <MudCardContent Class="py-3 px-3" Style="flex: 1;">
-                        <MudTooltip Text="@lora.FileName">
+                        <MudTooltip Text="@(lora.FileName ?? string.Empty)">
                             <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary); line-height: 1.2; word-break: break-all;">
-                                @(lora.CivitaiInfo != null ? lora.CivitaiInfo.ModelName : lora.FileName)
+                                @(lora.CivitaiInfo != null && !string.IsNullOrWhiteSpace(lora.CivitaiInfo.ModelName) ? lora.CivitaiInfo.ModelName : (lora.FileName ?? "Unknown"))
                             </MudText>
                         </MudTooltip>
                         @if (lora.CivitaiInfo != null && !string.IsNullOrWhiteSpace(lora.CivitaiInfo.VersionName)) {
@@ -425,10 +425,10 @@
     }
 } else {
     <!-- Table View -->
-    @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && _currentSubfolders.Count > 0) {
+    @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfoldersSnapshot.Count > 0) {
         <div class="d-flex flex-wrap gap-2 mb-3 align-center">
             <MudText Typo="Typo.body2" Style="color: var(--text-secondary); font-weight: 600;">Subfolders:</MudText>
-            @foreach (var sub in _currentSubfolders) {
+            @foreach (var sub in CurrentSubfoldersSnapshot) {
                 <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
                     @sub.Name (@sub.LoraCount)
                 </MudChip>
@@ -529,7 +529,6 @@
 
     private bool _disposed;
     private readonly object _filterLock = new();
-    private CancellationTokenSource? _searchCts;
     private static readonly ConcurrentDictionary<string, string> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> _loadingThumbnails = new(StringComparer.OrdinalIgnoreCase);
 
@@ -540,10 +539,18 @@
     private List<LoraMetadata> _filteredLoras = new();
     private string? _cachedSubfolderPath;
 
+    private IReadOnlyList<SubfolderItem> CurrentSubfoldersSnapshot {
+        get {
+            lock (_filterLock) {
+                return _currentSubfolders?.ToList() ?? new List<SubfolderItem>();
+            }
+        }
+    }
+
     private int FilteredCount {
         get {
             lock (_filterLock) {
-                return _filteredLoras.Count;
+                return _filteredLoras?.Count ?? 0;
             }
         }
     }
@@ -551,7 +558,7 @@
     private IReadOnlyList<LoraMetadata> FilteredLorasSnapshot {
         get {
             lock (_filterLock) {
-                return _filteredLoras.ToList();
+                return _filteredLoras?.ToList() ?? new List<LoraMetadata>();
             }
         }
     }
@@ -559,15 +566,32 @@
     private int TotalPages {
         get {
             lock (_filterLock) {
-                return Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
+                int count = _filteredLoras?.Count ?? 0;
+                return Math.Max(1, (int)Math.Ceiling((double)count / _pageSize));
             }
         }
     }
 
     private IReadOnlyList<LoraMetadata> PagedLoras {
         get {
-            lock (_filterLock) {
-                return _filteredLoras.Skip((_currentPage - 1) * _pageSize).Take(_pageSize).ToList();
+            try {
+                lock (_filterLock) {
+                    if (_filteredLoras == null || _filteredLoras.Count == 0) {
+                        return Array.Empty<LoraMetadata>();
+                    }
+                    int totalPages = Math.Max(1, (int)Math.Ceiling((double)_filteredLoras.Count / _pageSize));
+                    if (_currentPage > totalPages || _currentPage < 1) {
+                        _currentPage = 1;
+                    }
+                    int skip = (_currentPage - 1) * _pageSize;
+                    if (skip >= _filteredLoras.Count) {
+                        skip = 0;
+                        _currentPage = 1;
+                    }
+                    return _filteredLoras.Skip(skip).Take(_pageSize).ToList();
+                }
+            } catch {
+                return Array.Empty<LoraMetadata>();
             }
         }
     }
@@ -575,42 +599,26 @@
     private string SearchQuery {
         get => _searchQuery;
         set {
-            if (_searchQuery != value) {
-                _searchQuery = value;
-                TriggerDebouncedSearch();
+            string newVal = value ?? string.Empty;
+            if (_searchQuery != newVal) {
+                _searchQuery = newVal;
+                _currentPage = 1;
+                UpdateFilteredList();
+                StateHasChanged();
             }
         }
     }
 
-    private readonly object _searchLock = new();
-
-    private void TriggerDebouncedSearch() {
-        CancellationTokenSource cts;
-        lock (_searchLock) {
-            try {
-                _searchCts?.Cancel();
-                _searchCts?.Dispose();
-            } catch { }
-            cts = new CancellationTokenSource();
-            _searchCts = cts;
+    private void HandleSearchKeyDown(KeyboardEventArgs e) {
+        if (e.Key == "Enter") {
+            ExecuteSearchNow();
         }
+    }
 
-        _ = Task.Run(async () => {
-            try {
-                await Task.Delay(250, cts.Token);
-                if (!cts.IsCancellationRequested && !_disposed) {
-                    await SafeInvokeAsync(() => {
-                        _currentPage = 1;
-                        UpdateFilteredList();
-                        StateHasChanged();
-                    });
-                }
-            } catch (OperationCanceledException) {
-                // Expected when user continues typing
-            } catch {
-                // Suppress background search dispatch errors
-            }
-        });
+    private void ExecuteSearchNow() {
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
     }
 
     private Task SafeInvokeAsync(Action action) {
@@ -685,9 +693,14 @@
                     bool matchPath = l.FilePath != null && l.FilePath.Contains(query, StringComparison.OrdinalIgnoreCase);
                     bool matchTriggers = false;
                     try {
-                        var triggers = l.TrainedWords?.ToArray();
-                        if (triggers != null && triggers.Length > 0) {
-                            matchTriggers = triggers.Any(w => w != null && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+                        if (l.TrainedWords != null && l.TrainedWords.Count > 0) {
+                            matchTriggers = l.TrainedWords.Any(w => !string.IsNullOrWhiteSpace(w) && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+                        }
+                        if (!matchTriggers && l.CivitaiInfo?.TrainedWords != null && l.CivitaiInfo.TrainedWords.Count > 0) {
+                            matchTriggers = l.CivitaiInfo.TrainedWords.Any(w => !string.IsNullOrWhiteSpace(w) && w.Contains(query, StringComparison.OrdinalIgnoreCase));
+                        }
+                        if (query.Length >= 3 && !matchTriggers && l.RawHeaderMetadata != null && l.RawHeaderMetadata.TryGetValue("ss_tag_frequency", out var tags) && !string.IsNullOrWhiteSpace(tags)) {
+                            matchTriggers = tags.Contains(query, StringComparison.OrdinalIgnoreCase);
                         }
                     } catch { }
 
@@ -873,20 +886,27 @@
         StateHasChanged();
     }
 
-    private string GetRelativeSubfolder(string filePath) {
-        string root = LibraryService.RootFolder;
-        if (string.IsNullOrWhiteSpace(root)) {
-            return Path.GetDirectoryName(filePath) ?? string.Empty;
-        }
-        string? dir = Path.GetDirectoryName(filePath);
-        if (string.IsNullOrEmpty(dir)) {
+    private string GetRelativeSubfolder(string? filePath) {
+        if (string.IsNullOrWhiteSpace(filePath)) {
             return string.Empty;
         }
         try {
+            string root = LibraryService.RootFolder;
+            string? dir = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(dir)) {
+                return string.Empty;
+            }
+            if (string.IsNullOrWhiteSpace(root)) {
+                return dir;
+            }
             string rel = Path.GetRelativePath(root, dir);
             return rel == "." ? "Root" : rel;
         } catch {
-            return dir;
+            try {
+                return Path.GetFileName(Path.GetDirectoryName(filePath)) ?? string.Empty;
+            } catch {
+                return string.Empty;
+            }
         }
     }
 
@@ -1012,10 +1032,6 @@
 
     public void Dispose() {
         _disposed = true;
-        try {
-            _searchCts?.Cancel();
-            _searchCts?.Dispose();
-        } catch { }
         LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
         LibraryService.OnLibrariesChanged -= HandleLibrariesChanged;
         LibraryService.OnScanProgress -= HandleScanProgress;
@@ -1149,13 +1165,29 @@
         }
     }
 
-    private static string? GetPrimaryTrigger(LoraMetadata lora) {
-        if (lora.TrainedWords != null && lora.TrainedWords.Count > 0) {
-            return lora.TrainedWords.First();
+    private static string? GetPrimaryTrigger(LoraMetadata? lora) {
+        if (lora == null) {
+            return null;
         }
-        if (lora.RawHeaderMetadata.TryGetValue("ss_tag_frequency", out var tags) && !string.IsNullOrWhiteSpace(tags)) {
-            return tags.Split(',').FirstOrDefault()?.Trim();
-        }
+        try {
+            if (lora.TrainedWords != null && lora.TrainedWords.Count > 0) {
+                string? first = lora.TrainedWords.FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
+                if (!string.IsNullOrWhiteSpace(first)) {
+                    return first;
+                }
+            }
+            if (lora.CivitaiInfo?.TrainedWords != null && lora.CivitaiInfo.TrainedWords.Count > 0) {
+                string? firstCiv = lora.CivitaiInfo.TrainedWords.FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
+                if (!string.IsNullOrWhiteSpace(firstCiv)) {
+                    return firstCiv;
+                }
+            }
+            if (lora.RawHeaderMetadata != null && lora.RawHeaderMetadata.TryGetValue("ss_tag_frequency", out var tags) && !string.IsNullOrWhiteSpace(tags)) {
+                return tags.Split(new[] { ',', '{', '}', '"', ':', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                           .Select(t => t.Trim())
+                           .FirstOrDefault(t => !string.IsNullOrWhiteSpace(t) && !int.TryParse(t, out _));
+            }
+        } catch { }
         return null;
     }
 
@@ -1191,7 +1223,10 @@
         return string.Empty;
     }
 
-    private static Color GetArchitectureColor(string arch) {
+    private static Color GetArchitectureColor(string? arch) {
+        if (string.IsNullOrWhiteSpace(arch)) {
+            return Color.Default;
+        }
         if (arch.Contains("flux", StringComparison.OrdinalIgnoreCase)) return Color.Tertiary;
         if (arch.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return Color.Info;
         if (arch.Contains("pony", StringComparison.OrdinalIgnoreCase)) return Color.Secondary;
