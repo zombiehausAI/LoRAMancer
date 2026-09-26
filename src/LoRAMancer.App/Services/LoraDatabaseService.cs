@@ -90,6 +90,9 @@ public sealed class LoraDatabaseService : IDisposable {
                     CivitaiUrl TEXT,
                     CivitaiPreviewImageUrl TEXT,
                     CivitaiSamplePromptsJson TEXT,
+                    LibraryId TEXT,
+                    Category TEXT,
+                    TagsJson TEXT,
                     CreatedAtUtc TEXT NOT NULL,
                     UpdatedAtUtc TEXT NOT NULL
                 );
@@ -97,6 +100,7 @@ public sealed class LoraDatabaseService : IDisposable {
                 CREATE INDEX IF NOT EXISTS idx_loras_fav ON Loras(IsFavorite);
                 CREATE INDEX IF NOT EXISTS idx_loras_base ON Loras(BaseModel);
                 CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
+                CREATE INDEX IF NOT EXISTS idx_loras_cat ON Loras(Category);
 
                 CREATE TABLE IF NOT EXISTS Libraries (
                     Id TEXT PRIMARY KEY,
