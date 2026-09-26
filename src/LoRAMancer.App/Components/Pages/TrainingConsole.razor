@@ -28,17 +28,28 @@
             TensorBoard
         </MudButton>
         @if (TrainingRunner.IsRunning) {
-            <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="CancelTraining">
-                Stop Training
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Queue" OnClick="StartTrainingAsync" Disabled="@string.IsNullOrWhiteSpace(_configYamlPath)">
+                Queue Training
             </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="CancelTraining">
+                Stop Current
+            </MudButton>
+            @if (TrainingRunner.QueueCount > 0) {
+                <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="CancelAll">
+                    Cancel All &amp; Clear
+                </MudButton>
+            }
         } else {
             @if (TrainingRunner.CurrentProgress.Status == TrainingStatus.Failed) {
                 <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" OnClick="RetryTrainingAsync">
                     Retry Training
                 </MudButton>
             }
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartTrainingAsync">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartTrainingAsync" Disabled="@string.IsNullOrWhiteSpace(_configYamlPath)">
                 Launch Training
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Queue" OnClick="StartTrainingAsync" Disabled="@string.IsNullOrWhiteSpace(_configYamlPath)">
+                Queue Training
             </MudButton>
         }
         <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearLogs">
@@ -114,6 +125,99 @@
                 </div>
             </MudItem>
         </MudGrid>
+    </MudCardContent>
+</MudCard>
+
+<!-- Studio Training Queue & Sequential Runner -->
+<MudCard Elevation="1" Class="mb-4" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+    <MudCardHeader Class="py-2 px-3" Style="border-bottom: 1px solid var(--border-dark); background-color: rgba(255, 255, 255, 0.02);">
+        <CardHeaderContent>
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Queue" Color="Color.Tertiary" Size="Size.Small" />
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Studio Training Queue</MudText>
+                @if (TrainingRunner.IsRunning) {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Style="font-weight: 700; height: 20px;">
+                        1 Active Run
+                    </MudChip>
+                }
+                @if (TrainingRunner.QueueCount > 0) {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled" Style="font-weight: 700; height: 20px;">
+                        @TrainingRunner.QueueCount Queued
+                    </MudChip>
+                } else if (!TrainingRunner.IsRunning) {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="font-weight: 600; height: 20px;">
+                        Queue Idle
+                    </MudChip>
+                }
+            </div>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            @if (TrainingRunner.QueueCount > 0) {
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="@(() => TrainingRunner.ClearQueue())">
+                    Clear Queue
+                </MudButton>
+            }
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent Class="pa-3">
+        @if (TrainingRunner.CurrentJob != null) {
+            <div class="pa-3 mb-2" style="background-color: rgba(166, 227, 161, 0.08); border: 1px solid rgba(166, 227, 161, 0.3); border-radius: 6px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudProgressCircular Color="Color.Success" Size="Size.Small" Indeterminate="true" Style="width: 18px; height: 18px;" />
+                        <div>
+                            <span style="font-weight: 700; color: #a6e3a1;">RUNNING:</span>
+                            <span style="font-weight: 600; margin-left: 6px; color: var(--text-primary);">@TrainingRunner.CurrentJob.Name</span>
+                            <span class="text-secondary ml-2" style="font-size: 0.75rem; font-family: monospace;">(@Path.GetFileName(TrainingRunner.CurrentJob.ConfigYamlPath))</span>
+                        </div>
+                    </div>
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Step @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
+                        </MudText>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Stop" OnClick="CancelTraining" Style="font-size: 0.7rem; height: 24px; padding: 0 8px;">
+                            Stop
+                        </MudButton>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (TrainingRunner.QueueCount > 0) {
+            <div class="d-flex flex-column gap-2">
+                @for (int i = 0; i < TrainingRunner.Queue.Count; i++) {
+                    var queuedJob = TrainingRunner.Queue[i];
+                    var jobIndex = i;
+                    <div class="d-flex align-center justify-space-between px-3 py-2" style="background-color: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-dark); border-radius: 6px;">
+                        <div class="d-flex align-center gap-3">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled" Style="font-weight: 700; height: 20px;">
+                                #@(jobIndex + 1)
+                            </MudChip>
+                            <div>
+                                <span style="font-weight: 600; color: var(--text-primary);">@queuedJob.Name</span>
+                                <span class="text-secondary ml-2" style="font-size: 0.75rem; font-family: monospace;">@Path.GetFileName(queuedJob.ConfigYamlPath)</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-center gap-1">
+                            <MudTooltip Text="Move Up">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Color="Color.Default" Disabled="@(jobIndex == 0)" OnClick="@(() => TrainingRunner.MoveJobUp(queuedJob.Id))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Move Down">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Color="Color.Default" Disabled="@(jobIndex == TrainingRunner.Queue.Count - 1)" OnClick="@(() => TrainingRunner.MoveJobDown(queuedJob.Id))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Remove from Queue">
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="@(() => TrainingRunner.RemoveJob(queuedJob.Id))" />
+                            </MudTooltip>
+                        </div>
+                    </div>
+                }
+            </div>
+        } else if (TrainingRunner.CurrentJob == null) {
+            <div class="d-flex align-center gap-2 py-1 text-secondary" style="font-size: 0.8rem;">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" Color="Color.Secondary" />
+                <span>Single GPU safe: Queue multiple training runs. They will execute sequentially with automatic VRAM cooldown between jobs.</span>
+            </div>
+        }
     </MudCardContent>
 </MudCard>
 
@@ -204,6 +308,14 @@
     protected override void OnInitialized() {
         TrainingRunner.OnLogReceived += HandleLogReceived;
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
+        TrainingRunner.OnQueueUpdated += HandleQueueUpdated;
+
+        if (TrainingRunner.CurrentJob != null) {
+            _configYamlPath = TrainingRunner.CurrentJob.ConfigYamlPath;
+            if (!string.IsNullOrWhiteSpace(TrainingRunner.CurrentJob.VenvPath)) {
+                _venvPath = TrainingRunner.CurrentJob.VenvPath;
+            }
+        }
 
         var existingLogs = TrainingRunner.GetRecentLogs();
         if (existingLogs.Count > 0) {
@@ -223,10 +335,17 @@
             _configYamlPath = QueryConfig;
         }
 
-        if (QueryAutoStart == true && !_autoStarted && !TrainingRunner.IsRunning && !string.IsNullOrWhiteSpace(_configYamlPath)) {
+        if (QueryAutoStart == true && !_autoStarted && !string.IsNullOrWhiteSpace(_configYamlPath)) {
             _autoStarted = true;
             await StartTrainingAsync();
         }
+    }
+
+    private void HandleQueueUpdated() {
+        if (_disposed) {
+            return;
+        }
+        RequestRender();
     }
 
     private void RequestRender() {
@@ -368,23 +487,12 @@
                 }
             }
 
-            lock (_logsLock) {
-                _logs.Add($"[HOST] Initiating training process for: {_configYamlPath}");
+            var job = TrainingRunner.EnqueueJob(_configYamlPath, _venvPath, toolkitScript);
+            if (TrainingRunner.IsRunning && TrainingRunner.QueueCount > 1) {
+                Snackbar.Add($"Training job '{job.Name}' added to queue ({TrainingRunner.QueueCount} pending).", Severity.Info);
+            } else {
+                Snackbar.Add($"Training job '{job.Name}' started.", Severity.Success);
             }
-
-            _ = Task.Run(async () => {
-                try {
-                    await TrainingRunner.StartTrainingAsync(_venvPath, toolkitScript, _configYamlPath);
-                } catch (Exception ex) {
-                    TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
-                    if (!_disposed) {
-                        await InvokeAsync(() => {
-                            Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
-                            RequestRender();
-                        });
-                    }
-                }
-            });
         } catch (Exception ex) {
             TrainingRunner.CurrentProgress.Status = TrainingStatus.Failed;
             Snackbar.Add($"Training failed: {ex.Message}", Severity.Error);
@@ -410,7 +518,18 @@
         }
 
         TrainingRunner.CancelTraining();
-        Snackbar.Add("Training cancellation requested.", Severity.Info);
+        Snackbar.Add("Current training cancellation requested.", Severity.Info);
+    }
+
+    private void CancelAll() {
+        if (Settings.Current.ClientRemoteMode) {
+            _ = RemoteClient.StopRemoteTrainingAsync();
+            Snackbar.Add("Cancellation command sent to remote AI PC.", Severity.Info);
+            return;
+        }
+
+        TrainingRunner.CancelAll();
+        Snackbar.Add("Cancelled all training jobs and cleared queue.", Severity.Info);
     }
 
     private void ClearLogs() {
@@ -506,6 +625,7 @@
         _disposed = true;
         TrainingRunner.OnLogReceived -= HandleLogReceived;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+        TrainingRunner.OnQueueUpdated -= HandleQueueUpdated;
     }
 
     private string? _preFlightWarning;

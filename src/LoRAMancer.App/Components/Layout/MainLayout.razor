@@ -4,6 +4,7 @@
 @inject ThemeService ThemeManager
 @inject AmdVenvProvisioner Provisioner
 @inject StudioSessionService StudioSession
+@inject SettingsService Settings
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
@@ -175,9 +176,18 @@
         <!-- Right: Hardware & Telemetry -->
         <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
             @if (TrainingRunner.IsRunning) {
-                <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
-                    Step @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
-                </MudChip>
+                <MudTooltip Text="@($"Training {(TrainingRunner.CurrentJob != null ? TrainingRunner.CurrentJob.Name : "job")} in progress. Click to view console.")">
+                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2" OnClick="@(() => Navigation.NavigateTo("training"))" Style="cursor: pointer; font-weight: 600;">
+                        Step @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
+                        @(TrainingRunner.QueueCount > 0 ? $" • +{TrainingRunner.QueueCount} queued" : "")
+                    </MudChip>
+                </MudTooltip>
+            } else if (TrainingRunner.QueueCount > 0) {
+                <MudTooltip Text="@($"{TrainingRunner.QueueCount} training job(s) in queue. Click to view console.")">
+                    <MudChip T="string" Color="Color.Info" Size="Size.Small" Icon="@Icons.Material.Filled.Queue" Class="mr-2" OnClick="@(() => Navigation.NavigateTo("training"))" Style="cursor: pointer; font-weight: 600;">
+                        @TrainingRunner.QueueCount Queued
+                    </MudChip>
+                </MudTooltip>
             }
 
             @if (_envInfo != null) {
@@ -290,12 +300,24 @@
     private AmdEnvironmentInfo? _envInfo;
     private ErrorBoundary? _errorBoundary;
     private bool _disposed;
+    private bool _startupNavigated;
 
     protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
+        TrainingRunner.OnQueueUpdated += HandleQueueUpdated;
         ThemeManager.OnThemeChanged += HandleThemeChanged;
         StudioSession.OnSessionChanged += HandleSessionChanged;
         Navigation.LocationChanged += HandleLocationChanged;
+        if (!_startupNavigated) {
+            _startupNavigated = true;
+            string relative = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
+            if (string.IsNullOrEmpty(relative)) {
+                string target = Settings.Current.StartupSection;
+                if (!string.IsNullOrWhiteSpace(target) && !string.Equals(target, "vault", StringComparison.OrdinalIgnoreCase) && !string.Equals(target, "/", StringComparison.OrdinalIgnoreCase)) {
+                    Navigation.NavigateTo(target.TrimStart('/'));
+                }
+            }
+        }
         try {
             _envInfo = await Provisioner.DetectEnvironmentAsync();
         } catch {
@@ -408,9 +430,23 @@
         StateHasChanged();
     }
 
+    private void HandleQueueUpdated() {
+        if (_disposed) {
+            return;
+        }
+        try {
+            _ = InvokeAsync(() => {
+                if (!_disposed) {
+                    StateHasChanged();
+                }
+            });
+        } catch { }
+    }
+
     public void Dispose() {
         _disposed = true;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+        TrainingRunner.OnQueueUpdated -= HandleQueueUpdated;
         ThemeManager.OnThemeChanged -= HandleThemeChanged;
         StudioSession.OnSessionChanged -= HandleSessionChanged;
         Navigation.LocationChanged -= HandleLocationChanged;

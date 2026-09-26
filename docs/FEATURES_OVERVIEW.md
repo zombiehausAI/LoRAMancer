@@ -54,6 +54,14 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - Wizard presets for Characters, Styles, Concepts, and Clothing.
   - Live dataset health auditing (verifies caption pairing, warns on missing tags or low-resolution images).
   - Real-time hardware estimators (estimated VRAM vs detected GPU, total steps, and completion duration).
+- **Single-GPU Training Queue & Background Runner**:
+  - Sequential training job queue designed specifically for dedicated single-GPU workstations, preventing multi-process VRAM contention and driver crashes.
+  - Non-blocking background execution: users can freely navigate between Curate, Lab, Test, and Vault while active runs continue unimpeded in the background.
+  - Global top navbar telemetry badge displaying live step progress and count of queued jobs from any page.
+  - Queue management: re-order pending jobs, remove individual runs, or cancel all with automatic 2-second VRAM cooldown between consecutive runs.
+- **Single-Instance Application Mutex**:
+  - Desktop-wide named mutex check (`Global\LoRAMancer_Studio_SingleInstance_Mutex`) ensuring only one instance of LoRAMancer can run simultaneously.
+  - Automatically restores and focuses the active window if a second instance is launched.
 
 ---
 
@@ -195,6 +203,10 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 - **Surgical Layer Pruning & Selective Attenuation**:
   - Select and attenuate ($0.0\times - 0.75\times$) or zero-out defective layers without retraining.
   - Instantly cures "fried" models and salvages overcooked LoRA checkpoints in seconds.
+- **Cohesive Studio Target LoRA Integration**:
+  - Seamlessly utilizes the active target LoRA loaded in Stage 3 (marked "Ready for Surgery") directly inside the Vector Gene Therapy tab.
+  - Supports 1-click active model block energy scans, interactive toxic block health tables, and 1-click auto-purge cleansing that updates the active session.
+  - Automatically pre-populates `InitialLoraPath` when launching the full Gene Therapy Suite dialog.
 
 ---
 
@@ -216,6 +228,8 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 - **Training Recipe & Hyperparameter Diffs**:
   - Compares base architecture, learning rates, schedulers, rank/alpha ratios, dataset tags, and optimizer configurations from Safetensors headers.
   - Exports clean Markdown audit reports for model versioning and merge comparisons.
+- **Stage 3 Baseline Model A Binding**:
+  - The Visual Diff tab in Stage 3 automatically locks the active target LoRA as Model A (Baseline/Reference) and accepts comparison models or epoch checkpoints for inline comparisons or pre-populated full inspector launches.
 
 ---
 
@@ -259,6 +273,9 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
   3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, and Forensic De-Anonymizer.
   4. **Test (`/test`)**: ComfyUI inference studio with live WebSocket image rendering, prompt testing, and AI benchmark matrix sweeps.
   5. **Vault (`/`)**: Central LoRA model library, visual card/table browser, Civitai metadata enricher, and version management.
+- **Configurable Startup Section**:
+  - Configurable in Settings (`General & Paths`) allowing users to choose which pipeline section opens on load (Section 1: Curate, Section 2: Train, Section 3: Lab, Section 4: Test, or Section 5: Vault).
+  - Defaults to Section 1 (Curate: `/curate`) on initial load and unless explicitly configured.
 
 ---
 

@@ -645,6 +645,16 @@
                 </MudItem>
 
                 <MudItem xs="12">
+                    <MudSelect @bind-Value="_settings.StartupSection" Label="Startup Section (Opens on Load)" Variant="Variant.Outlined" HelperText="Choose which studio section opens when the application starts up. Defaults to Section 1 (Curate &amp; Caption).">
+                        <MudSelectItem Value="@("curate")">1. Curate &amp; Caption Studio (/curate)</MudSelectItem>
+                        <MudSelectItem Value="@("training")">2. Train &amp; Forge Studio (/training)</MudSelectItem>
+                        <MudSelectItem Value="@("lab")">3. Diagnostic Lab &amp; Surgery (/lab)</MudSelectItem>
+                        <MudSelectItem Value="@("test")">4. ComfyUI Interactive Test Studio (/test)</MudSelectItem>
+                        <MudSelectItem Value="@("vault")">5. Library &amp; Vault (/)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12">
                     <MudSwitch @bind-Value="_settings.AutoCheckUpdatesOnStartup" Label="Check for updates automatically on application startup" Color="Color.Primary" />
                 </MudItem>
 

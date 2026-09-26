@@ -16,7 +16,7 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 
 1. **Multi-Library Management & Visual Browsing**: Index thousands of `.safetensors` models into an instant, SQLite-backed library (`~/.LoRAMancer/loras.db`). Organize models across independent named libraries, convert subfolders into libraries with one click, search globally, and view auto-discovered companion preview thumbnails with zero UI freezing.
 2. **Hyperparameter Recipe Cloning**: Inspect and borrow proven mathematical settings (rank, alpha, learning rates, optimizer, epochs) from any donor LoRA to pre-seed your next training run while preserving your own unique dataset and identity.
-3. **Automated AI-Toolkit Orchestration**: Streamlined Civitai-style wizard with built-in presets (Characters, Styles, Concepts, Clothing), dataset health auditing, and live hardware estimators.
+3. **Automated AI-Toolkit Orchestration & Training Queue**: Streamlined Civitai-style wizard with built-in presets (Characters, Styles, Concepts, Clothing), dataset health auditing, live hardware estimators, sequential single-GPU training queue, and background execution with desktop-wide single-instance protection.
 4. **Permanent Training History & Vault**: Keep permanent records of all training runs, prompt triggers, loss curves, and configurations without cloud retention limits.
 5. **Universal Hardware Provisioning**: Automated detection and provisioning of hardware-matched PyTorch environments for AMD ROCm, NVIDIA CUDA, Intel XPU, and CPU.
 6. **Remote Control & Public Serving**: Embedded Kestrel network server and Cloudflare Quick Tunnels to monitor training and manage LoRAs from any browser or mobile PWA.

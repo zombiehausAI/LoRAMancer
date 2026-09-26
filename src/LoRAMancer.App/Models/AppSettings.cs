@@ -38,6 +38,11 @@ public sealed class AppSettings {
     public string LastActiveLibraryId { get; set; } = string.Empty;
     public string UpdateManifestUrl { get; set; } = "https://raw.githubusercontent.com/loramancer/loramancer/main/installer/version.json";
     public bool AutoCheckUpdatesOnStartup { get; set; } = true;
+    public string StartupSection {
+        get => string.IsNullOrWhiteSpace(_startupSection) ? "curate" : _startupSection;
+        set => _startupSection = string.IsNullOrWhiteSpace(value) ? "curate" : value;
+    }
+    private string _startupSection = "curate";
     public bool EnableDarkTheme { get; set; } = true;
     public string ThemePreset { get; set; } = "dark-purple";
     public string? CustomPrimaryColor { get; set; }

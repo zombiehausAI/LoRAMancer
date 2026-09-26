@@ -56,6 +56,7 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\OverbakeRadarService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraEchoHunterService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraDeAnonymizerService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\TrainingRunnerService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>
