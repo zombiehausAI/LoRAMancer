@@ -571,6 +571,74 @@
     <!-- Appearance & Themes Tab -->
     <MudTabPanel Text="Appearance & Themes" Icon="@Icons.Material.Filled.Palette">
         <div class="px-4 pb-4">
+            <!-- Studio Highlight & Accent Color Picker Section -->
+            <MudCard Elevation="0" Class="pa-4 mb-4" Style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+                    <div>
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Palette" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.5rem;")" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">Studio Highlight &amp; Accent Color</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Dynamically override the primary accent across buttons, chips, indicators, and active highlights studio-wide.
+                        </MudText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(ThemeManager.CustomPrimaryColor)) {
+                        <MudButton Variant="Variant.Outlined" 
+                                   Color="Color.Warning" 
+                                   Size="Size.Small" 
+                                   StartIcon="@Icons.Material.Filled.RestartAlt" 
+                                   OnClick="@(() => SetAccentColorAsync(null))">
+                            Reset to Theme Default (@ThemeManager.CurrentTheme.Primary)
+                        </MudButton>
+                    }
+                </div>
+
+                <MudGrid Class="align-center">
+                    <!-- Preset Swatches -->
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.caption" Style="font-weight: 600; color: var(--text-secondary);" Class="mb-2 d-block">
+                            QUICK SWATCHES
+                        </MudText>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var swatch in ThemeService.CuratedAccentSwatches) {
+                                bool isSelected = string.Equals(ThemeManager.EffectivePrimaryColor, swatch.Hex, StringComparison.OrdinalIgnoreCase);
+                                <MudTooltip Text="@swatch.Name">
+                                    <div @onclick="@(() => SetAccentColorAsync(swatch.Hex))"
+                                         style="@($"width: 32px; height: 32px; border-radius: 8px; background-color: {swatch.Hex}; cursor: pointer; border: {(isSelected ? "3px solid #fff" : "1px solid rgba(255,255,255,0.2)")}; box-shadow: {(isSelected ? $"0 0 10px {swatch.Hex}88" : "0 2px 4px rgba(0,0,0,0.3)")}; transition: transform 0.15s ease;")"
+                                         class="d-flex align-center justify-center">
+                                        @if (isSelected) {
+                                            <MudIcon Icon="@Icons.Material.Filled.Check" Style="color: #fff; font-size: 1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));" />
+                                        }
+                                    </div>
+                                </MudTooltip>
+                            }
+                        </div>
+                    </MudItem>
+
+                    <!-- Custom Color Picker -->
+                    <MudItem xs="12" md="6">
+                        <div class="d-flex align-center gap-3">
+                            <MudColorPicker Label="Custom Highlight Color"
+                                            Value="@(new MudBlazor.Utilities.MudColor(ThemeManager.EffectivePrimaryColor))"
+                                            ValueChanged="@(c => SetAccentColorAsync(c.Value))"
+                                            ColorPickerMode="ColorPickerMode.HEX"
+                                            ShowAlpha="false"
+                                            ShowInputs="true"
+                                            Margin="Margin.Dense"
+                                            Variant="Variant.Outlined"
+                                            Style="max-width: 280px;" />
+                            <div class="d-flex flex-column">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Active HEX</MudText>
+                                <code style="@($"font-size: 0.9rem; font-weight: 700; color: {ThemeManager.EffectivePrimaryColor}; background-color: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px;")">
+                                    @ThemeManager.EffectivePrimaryColor
+                                </code>
+                            </div>
+                        </div>
+                    </MudItem>
+                </MudGrid>
+            </MudCard>
+
             <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-4">
                 <div>
                     <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">Theme Engine</MudText>
@@ -1266,6 +1334,15 @@
         ThemeManager.SetTheme(themeId);
         _settings.ThemePreset = themeId;
         Snackbar.Add($"Theme switched to '{ThemeManager.CurrentTheme.Name}'!", Severity.Success);
+    }
+
+    private async Task SetAccentColorAsync(string? hex) {
+        await ThemeManager.SetCustomPrimaryColorAsync(hex);
+        _settings.CustomPrimaryColor = hex;
+        Snackbar.Add(string.IsNullOrWhiteSpace(hex) 
+            ? "Highlight color reset to theme default." 
+            : $"Highlight color updated to {hex}!", Severity.Info);
+        StateHasChanged();
     }
 
     private void AutoGenerateUrls() {
