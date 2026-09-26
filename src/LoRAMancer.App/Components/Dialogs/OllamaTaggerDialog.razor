@@ -5,6 +5,7 @@
 @inject PluginManagerService PluginManager
 @inject SettingsService Settings
 @inject NativeFileDialogService FileDialogService
+@inject StudioSessionService StudioSession
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -59,23 +60,54 @@
         }
 
         <MudGrid Spacing="2">
-            <!-- Input Source -->
+            <!-- Input Source & Current Dataset Quick Button -->
             <MudItem xs="12">
+                @if (!string.IsNullOrWhiteSpace(StudioSession.DatasetFolder) && _inputPath != StudioSession.DatasetFolder) {
+                    <div class="d-flex align-center justify-space-between pa-2 mb-2" style="background: rgba(137, 180, 250, 0.1); border: 1px dashed rgba(137, 180, 250, 0.35); border-radius: 8px;">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Primary" Size="Size.Small" />
+                            <span style="font-size: 0.8rem; color: #cdd6f4;">Current Studio Dataset: <b>@Path.GetFileName(StudioSession.DatasetFolder)</b></span>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="UseCurrentStudioDataset" Style="font-size: 0.72rem; padding: 2px 10px;">
+                            Use Current Dataset
+                        </MudButton>
+                    </div>
+                }
+
                 <div class="d-flex align-center gap-2">
                     <MudTextField @bind-Value="_inputPath" Label="Input Images Folder or ZIP Archive" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="C:\datasets\my_images or my_images.zip" FullWidth="true" Disabled="_isProcessing" />
                     <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseInputFolderAsync" Disabled="_isProcessing">Folder</MudButton>
                     <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseInputZipAsync" Disabled="_isProcessing">ZIP</MudButton>
                 </div>
+
+                <div class="d-flex align-center justify-space-between mt-1">
+                    <MudCheckBox @bind-Value="_writeInPlace" 
+                                 Color="Color.Success" 
+                                 Dense="true" 
+                                 Disabled="_isProcessing"
+                                 Label="Tag dataset in-place (Save .txt captions directly to image folder, auto-loading into studio)" />
+                </div>
             </MudItem>
 
-            <!-- Output Destination & ZIP toggle -->
-            <MudItem xs="12">
-                <div class="d-flex align-center gap-2">
-                    <MudTextField @bind-Value="_outputPath" Label="Output Destination (Folder or .zip)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Leave blank for auto-named output" FullWidth="true" Disabled="_isProcessing" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseOutputFolderAsync" Disabled="_isProcessing">Browse</MudButton>
-                </div>
-                <MudCheckBox @bind-Value="_createZip" Label="Create compressed ZIP file output for training" Color="Color.Primary" Dense="true" Class="mt-1" Disabled="_isProcessing" />
-            </MudItem>
+            <!-- Output Destination & ZIP toggle (Only shown when not tagging in-place) -->
+            @if (!_writeInPlace) {
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_outputPath" Label="Output Destination (Folder or .zip)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Leave blank for auto-named output" FullWidth="true" Disabled="_isProcessing" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="BrowseOutputFolderAsync" Disabled="_isProcessing">Browse</MudButton>
+                    </div>
+                    <MudCheckBox @bind-Value="_createZip" Label="Create compressed ZIP file output for training" Color="Color.Primary" Dense="true" Class="mt-1" Disabled="_isProcessing" />
+                </MudItem>
+            } else {
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2 px-3 py-2" style="background: rgba(166, 227, 161, 0.08); border: 1px solid rgba(166, 227, 161, 0.25); border-radius: 8px;">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                        <span style="font-size: 0.75rem; color: #a6e3a1;">
+                            <b>In-Place Civitai-Style Tagging:</b> .txt files are generated and saved directly next to your images. When completed, Studio auto-refreshes all captions.
+                        </span>
+                    </div>
+                </MudItem>
+            }
 
             <!-- Tagging Options -->
             <MudItem xs="12" sm="6">
@@ -164,7 +196,12 @@
             <div class="mt-4 p-3 text-center" style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                 <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-2" />
                 <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Ollama Vision is analyzing and tagging your images...</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Targeting model: <b>@_selectedModel</b> at <b>@_ollamaUrl</b></MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-1">Targeting model: <b>@_selectedModel</b> at <b>@_ollamaUrl</b></MudText>
+                @if (!string.IsNullOrWhiteSpace(_latestLog)) {
+                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #a6adc8; background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 4px; max-width: 90%; margin: 6px auto 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        @_latestLog
+                    </div>
+                }
             </div>
         } else if (_lastResult != null) {
             <MudCard Elevation="0" Class="mt-4 p-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
@@ -202,7 +239,7 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="Cancel" Disabled="_isProcessing">Close</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="CloseDialog" Disabled="_isProcessing">Close</MudButton>
         @if (_lastResult != null) {
             <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Done" OnClick="ApplyToWizard">
                 Use in Training Wizard
@@ -236,7 +273,9 @@
     private string _captionStyle = "tags";
     private string _subjectFocus = "general";
     private string _customPrompt = string.Empty;
-    private bool _createZip = true;
+    private bool _createZip = false;
+    private bool _writeInPlace = true;
+    private string _latestLog = string.Empty;
 
     private bool _isCheckingOllama = true;
     private bool _ollamaReachable = false;
@@ -249,6 +288,16 @@
     protected override async Task OnInitializedAsync() {
         _inputPath = InitialInputPath;
         _triggerWord = InitialTriggerWord;
+
+        if (string.IsNullOrWhiteSpace(_inputPath) && !string.IsNullOrWhiteSpace(StudioSession.DatasetFolder)) {
+            _inputPath = StudioSession.DatasetFolder;
+            _writeInPlace = true;
+            _createZip = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_triggerWord) && !string.IsNullOrWhiteSpace(StudioSession.TriggerWord)) {
+            _triggerWord = StudioSession.TriggerWord;
+        }
 
         if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaEndpointUrl)) {
             _ollamaUrl = Settings.Current.OllamaEndpointUrl;
@@ -446,21 +495,36 @@
         _ = Settings.SaveSettingsAsync(Settings.Current);
 
         try {
+            string effectiveOutput = _writeInPlace ? string.Empty : _outputPath;
+            bool effectiveZip = !_writeInPlace && _createZip;
+
             var parameters = new Dictionary<string, object?> {
                 ["input_path"] = _inputPath,
-                ["output_path"] = _outputPath,
+                ["output_path"] = effectiveOutput,
                 ["trigger_word"] = _triggerWord,
                 ["included_phrases"] = _includedPhrases,
                 ["blacklist_words"] = _blacklistWords,
                 ["model"] = _selectedModel,
                 ["caption_style"] = _captionStyle,
                 ["custom_prompt"] = _customPrompt.Trim(),
-                ["create_zip"] = _createZip,
+                ["create_zip"] = effectiveZip,
                 ["ollama_url"] = (_ollamaUrl ?? string.Empty).Trim(),
                 ["api_key"] = (_apiKey ?? string.Empty).Trim()
             };
 
-            var pluginResult = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "tag_dataset", parameters);
+            var pluginResult = await PluginManager.ExecutePluginAsync(
+                "ollama-lora-tagger",
+                "tag_dataset",
+                parameters,
+                line => {
+                    if (!string.IsNullOrWhiteSpace(line)) {
+                        _latestLog = line;
+                        InvokeAsync(StateHasChanged);
+                    }
+                },
+                null,
+                CancellationToken.None
+            );
 
             string dataStr = pluginResult.Data?.ToString() ?? string.Empty;
             if (!pluginResult.Success || string.IsNullOrEmpty(dataStr)) {
@@ -506,7 +570,20 @@
                 : (_lastResult.OutputDirectory ?? _inputPath);
             MudDialog.Close(DialogResult.Ok(new TaggerDialogResult {
                 DatasetPath = finalTarget,
-                TriggerWord = _triggerWord
+                TriggerWord = _triggerWord,
+                WasInPlace = _writeInPlace
+            }));
+        } else {
+            MudDialog.Cancel();
+        }
+    }
+
+    private void CloseDialog() {
+        if (_lastResult != null && _writeInPlace) {
+            MudDialog.Close(DialogResult.Ok(new TaggerDialogResult {
+                DatasetPath = _inputPath,
+                TriggerWord = _triggerWord,
+                WasInPlace = true
             }));
         } else {
             MudDialog.Cancel();
@@ -514,6 +591,19 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private void UseCurrentStudioDataset() {
+        if (!string.IsNullOrWhiteSpace(StudioSession.DatasetFolder)) {
+            _inputPath = StudioSession.DatasetFolder;
+            _writeInPlace = true;
+            _createZip = false;
+            _outputPath = string.Empty;
+            if (!string.IsNullOrWhiteSpace(StudioSession.TriggerWord)) {
+                _triggerWord = StudioSession.TriggerWord;
+            }
+            StateHasChanged();
+        }
+    }
 
     public sealed class TaggerResultViewModel {
         public int ProcessedCount { get; set; }
@@ -530,6 +620,7 @@
     public sealed class TaggerDialogResult {
         public string DatasetPath { get; set; } = string.Empty;
         public string TriggerWord { get; set; } = string.Empty;
+        public bool WasInPlace { get; set; }
     }
 
     private void OnCaptionStyleOrPresetChanged() {

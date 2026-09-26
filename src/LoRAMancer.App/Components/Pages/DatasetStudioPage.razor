@@ -1,11 +1,14 @@
 @page "/curate"
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
+@using System.Text.Json
 @implements IDisposable
 @inject StudioSessionService StudioSession
 @inject DatasetCuratorService CuratorService
 @inject SemanticCollisionService CollisionService
 @inject NativeFileDialogService FileDialogService
+@inject PluginManagerService PluginManager
+@inject SettingsService Settings
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
@@ -56,7 +59,11 @@
                 <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@_report.TotalImages Images</MudChip>
                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@_report.TotalCaptions Captions</MudChip>
                 @if (_report.MissingCaptions > 0) {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">@_report.MissingCaptions Missing .txt</MudChip>
+                    <MudTooltip Text="Click to auto-tag missing caption files with Ollama">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled" OnClick="OpenOllamaTaggerAsync" Style="cursor: pointer;">
+                            @_report.MissingCaptions Missing .txt (Auto-Tag)
+                        </MudChip>
+                    </MudTooltip>
                 }
             }
         </div>
@@ -202,11 +209,21 @@
                                     <span style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">
                                         Caption (@(string.IsNullOrWhiteSpace(item.CaptionText) ? "Empty" : $"{item.CaptionText.Split(',', StringSplitOptions.RemoveEmptyEntries).Length} tags"))
                                     </span>
-                                    @if (string.IsNullOrWhiteSpace(item.CaptionText)) {
-                                        <span style="font-size: 0.65rem; color: #f9e2af; font-weight: 600; background: rgba(249,226,175,0.15); padding: 1px 6px; border-radius: 4px;">
-                                            Missing .txt
-                                        </span>
-                                    }
+                                    <div class="d-flex align-center gap-1">
+                                        @if (string.IsNullOrWhiteSpace(item.CaptionText)) {
+                                            <span style="font-size: 0.65rem; color: #f9e2af; font-weight: 600; background: rgba(249,226,175,0.15); padding: 1px 6px; border-radius: 4px;">
+                                                Missing .txt
+                                            </span>
+                                        }
+                                        <MudTooltip Text="Auto-tag this image using Ollama Vision">
+                                            <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" 
+                                                           Size="Size.Small" 
+                                                           Color="Color.Tertiary" 
+                                                           OnClick="@(() => AutoTagSingleItemAsync(item))" 
+                                                           Disabled="@(_singleTaggingPath == item.ImagePath)" 
+                                                           Style="width: 22px; height: 22px; padding: 0;" />
+                                        </MudTooltip>
+                                    </div>
                                 </div>
                                 
                                 <textarea @bind="item.CaptionText"
@@ -272,9 +289,25 @@
                                                   placeholder="Enter tags separated by commas..."
                                                   style="width: 100%; height: 60px; max-height: 100px; overflow-y: auto; background-color: rgba(24, 24, 37, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: #cdd6f4; font-size: 0.85rem; font-family: inherit; padding: 6px 10px; resize: vertical; outline: none; line-height: 1.4;"
                                                   class="custom-caption-textarea"></textarea>
-                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => SaveSingleCaptionAsync(item))" Style="height: 60px; min-width: 80px; border-radius: 6px;">
-                                            Save
-                                        </MudButton>
+                                        <div class="d-flex flex-column gap-1" style="min-width: 80px;">
+                                            <MudButton Variant="Variant.Outlined" 
+                                                       Color="Color.Tertiary" 
+                                                       Size="Size.Small" 
+                                                       StartIcon="@Icons.Material.Filled.AutoAwesome" 
+                                                       OnClick="@(() => AutoTagSingleItemAsync(item))"
+                                                       Disabled="@(_singleTaggingPath == item.ImagePath)"
+                                                       Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                                @(_singleTaggingPath == item.ImagePath ? "Tagging..." : "AI Tag")
+                                            </MudButton>
+                                            <MudButton Variant="Variant.Filled" 
+                                                       Color="Color.Primary" 
+                                                       Size="Size.Small" 
+                                                       StartIcon="@Icons.Material.Filled.Save" 
+                                                       OnClick="@(() => SaveSingleCaptionAsync(item))"
+                                                       Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                                Save
+                                            </MudButton>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -634,6 +667,15 @@
                             <span style="font-size: 0.75rem; color: #a6adc8;">
                                 @GetWordCount(_editingCaptionDraft) words | @_editingCaptionDraft.Length chars
                             </span>
+                            <MudButton Variant="Variant.Outlined" 
+                                       Color="Color.Tertiary" 
+                                       Size="Size.Small" 
+                                       StartIcon="@Icons.Material.Filled.AutoAwesome" 
+                                       OnClick="@(() => AutoTagSingleItemAsync(_editingItem))"
+                                       Disabled="@(_singleTaggingPath == _editingItem.ImagePath)"
+                                       Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                @(_singleTaggingPath == _editingItem.ImagePath ? "AI Tagging..." : "✨ AI Auto-Tag")
+                            </MudButton>
                         </div>
                     </div>
 
@@ -755,6 +797,7 @@
     private DatasetCuratorItem? _editingItem;
     private int _editingIndex = -1;
     private string _editingCaptionDraft = "";
+    private string _singleTaggingPath = string.Empty;
 
     private void OpenCaptionEditor(DatasetCuratorItem item) {
         _editingItem = item;
@@ -1103,8 +1146,75 @@
     }
 
     private async Task OpenOllamaTaggerAsync() {
+        var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.OllamaTaggerDialog> {
+            { x => x.InitialInputPath, _datasetFolder },
+            { x => x.InitialTriggerWord, StudioSession.TriggerWord }
+        };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.OllamaTaggerDialog>("Ollama Vision LoRA Tagger", options);
+        var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.OllamaTaggerDialog>("Ollama Vision LoRA Tagger", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled) {
+            if (!string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
+                await ScanFolderAsync();
+                Snackbar.Add("Dataset refreshed with newly generated Ollama captions!", Severity.Success);
+            }
+        }
+    }
+
+    private async Task AutoTagSingleItemAsync(DatasetCuratorItem? item) {
+        if (item == null || string.IsNullOrWhiteSpace(item.ImagePath) || !File.Exists(item.ImagePath)) return;
+
+        _singleTaggingPath = item.ImagePath;
+        StateHasChanged();
+
+        try {
+            string model = !string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel) 
+                ? Settings.Current.OllamaDefaultModel 
+                : "llama3.2-vision";
+            string url = !string.IsNullOrWhiteSpace(Settings.Current.OllamaEndpointUrl)
+                ? Settings.Current.OllamaEndpointUrl
+                : "http://localhost:11434";
+
+            var parameters = new Dictionary<string, object?> {
+                ["image_path"] = item.ImagePath,
+                ["model"] = model,
+                ["ollama_url"] = url,
+                ["api_key"] = Settings.Current.OllamaApiKey ?? "",
+                ["trigger_word"] = StudioSession.TriggerWord,
+                ["caption_style"] = "tags",
+                ["write_txt"] = true
+            };
+
+            var pluginResult = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "tag_single_image", parameters);
+            if (!pluginResult.Success || string.IsNullOrEmpty(pluginResult.Data?.ToString())) {
+                throw new InvalidOperationException(pluginResult.Message ?? "Failed to execute Ollama single tagger.");
+            }
+
+            using var doc = JsonDocument.Parse(pluginResult.Data.ToString()!);
+            JsonElement root = doc.RootElement;
+            string status = root.TryGetProperty("status", out var sElem) ? sElem.GetString() ?? "" : "";
+            if (status != "success") {
+                string msg = root.TryGetProperty("message", out var mElem) ? mElem.GetString() ?? "" : "Tagging failed";
+                throw new InvalidOperationException(msg);
+            }
+
+            string newCaption = root.TryGetProperty("caption", out var cElem) ? cElem.GetString() ?? "" : "";
+            item.CaptionText = newCaption;
+            if (_editingItem?.ImagePath == item.ImagePath) {
+                _editingCaptionDraft = newCaption;
+            }
+
+            if (_report != null) {
+                _report.TagFrequencies = CuratorService.ComputeTagFrequencies(_report.Items);
+            }
+
+            Snackbar.Add($"AI Tagged {Path.GetFileName(item.ImagePath)} using {model}!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"AI Tagging failed: {ex.Message}", Severity.Error);
+        } finally {
+            _singleTaggingPath = string.Empty;
+            StateHasChanged();
+        }
     }
 
     private static Color GetRadarSeverityColor(CollisionSeverity sev) {

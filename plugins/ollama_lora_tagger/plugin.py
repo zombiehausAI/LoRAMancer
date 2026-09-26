@@ -390,10 +390,68 @@ def main():
         result = ping_ollama(ollama_url, api_key=api_key)
     elif args.cmd == "tag_dataset":
         result = handle_tag_dataset(data)
+    elif args.cmd == "tag_single_image":
+        result = handle_tag_single_image(data)
     else:
         result = {"status": "error", "message": f"Unknown command: {args.cmd}"}
 
     print(json.dumps(result))
+
+
+def handle_tag_single_image(data: dict) -> dict:
+    image_path = data.get("image_path", "").strip()
+    if not image_path or not os.path.isfile(image_path):
+        return {"status": "error", "message": f"Image file not found: {image_path}"}
+
+    ollama_url = data.get("ollama_url", "http://localhost:11434").strip()
+    api_key = data.get("api_key", "").strip()
+    model = data.get("model", "llama3.2-vision").strip()
+    caption_style = data.get("caption_style", "tags").strip()
+    custom_prompt = data.get("custom_prompt", "").strip()
+    trigger_word = data.get("trigger_word", "").strip()
+    raw_inclusions = data.get("included_phrases", [])
+    if isinstance(raw_inclusions, str):
+        included_phrases = [x.strip() for x in raw_inclusions.split(",") if x.strip()]
+    else:
+        included_phrases = list(raw_inclusions)
+    raw_blacklist = data.get("blacklist_words", [])
+    if isinstance(raw_blacklist, str):
+        blacklist_words = [x.strip() for x in raw_blacklist.split(",") if x.strip()]
+    else:
+        blacklist_words = list(raw_blacklist)
+
+    if custom_prompt:
+        prompt = custom_prompt
+    elif caption_style == "natural":
+        prompt = DEFAULT_NATURAL_PROMPT
+    else:
+        prompt = DEFAULT_TAG_PROMPT
+
+    try:
+        with open(image_path, "rb") as f:
+            img_data = f.read()
+
+        raw_caption = query_ollama_vision(img_data, model, prompt, ollama_url, api_key=api_key)
+        final_caption = sanitize_and_format_caption(
+            raw_caption,
+            trigger_word=trigger_word,
+            included_phrases=included_phrases,
+            blacklist_words=blacklist_words,
+            caption_style=caption_style
+        )
+
+        if data.get("write_txt", True):
+            txt_path = os.path.splitext(image_path)[0] + ".txt"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(final_caption)
+
+        return {
+            "status": "success",
+            "caption": final_caption,
+            "image": os.path.basename(image_path)
+        }
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
 
 
 if __name__ == "__main__":
