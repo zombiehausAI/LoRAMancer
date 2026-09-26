@@ -36,6 +36,11 @@
             @(_isLoading ? "Scanning..." : "Rescan")
         </MudButton>
         @if (!string.IsNullOrWhiteSpace(_datasetFolder)) {
+            <MudTooltip Text="@($"Zip dataset images and captions into {Path.GetFileName(_datasetFolder.TrimEnd('\\', '/'))}.zip")">
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="OpenZipDatasetDialogAsync" Disabled="_isLoading">
+                    Zip Dataset
+                </MudButton>
+            </MudTooltip>
             <MudTooltip Text="Unload and clear active dataset">
                 <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearDataset" Disabled="_isLoading">
                     Clear Dataset
@@ -384,7 +389,7 @@
         <!-- Tab 3: Batch Operations -->
         <MudTabPanel Text="Batch Operations" Icon="@Icons.Material.Filled.EditNote">
             <MudGrid Spacing="3" Class="mt-1">
-                <MudItem xs="12" md="6">
+                <MudItem xs="12" md="4">
                     <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                         <div class="d-flex align-center gap-2 mb-2">
                             <MudIcon Icon="@Icons.Material.Filled.AddCircle" Color="Color.Success" Size="Size.Small" />
@@ -405,7 +410,7 @@
                     </MudCard>
                 </MudItem>
 
-                <MudItem xs="12" md="6">
+                <MudItem xs="12" md="4">
                     <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                         <div class="d-flex align-center gap-2 mb-2">
                             <MudIcon Icon="@Icons.Material.Filled.FindReplace" Color="Color.Primary" Size="Size.Small" />
@@ -425,6 +430,29 @@
                                 Replace in All
                             </MudButton>
                         </div>
+                    </MudCard>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <MudCard Elevation="0" Class="pa-4 h-100 d-flex flex-column justify-space-between" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <div>
+                            <div class="d-flex align-center gap-2 mb-2">
+                                <MudIcon Icon="@Icons.Material.Filled.FolderZip" Color="Color.Info" Size="Size.Small" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Package Dataset as ZIP</MudText>
+                            </div>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                                Compress your training images and captions into a clean archive named after your folder for easy backup, Civitai sharing, or remote cloud training.
+                            </MudText>
+                            <div class="pa-2 mb-3" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
+                                <div style="font-size: 0.72rem; color: #a6adc8;">Target Archive Name:</div>
+                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #89b4fa; font-weight: 600;">
+                                    @(Path.GetFileName(_datasetFolder.TrimEnd('\\', '/'))).zip
+                                </div>
+                            </div>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" OnClick="OpenZipDatasetDialogAsync" StartIcon="@Icons.Material.Filled.Archive">
+                            Zip Dataset Archive...
+                        </MudButton>
                     </MudCard>
                 </MudItem>
             </MudGrid>
@@ -1202,6 +1230,21 @@
                 Snackbar.Add("Dataset refreshed with newly generated Ollama captions!", Severity.Success);
             }
         }
+    }
+
+    private async Task OpenZipDatasetDialogAsync() {
+        if (string.IsNullOrWhiteSpace(_datasetFolder) || !Directory.Exists(_datasetFolder)) {
+            Snackbar.Add("Please select a valid dataset folder first.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ZipDatasetDialog> {
+            { x => x.DatasetFolder, _datasetFolder },
+            { x => x.TotalImages, _report?.TotalImages ?? 0 },
+            { x => x.TotalCaptions, _report?.TotalCaptions ?? 0 }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ZipDatasetDialog>("Zip Dataset Archive", parameters, options);
     }
 
     private async Task AutoTagSingleItemAsync(DatasetCuratorItem? item, string? focusOverride = null, string? styleOverride = null) {

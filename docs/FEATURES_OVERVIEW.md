@@ -146,6 +146,10 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - Automatic timestamped caption backups (`.captions_backup_YYYYMMDD_HHMMSS`) created before every batch modification.
 - **Dataset Clear & Unload**:
   - One-click dataset clearing to safely unload the active workspace, wipe thumbnail memory caches, and reset curation session state.
+- **Dataset ZIP Archive Packaging**:
+  - 1-click dialog to compress images and `.txt` captions into `<folder_name>.zip`.
+  - Toggle between saving directly inside the dataset folder (`<dataset_folder>\<folder_name>.zip`) or alongside in the parent directory (`<parent_dir>\<folder_name>.zip`).
+  - Real-time compression progress, automatic exclusion of pre-existing `.zip` archives, and 1-click "Open in File Explorer" upon completion.
 - **Aspect Ratio Bucketing & Image Audit**:
   - Analyzes image dimensions across dataset files without loading full bitmaps into RAM.
   - Groups images into standard training buckets (1:1 Square, 3:4/2:3/9:16 Portrait, 4:3/3:2/16:9 Landscape) with distribution percentages.
