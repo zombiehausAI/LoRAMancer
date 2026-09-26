@@ -368,6 +368,11 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
   - Overrides take precedence over high-level category cards.
 - **Smart Auto-Craft Recipe**:
   - 1-click intelligent analysis: automatically evaluates donor Frobenius norms and assigns the optimal donor to each anatomical and aesthetic part.
+- **Recipe Presets & User Home JSON Storage**:
+  - Save custom chimeric recipes to the user's home folder (`~/.loramancer/chopshop_recipes/*.json`) with custom names, descriptions, donor linkages, multipliers, and block matrix overrides.
+  - Dropdown preset selector allowing users to quickly switch between saved recipes, auto-restoring donor models, anatomical bindings, and synthesis parameters with missing-file safety guards.
+  - 1-click shortcut icon to open the recipe directory directly in the native file explorer, plus 1-click preset deletion.
+  - Quick "Save Preset" action accessible directly from the Bake & Synthesis station.
 - **SVD Matrix Re-Compression, TIES Denoising & ComfyUI Launch**:
   - Zero-training algebraic synthesis compiling delta weight matrices into clean, target-rank `.safetensors` files (Rank 8, 16, 32, or 64).
   - TIES consensus denoising to eliminate multi-vector interference and artifact bleed.

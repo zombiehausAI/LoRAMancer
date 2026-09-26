@@ -19,6 +19,33 @@
     </div>
 
     <div class="d-flex align-center gap-2 flex-wrap">
+        <div style="min-width: 220px;">
+            <MudSelect T="string" Value="@_selectedRecipeName" ValueChanged="OnSelectRecipeAsync"
+                       Label="Recipe Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                       Placeholder="Saved Recipes..." Clearable="true" OnClearButtonClick="ClearSelectedRecipe">
+                <MudSelectItem Value="@((string?)null)">-- Current Workspace --</MudSelectItem>
+                @foreach (var r in _savedRecipes) {
+                    <MudSelectItem Value="@r.RecipeName">
+                        <div class="d-flex align-center justify-space-between gap-2">
+                            <span style="font-weight: 600;">@r.RecipeName</span>
+                            <span style="font-size: 0.7rem; color: #a6adc8;">(@r.Donors.Count donors)</span>
+                        </div>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_selectedRecipeName)) {
+            <MudTooltip Text="Delete selected recipe preset">
+                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error" Size="Size.Small" OnClick="DeleteSelectedRecipeAsync" />
+            </MudTooltip>
+        }
+        <MudTooltip Text="Open recipe presets folder (~/.loramancer/chopshop_recipes)">
+            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Default" Size="Size.Small" OnClick="OpenRecipeFolder" />
+        </MudTooltip>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.BookmarkAdd"
+                   OnClick="OpenSaveRecipeDialog" Disabled="_donors.Count == 0 || _isAssembling">
+            Save Recipe
+        </MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="AddDonorLoRAAsync" Disabled="_isInspectingDonor || _isAssembling">
             @(_isInspectingDonor ? "Analyzing Donor..." : "Add Donor LoRA")
         </MudButton>
@@ -239,9 +266,14 @@
                         <MudText Typo="Typo.caption" Color="Color.Secondary">Destination Path:</MudText>
                         <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #89b4fa;">@_recipe.OutputPath</span>
                     </div>
-                    <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Large" StartIcon="@Icons.Material.Filled.BuildCircle" OnClick="BakeLoraAsync" Disabled="_isAssembling">
-                        @(_isAssembling ? "Assembling Franken-LoRA..." : "Bake Assembled Franken-LoRA")
-                    </MudButton>
+                    <div class="d-flex align-center gap-2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.BookmarkAdd" OnClick="OpenSaveRecipeDialog" Disabled="_isAssembling">
+                            Save Preset
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Large" StartIcon="@Icons.Material.Filled.BuildCircle" OnClick="BakeLoraAsync" Disabled="_isAssembling">
+                            @(_isAssembling ? "Assembling Franken-LoRA..." : "Bake Assembled Franken-LoRA")
+                        </MudButton>
+                    </div>
                 </div>
 
                 @if (_result != null) {
@@ -274,6 +306,35 @@
     </MudTabPanel>
 </MudTabs>
 
+<!-- Save Recipe Dialog -->
+<MudDialog @bind-Visible="_saveRecipeDialogOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.BookmarkAdd" Color="Color.Info" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">Save Chop-Shop Recipe</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            Saves all donor links, anatomical part mappings, multipliers, and block matrix overrides to your user home folder in JSON format (<code>~/.loramancer/chopshop_recipes</code>).
+        </MudText>
+        <MudTextField @bind-Value="_recipeSaveName" Label="Recipe Name" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+        <MudTextField @bind-Value="_recipeSaveDescription" Label="Description (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+        <div class="d-flex align-center gap-2 flex-wrap mt-2">
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled">@_donors.Count Donors</MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled">Rank @(_recipe?.TargetRank ?? 16)</MudChip>
+            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled">@(_recipe?.PartAssignments.Count ?? 0) Parts Assigned</MudChip>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => _saveRecipeDialogOpen = false)">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="ConfirmSaveRecipeAsync" Disabled="string.IsNullOrWhiteSpace(_recipeSaveName)">
+            Save Preset
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private int _activeTabIndex;
     private readonly List<ChopDonorModel> _donors = new();
@@ -282,12 +343,26 @@
     private bool _isAssembling;
     private ChopShopResult? _result;
     private readonly List<string> _logs = new();
+    private List<ChopShopRecipe> _savedRecipes = new();
+    private string? _selectedRecipeName;
+    private bool _saveRecipeDialogOpen;
+    private string _recipeSaveName = string.Empty;
+    private string _recipeSaveDescription = string.Empty;
 
     protected override async Task OnInitializedAsync() {
         InitRecipe();
+        await LoadSavedRecipesAsync();
         // If an active LoRA is present in the Studio session, seed it as Donor #1 automatically
         if (!string.IsNullOrWhiteSpace(StudioSession.ActiveLoraPath) && File.Exists(StudioSession.ActiveLoraPath)) {
             await AddDonorByPathAsync(StudioSession.ActiveLoraPath);
+        }
+    }
+
+    private async Task LoadSavedRecipesAsync() {
+        try {
+            _savedRecipes = await ChopShop.GetSavedRecipesAsync();
+        } catch {
+            _savedRecipes = new();
         }
     }
 
@@ -461,5 +536,127 @@
             ("output_blocks.10", "Iris & Micro-Pores"),
             ("output_blocks.11", "Fine Detail Polish")
         };
+    }
+
+    private async Task OnSelectRecipeAsync(string? recipeName) {
+        _selectedRecipeName = recipeName;
+        if (string.IsNullOrWhiteSpace(recipeName)) {
+            return;
+        }
+
+        var saved = _savedRecipes.FirstOrDefault(r => string.Equals(r.RecipeName, recipeName, StringComparison.OrdinalIgnoreCase));
+        if (saved != null) {
+            await ApplyRecipeAsync(saved);
+        }
+    }
+
+    private void ClearSelectedRecipe() {
+        _selectedRecipeName = null;
+    }
+
+    private async Task ApplyRecipeAsync(ChopShopRecipe savedRecipe) {
+        if (savedRecipe == null) return;
+
+        int missing = 0;
+        foreach (var d in savedRecipe.Donors) {
+            var existing = _donors.FirstOrDefault(x => x.FilePath == d.FilePath || x.Id == d.Id);
+            if (existing == null) {
+                if (File.Exists(d.FilePath)) {
+                    try {
+                        var inspected = await ChopShop.InspectDonorAsync(d.FilePath);
+                        inspected.Id = d.Id;
+                        _donors.Add(inspected);
+                    } catch {
+                        _donors.Add(d);
+                    }
+                } else {
+                    missing++;
+                    _donors.Add(d);
+                }
+            }
+        }
+
+        _recipe = new ChopShopRecipe {
+            RecipeName = savedRecipe.RecipeName,
+            Description = savedRecipe.Description,
+            Donors = _donors.ToList(),
+            PartAssignments = savedRecipe.PartAssignments.Select(p => new ChopPartAssignment {
+                Category = p.Category,
+                PartName = p.PartName,
+                Description = p.Description,
+                Icon = p.Icon,
+                SelectedDonorId = p.SelectedDonorId,
+                Weight = p.Weight,
+                TargetBlocksDescription = p.TargetBlocksDescription
+            }).ToList(),
+            AdvancedOverrides = savedRecipe.AdvancedOverrides.Select(o => new AdvancedBlockOverride {
+                BlockName = o.BlockName,
+                FunctionalGroup = o.FunctionalGroup,
+                SelectedDonorId = o.SelectedDonorId,
+                Weight = o.Weight
+            }).ToList(),
+            TargetRank = savedRecipe.TargetRank,
+            UseDenoisingTies = savedRecipe.UseDenoisingTies,
+            OutputPath = string.IsNullOrWhiteSpace(savedRecipe.OutputPath)
+                ? Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "chopshop"), $"{savedRecipe.RecipeName}.safetensors")
+                : savedRecipe.OutputPath
+        };
+
+        if (missing > 0) {
+            Snackbar.Add($"Loaded recipe preset '{savedRecipe.RecipeName}'! ({missing} donor files not found at original paths)", Severity.Warning);
+        } else {
+            Snackbar.Add($"Loaded recipe preset '{savedRecipe.RecipeName}' successfully!", Severity.Success);
+        }
+        StateHasChanged();
+    }
+
+    private void OpenSaveRecipeDialog() {
+        _recipeSaveName = _recipe?.RecipeName ?? "ChopShop_Recipe";
+        _recipeSaveDescription = _recipe?.Description ?? "";
+        _saveRecipeDialogOpen = true;
+    }
+
+    private async Task ConfirmSaveRecipeAsync() {
+        if (_recipe == null || string.IsNullOrWhiteSpace(_recipeSaveName)) return;
+
+        try {
+            _recipe.Donors = _donors.ToList();
+            _recipe.RecipeName = _recipeSaveName.Trim();
+            _recipe.Description = _recipeSaveDescription.Trim();
+            string savedPath = await ChopShop.SaveRecipeAsync(_recipe, _recipeSaveName);
+            await LoadSavedRecipesAsync();
+            _selectedRecipeName = _recipeSaveName;
+            _saveRecipeDialogOpen = false;
+            Snackbar.Add($"Recipe saved: {Path.GetFileName(savedPath)} in ~/.loramancer/chopshop_recipes", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save recipe: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteSelectedRecipeAsync() {
+        if (string.IsNullOrWhiteSpace(_selectedRecipeName)) return;
+
+        try {
+            bool deleted = ChopShop.DeleteRecipe(_selectedRecipeName);
+            if (deleted) {
+                Snackbar.Add($"Deleted recipe preset '{_selectedRecipeName}'.", Severity.Info);
+                _selectedRecipeName = null;
+                await LoadSavedRecipesAsync();
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Error deleting recipe: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void OpenRecipeFolder() {
+        try {
+            string dir = LoraChopShopService.GetRecipeDirectory();
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = dir,
+                UseShellExecute = true
+            });
+        } catch (Exception ex) {
+            Snackbar.Add($"Could not open recipes folder: {ex.Message}", Severity.Warning);
+        }
     }
 }

@@ -47,6 +47,8 @@ public sealed class AdvancedBlockOverride {
 
 public sealed class ChopShopRecipe {
     public string RecipeName { get; set; } = "ChopShop_FrankenLoRA";
+    public string Description { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<ChopDonorModel> Donors { get; set; } = new();
     public List<ChopPartAssignment> PartAssignments { get; set; } = new();
     public List<AdvancedBlockOverride> AdvancedOverrides { get; set; } = new();
@@ -241,6 +243,82 @@ public sealed class LoraChopShopService {
         }
 
         return recipe;
+    }
+
+    public static string GetRecipeDirectory() {
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "chopshop_recipes");
+        if (!Directory.Exists(dir)) {
+            Directory.CreateDirectory(dir);
+        }
+        return dir;
+    }
+
+    public async Task<string> SaveRecipeAsync(ChopShopRecipe recipe, string? customName = null, CancellationToken cancellationToken = default) {
+        string dir = GetRecipeDirectory();
+        string name = string.IsNullOrWhiteSpace(customName) ? recipe.RecipeName : customName.Trim();
+        if (string.IsNullOrWhiteSpace(name)) {
+            name = "Recipe_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        }
+        recipe.RecipeName = name;
+        recipe.CreatedAt = DateTime.UtcNow;
+
+        foreach (char c in Path.GetInvalidFileNameChars()) {
+            name = name.Replace(c, '_');
+        }
+
+        string filePath = Path.Combine(dir, $"{name}.json");
+        string json = JsonSerializer.Serialize(recipe, new JsonSerializerOptions {
+            WriteIndented = true,
+            PropertyNameCaseInsensitive = true
+        });
+        await File.WriteAllTextAsync(filePath, json, Encoding.UTF8, cancellationToken);
+        return filePath;
+    }
+
+    public async Task<List<ChopShopRecipe>> GetSavedRecipesAsync(CancellationToken cancellationToken = default) {
+        var list = new List<ChopShopRecipe>();
+        string dir = GetRecipeDirectory();
+        if (!Directory.Exists(dir)) return list;
+
+        var files = Directory.GetFiles(dir, "*.json").OrderByDescending(File.GetLastWriteTimeUtc);
+        foreach (var file in files) {
+            try {
+                string json = await File.ReadAllTextAsync(file, cancellationToken);
+                var recipe = JsonSerializer.Deserialize<ChopShopRecipe>(json, new JsonSerializerOptions {
+                    PropertyNameCaseInsensitive = true
+                });
+                if (recipe != null) {
+                    if (string.IsNullOrWhiteSpace(recipe.RecipeName)) {
+                        recipe.RecipeName = Path.GetFileNameWithoutExtension(file);
+                    }
+                    list.Add(recipe);
+                }
+            } catch {
+                // Ignore corrupt or unreadable files
+            }
+        }
+        return list;
+    }
+
+    public async Task<ChopShopRecipe?> LoadRecipeAsync(string filePath, CancellationToken cancellationToken = default) {
+        if (!File.Exists(filePath)) return null;
+        string json = await File.ReadAllTextAsync(filePath, cancellationToken);
+        return JsonSerializer.Deserialize<ChopShopRecipe>(json, new JsonSerializerOptions {
+            PropertyNameCaseInsensitive = true
+        });
+    }
+
+    public bool DeleteRecipe(string recipeNameOrPath) {
+        string dir = GetRecipeDirectory();
+        string filePath = File.Exists(recipeNameOrPath)
+            ? recipeNameOrPath
+            : Path.Combine(dir, recipeNameOrPath.EndsWith(".json") ? recipeNameOrPath : $"{recipeNameOrPath}.json");
+
+        if (File.Exists(filePath)) {
+            File.Delete(filePath);
+            return true;
+        }
+        return false;
     }
 
     public async Task<ChopShopResult> AssembleChopShopLoraAsync(
