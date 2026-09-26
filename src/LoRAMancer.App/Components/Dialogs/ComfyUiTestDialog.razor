@@ -1,0 +1,407 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject ComfyUiService ComfyService
+@inject SettingsService Settings
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">ComfyUI Interactive Test Studio</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Deploy trained LoRA and render test generations directly in local, LAN, or WAN ComfyUI
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- Connection & Endpoint Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Lan" Size="Size.Small" Color="Color.Info" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">ComfyUI Instance</MudText>
+                    </div>
+                    @if (_connStatus != null) {
+                        @if (_connStatus.IsConnected) {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">
+                                Online (@_connStatus.DeviceName)
+                            </MudChip>
+                        } else {
+                            <MudChip T="string" Color="Color.Error" Size="Size.Small" Icon="@Icons.Material.Filled.Error">
+                                Offline (@(_connStatus.ErrorMessage ?? "Cannot reach host"))
+                            </MudChip>
+                        }
+                    }
+                </div>
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_endpoint" Label="Endpoint URL" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="http://127.0.0.1:8188" FullWidth="true" Disabled="_isRendering" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="CheckConnectionAsync" Disabled="_isConnecting || _isRendering" StartIcon="@Icons.Material.Filled.Refresh">
+                        @(_isConnecting ? "Connecting..." : "Check")
+                    </MudButton>
+                </div>
+            </MudCard>
+
+            <!-- LoRA Deployment Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Layers" Size="Size.Small" Color="Color.Warning" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Active LoRA Target</MudText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_deployedLoraName)) {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CloudDone">
+                            Available in ComfyUI
+                        </MudChip>
+                    } else {
+                        <MudChip T="string" Color="Color.Warning" Size="Size.Small" Icon="@Icons.Material.Filled.CloudUpload">
+                            Not Deployed
+                        </MudChip>
+                    }
+                </div>
+
+                <div class="d-flex align-center justify-space-between">
+                    <div>
+                        <MudText Typo="Typo.body2" Style="font-weight: 600;">@(string.IsNullOrWhiteSpace(LoraName) ? Path.GetFileName(LoraFilePath) : LoraName)</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@LoraFilePath</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="DeployLoraAsync" Disabled="_isDeploying || _isRendering || string.IsNullOrWhiteSpace(LoraFilePath)" StartIcon="@Icons.Material.Filled.Publish">
+                        @(_isDeploying ? "Deploying..." : "Deploy / Symlink")
+                    </MudButton>
+                </div>
+            </MudCard>
+
+            <MudGrid Spacing="2">
+                <!-- Checkpoint Selection & Architecture -->
+                <MudItem xs="12" md="6">
+                    <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Base Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering">
+                        <MudSelectItem Value="@("FLUX.1-dev")">FLUX.1 (Dev / Schnell)</MudSelectItem>
+                        <MudSelectItem Value="@("SDXL")">SDXL 1.0 / Pony</MudSelectItem>
+                        <MudSelectItem Value="@("SD1.5")">Stable Diffusion 1.5</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    @if (_connStatus?.AvailableCheckpoints?.Count > 0) {
+                        <MudSelect T="string" @bind-Value="_selectedCheckpoint" Label="ComfyUI Checkpoint" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering">
+                            @foreach (var ckpt in _connStatus.AvailableCheckpoints) {
+                                <MudSelectItem Value="@ckpt">@ckpt</MudSelectItem>
+                            }
+                        </MudSelect>
+                    } else {
+                        <MudTextField @bind-Value="_selectedCheckpoint" Label="ComfyUI Checkpoint / UNet" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="flux1-dev.safetensors or sdxl_base_1.0.safetensors" Disabled="_isRendering" />
+                    }
+                </MudItem>
+
+                <!-- Prompt -->
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_prompt" Label="Positive Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" HelperText="Trigger words will activate the trained features" Disabled="_isRendering" />
+                </MudItem>
+
+                @if (_selectedArchitecture != "FLUX.1-dev") {
+                    <!-- Negative Prompt -->
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Disabled="_isRendering" />
+                    </MudItem>
+                }
+
+                <!-- LoRA Weight Slider -->
+                <MudItem xs="12" md="4">
+                    <MudText Typo="Typo.caption">LoRA Weight: <b>@_loraWeight.ToString("F2")</b></MudText>
+                    <MudSlider @bind-Value="_loraWeight" Min="0.1" Max="2.0" Step="0.05" Color="Color.Primary" Disabled="_isRendering" />
+                </MudItem>
+
+                <!-- Resolution -->
+                <MudItem xs="12" md="4">
+                    <MudSelect T="string" Value="_selectedResolution" ValueChanged="OnResolutionChanged" Label="Resolution" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering">
+                        <MudSelectItem Value="@("1024x1024")">1024 x 1024 (1:1)</MudSelectItem>
+                        <MudSelectItem Value="@("832x1216")">832 x 1216 (Portrait)</MudSelectItem>
+                        <MudSelectItem Value="@("1216x832")">1216 x 832 (Landscape)</MudSelectItem>
+                        <MudSelectItem Value="@("768x1024")">768 x 1024 (SDXL Port)</MudSelectItem>
+                        <MudSelectItem Value="@("512x512")">512 x 512 (SD 1.5)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <!-- Steps & CFG -->
+                <MudItem xs="6" md="2">
+                    <MudNumericField @bind-Value="_steps" Label="Steps" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100" Disabled="_isRendering" />
+                </MudItem>
+
+                <MudItem xs="6" md="2">
+                    <MudNumericField @bind-Value="_cfg" Label="CFG" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1.0" Max="20.0" Step="0.5" Disabled="_isRendering" />
+                </MudItem>
+            </MudGrid>
+
+            <!-- Progress & Render Status -->
+            @if (_isRendering) {
+                <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.body2" Color="Color.Primary" Style="font-weight: 600;">@_statusMessage</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@_progressPercent%</MudText>
+                    </div>
+                    <MudProgressLinear Color="Color.Primary" Value="@_progressPercent" Rounded="true" Size="Size.Medium" Class="my-1" />
+                </MudCard>
+            }
+
+            <!-- Rendered Output Area -->
+            @if (!string.IsNullOrWhiteSpace(_renderedBase64Image)) {
+                <MudCard Elevation="0" Class="pa-3 text-center" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Render Result (@_renderDuration)</MudText>
+                        <div class="d-flex gap-2">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" OnClick="SaveRenderedImageAsync" StartIcon="@Icons.Material.Filled.SaveAlt">
+                                Save Image
+                            </MudButton>
+                        </div>
+                    </div>
+                    <img src="@($"data:image/png;base64,{_renderedBase64Image}")" alt="ComfyUI Generation" style="max-height: 420px; max-width: 100%; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);" />
+                </MudCard>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog" Disabled="_isRendering">Close</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="StartRenderAsync" Disabled="_isRendering || (_connStatus != null && !_connStatus.IsConnected)" StartIcon="@Icons.Material.Filled.PlayArrow">
+            @(_isRendering ? "Rendering..." : "Render in ComfyUI")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? LoraFilePath { get; set; }
+
+    [Parameter]
+    public string? LoraName { get; set; }
+
+    [Parameter]
+    public string? BaseArchitecture { get; set; }
+
+    [Parameter]
+    public string? TriggerWords { get; set; }
+
+    private string _endpoint = "";
+    private ComfyUiConnectionStatus? _connStatus;
+    private bool _isConnecting;
+    private bool _isDeploying;
+    private bool _isRendering;
+    private string? _deployedLoraName;
+
+    private string _selectedArchitecture = "FLUX.1-dev";
+    private string _selectedCheckpoint = "";
+    private string _prompt = "";
+    private string _negativePrompt = "blurry, low quality, bad anatomy, deformed, distorted";
+    private double _loraWeight = 1.0;
+    private string _selectedResolution = "1024x1024";
+    private int _width = 1024;
+    private int _height = 1024;
+    private int _steps = 20;
+    private double _cfg = 3.5;
+
+    private string _statusMessage = "";
+    private int _progressPercent = 0;
+    private string? _renderedBase64Image;
+    private string _renderDuration = "";
+    private CancellationTokenSource? _renderCts;
+
+    protected override async Task OnInitializedAsync() {
+        _endpoint = ComfyService.GetEffectiveEndpoint();
+        if (!string.IsNullOrWhiteSpace(BaseArchitecture)) {
+            _selectedArchitecture = BaseArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase)
+                ? "FLUX.1-dev"
+                : BaseArchitecture.Contains("sdxl", StringComparison.OrdinalIgnoreCase) || BaseArchitecture.Contains("pony", StringComparison.OrdinalIgnoreCase)
+                    ? "SDXL"
+                    : "SD1.5";
+        }
+
+        if (_selectedArchitecture == "FLUX.1-dev") {
+            _steps = 20;
+            _cfg = 3.5;
+        } else {
+            _steps = 30;
+            _cfg = 7.0;
+        }
+
+        string loraTag = !string.IsNullOrWhiteSpace(TriggerWords) ? TriggerWords.Trim() : (LoraName ?? "subject");
+        _prompt = $"A high quality photo of {loraTag}, detailed, professional lighting";
+
+        await CheckConnectionAsync();
+    }
+
+    private async Task CheckConnectionAsync() {
+        _isConnecting = true;
+        StateHasChanged();
+        try {
+            if (!string.IsNullOrWhiteSpace(_endpoint) && _endpoint != Settings.Current.ComfyUiEndpointUrl) {
+                Settings.Current.ComfyUiEndpointUrl = _endpoint;
+                await Settings.SaveSettingsAsync(Settings.Current);
+            }
+
+            _connStatus = await ComfyService.CheckConnectionAsync(_endpoint);
+            if (_connStatus.IsConnected) {
+                // Determine if our LoRA is already listed
+                string targetFileName = Path.GetFileName(LoraFilePath ?? "");
+                if (!string.IsNullOrWhiteSpace(targetFileName)) {
+                    var match = _connStatus.AvailableLoras.FirstOrDefault(l =>
+                        string.Equals(l, targetFileName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(Path.GetFileName(l), targetFileName, StringComparison.OrdinalIgnoreCase));
+                    if (match != null) {
+                        _deployedLoraName = match;
+                    }
+                }
+
+                // Pick a default checkpoint if none selected
+                if (string.IsNullOrWhiteSpace(_selectedCheckpoint) && _connStatus.AvailableCheckpoints.Count > 0) {
+                    _selectedCheckpoint = _connStatus.AvailableCheckpoints.FirstOrDefault(c =>
+                        _selectedArchitecture == "FLUX.1-dev" ? c.Contains("flux", StringComparison.OrdinalIgnoreCase) :
+                        _selectedArchitecture == "SDXL" ? c.Contains("xl", StringComparison.OrdinalIgnoreCase) || c.Contains("pony", StringComparison.OrdinalIgnoreCase) :
+                        c.Contains("1.5", StringComparison.OrdinalIgnoreCase) || c.Contains("v1-5", StringComparison.OrdinalIgnoreCase))
+                        ?? _connStatus.AvailableCheckpoints.First();
+                }
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to connect to ComfyUI: {ex.Message}", Severity.Error);
+        } finally {
+            _isConnecting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeployLoraAsync() {
+        if (string.IsNullOrWhiteSpace(LoraFilePath) || !File.Exists(LoraFilePath)) {
+            Snackbar.Add("LoRA file does not exist locally to deploy.", Severity.Warning);
+            return;
+        }
+
+        _isDeploying = true;
+        StateHasChanged();
+        try {
+            bool isLocal = _endpoint.Contains("127.0.0.1") || _endpoint.Contains("localhost");
+            if (isLocal) {
+                var deployedPath = await ComfyService.DeployLoraLocallyAsync(LoraFilePath);
+                if (deployedPath != null) {
+                    _deployedLoraName = Path.GetFileName(deployedPath);
+                    Snackbar.Add($"LoRA deployed locally to ComfyUI ({_deployedLoraName})", Severity.Success);
+                } else {
+                    Snackbar.Add("Could not auto-locate ComfyUI models/loras folder. Specify path in Settings.", Severity.Warning);
+                }
+            } else {
+                bool uploaded = await ComfyService.UploadLoraToRemoteComfyUiAsync(LoraFilePath);
+                if (uploaded) {
+                    _deployedLoraName = Path.GetFileName(LoraFilePath);
+                    Snackbar.Add($"Uploaded LoRA to remote ComfyUI ({_deployedLoraName})", Severity.Success);
+                } else {
+                    Snackbar.Add("Failed to upload LoRA to remote ComfyUI instance.", Severity.Warning);
+                }
+            }
+            await CheckConnectionAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Deployment failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isDeploying = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnResolutionChanged(string res) {
+        _selectedResolution = res;
+        var parts = res.Split('x');
+        if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h)) {
+            _width = w;
+            _height = h;
+        }
+    }
+
+    private async Task StartRenderAsync() {
+        if (_connStatus == null || !_connStatus.IsConnected) {
+            await CheckConnectionAsync();
+            if (_connStatus == null || !_connStatus.IsConnected) {
+                Snackbar.Add("ComfyUI is not reachable at " + _endpoint, Severity.Error);
+                return;
+            }
+        }
+
+        string loraRef = _deployedLoraName ?? Path.GetFileName(LoraFilePath ?? "lora.safetensors");
+        string ckptRef = !string.IsNullOrWhiteSpace(_selectedCheckpoint)
+            ? _selectedCheckpoint
+            : (_selectedArchitecture == "FLUX.1-dev" ? "flux1-dev.safetensors" : "sd_xl_base_1.0.safetensors");
+
+        System.Text.Json.Nodes.JsonObject promptGraph;
+        if (_selectedArchitecture == "FLUX.1-dev") {
+            promptGraph = ComfyService.GenerateFluxPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _width, _height, _steps);
+        } else {
+            promptGraph = ComfyService.GenerateSdxlPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _negativePrompt, _width, _height, _steps, (float)_cfg);
+        }
+
+        _isRendering = true;
+        _progressPercent = 0;
+        _statusMessage = "Connecting to ComfyUI WebSocket...";
+        _renderedBase64Image = null;
+        StateHasChanged();
+
+        var startTime = DateTime.UtcNow;
+        _renderCts = new CancellationTokenSource();
+
+        Action<ComfyUiProgress> progressAction = p => {
+            _progressPercent = p.Percentage;
+            _statusMessage = $"{p.Stage} ({p.Step}/{p.TotalSteps})";
+            if (!string.IsNullOrWhiteSpace(p.PreviewImageBase64)) {
+                _renderedBase64Image = p.PreviewImageBase64;
+            }
+            InvokeAsync(StateHasChanged);
+        };
+
+        try {
+            var imageBytes = await ComfyService.QueuePromptAndRenderAsync(promptGraph, progressAction, _renderCts.Token);
+            if (imageBytes != null && imageBytes.Length > 0) {
+                _renderDuration = $"{(DateTime.UtcNow - startTime).TotalSeconds:F1}s";
+                _renderedBase64Image = Convert.ToBase64String(imageBytes);
+                _statusMessage = "Render complete!";
+                _progressPercent = 100;
+                Snackbar.Add($"Render completed in {_renderDuration}!", Severity.Success);
+            } else {
+                _statusMessage = "No image returned by ComfyUI";
+                Snackbar.Add("ComfyUI did not return an image output.", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            _statusMessage = "Render failed: " + ex.Message;
+            Snackbar.Add($"ComfyUI render failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isRendering = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveRenderedImageAsync() {
+        if (string.IsNullOrWhiteSpace(_renderedBase64Image)) {
+            return;
+        }
+
+        try {
+            byte[] bytes = Convert.FromBase64String(_renderedBase64Image);
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            string safeName = string.Join("_", (LoraName ?? "render").Split(Path.GetInvalidFileNameChars()));
+            string path = Path.Combine(desktop, $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+            await File.WriteAllBytesAsync(path, bytes);
+            Snackbar.Add($"Saved render to {path}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save image: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _renderCts?.Cancel();
+        _renderCts?.Dispose();
+    }
+}

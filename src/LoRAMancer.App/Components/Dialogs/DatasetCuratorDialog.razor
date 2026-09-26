@@ -1,0 +1,455 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject DatasetCuratorService CuratorService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Collections" Color="Color.Tertiary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">Dataset Curator & Caption Studio</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Tag frequency inspector, mass caption find/replace, trigger words, and aspect ratio bucketing
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- Folder Selection Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_datasetFolder" Label="Dataset Directory" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="D:\datasets\my_lora_concept" FullWidth="true" Disabled="_isLoading" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseFolderAsync" Disabled="_isLoading" StartIcon="@Icons.Material.Filled.FolderOpen">
+                        Browse
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="ScanFolderAsync" Disabled="_isLoading || string.IsNullOrWhiteSpace(_datasetFolder)" StartIcon="@Icons.Material.Filled.Refresh">
+                        @(_isLoading ? "Scanning..." : "Scan")
+                    </MudButton>
+                </div>
+            </MudCard>
+
+            @if (_report != null && _report.TotalImages > 0) {
+                <!-- Stats Summary Ribbon -->
+                <MudGrid Spacing="2">
+                    <MudItem xs="6" sm="2">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Images</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">@_report.TotalImages</MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Captions</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #a6e3a1;">@_report.TotalCaptions</MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="2">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Missing .txt</MudText>
+                            <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(_report.MissingCaptions > 0 ? "#f38ba8" : "#a6adc8")};")">
+                                @_report.MissingCaptions
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Unique Tags</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">@_report.TagFrequencies.Count</MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Corrupt Files</MudText>
+                            <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(_report.CorruptCount > 0 ? "#f38ba8" : "#a6adc8")};")">
+                                @_report.CorruptCount
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- Curator Tabs -->
+                <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-2" Color="Color.Dark">
+                    <!-- Tab 1: Tag Frequency Inspector -->
+                    <MudTabPanel Text="Tag Frequencies" Icon="@Icons.Material.Filled.LocalOffer">
+                        <div class="d-flex align-center justify-space-between mb-2 mt-2">
+                            <MudTextField @bind-Value="_tagFilter" Placeholder="Filter tags..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" />
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-3">
+                                Showing @FilteredTags.Count tags
+                            </MudText>
+                        </div>
+
+                        <MudTable Items="@FilteredTags" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true">
+                            <HeaderContent>
+                                <MudTh>Tag</MudTh>
+                                <MudTh Style="width: 100px;">Count</MudTh>
+                                <MudTh Style="width: 140px;">Dataset %</MudTh>
+                                <MudTh Style="width: 180px; text-align: right;">Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Tag">
+                                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #cdd6f4;">@context.Tag</span>
+                                </MudTd>
+                                <MudTd DataLabel="Count">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@context.Count</MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="Dataset %">
+                                    <div class="d-flex align-center gap-2">
+                                        <MudProgressLinear Color="Color.Tertiary" Value="@context.Percentage" Size="Size.Small" Style="width: 60px;" />
+                                        <span style="font-size: 0.75rem; color: #a6adc8;">@context.Percentage.ToString("F1")%</span>
+                                    </div>
+                                </MudTd>
+                                <MudTd Style="text-align: right;">
+                                    <MudTooltip Text="Delete tag from all captions">
+                                        <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteTagAsync(context.Tag))" />
+                                    </MudTooltip>
+                                    <MudTooltip Text="Use as find in batch replace">
+                                        <MudIconButton Icon="@Icons.Material.Filled.FindReplace" Size="Size.Small" Color="Color.Primary" OnClick="@(() => PopulateReplaceFind(context.Tag))" />
+                                    </MudTooltip>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </MudTabPanel>
+
+                    <!-- Tab 2: Batch Operations -->
+                    <MudTabPanel Text="Batch Operations" Icon="@Icons.Material.Filled.EditNote">
+                        <MudGrid Spacing="3" Class="mt-1">
+                            <!-- Prepend / Append Trigger Words -->
+                            <MudItem xs="12" md="6">
+                                <MudCard Elevation="0" Class="pa-3 h-100" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                                    <div class="d-flex align-center gap-2 mb-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.AddCircle" Color="Color.Success" Size="Size.Small" />
+                                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Prefix / Suffix Trigger Words</MudText>
+                                    </div>
+                                    <MudTextField @bind-Value="_batchTagInput" Label="Tag / Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character, cyberpunk style" HelperText="Applies to all images in folder without duplicating existing tags" />
+                                    <div class="d-flex gap-2 mt-3">
+                                        <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" OnClick="PrependTagAsync" Disabled="string.IsNullOrWhiteSpace(_batchTagInput) || _isBatchMutating" StartIcon="@Icons.Material.Filled.FirstPage">
+                                            Prepend to All
+                                        </MudButton>
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" OnClick="AppendTagAsync" Disabled="string.IsNullOrWhiteSpace(_batchTagInput) || _isBatchMutating" StartIcon="@Icons.Material.Filled.LastPage">
+                                            Append to All
+                                        </MudButton>
+                                    </div>
+                                </MudCard>
+                            </MudItem>
+
+                            <!-- Mass Find & Replace -->
+                            <MudItem xs="12" md="6">
+                                <MudCard Elevation="0" Class="pa-3 h-100" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                                    <div class="d-flex align-center gap-2 mb-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.FindReplace" Color="Color.Primary" Size="Size.Small" />
+                                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Mass Find & Replace</MudText>
+                                    </div>
+                                    <MudTextField @bind-Value="_findText" Label="Find Text" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. 1girl" />
+                                    <MudTextField @bind-Value="_replaceText" Label="Replace With" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" Placeholder="e.g. solo, 1girl" />
+                                    <div class="d-flex align-center justify-space-between mt-2">
+                                        <div class="d-flex gap-3">
+                                            <MudCheckBox @bind-Value="_matchCase" Label="Match Case" Dense="true" Size="Size.Small" />
+                                            <MudCheckBox @bind-Value="_useRegex" Label="Use Regex" Dense="true" Size="Size.Small" />
+                                        </div>
+                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="ExecuteFindReplaceAsync" Disabled="string.IsNullOrEmpty(_findText) || _isBatchMutating" StartIcon="@Icons.Material.Filled.DoneAll">
+                                            Replace in All
+                                        </MudButton>
+                                    </div>
+                                </MudCard>
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <!-- Tab 3: Aspect Ratio Bucketing -->
+                    <MudTabPanel Text="Aspect Ratio Buckets" Icon="@Icons.Material.Filled.AspectRatio">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2 mb-3">
+                            Distribution of aspect ratios across your training images. AI-Toolkit automatically buckets these into standard latent resolutions during training.
+                        </MudText>
+                        <MudGrid Spacing="2">
+                            @foreach (var bucket in _report.Buckets) {
+                                <MudItem xs="12" sm="6" md="4">
+                                    <MudCard Elevation="0" Class="pa-3" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                                        <div class="d-flex align-center justify-space-between mb-1">
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight: 600; color: #cdd6f4;">@bucket.BucketName</MudText>
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">@bucket.Count images</MudChip>
+                                        </div>
+                                        <div class="d-flex align-center gap-2 my-2">
+                                            <MudProgressLinear Color="Color.Tertiary" Value="@bucket.Percentage" Size="Size.Medium" Rounded="true" />
+                                            <span style="font-size: 0.8rem; color: #a6adc8; font-weight: 600;">@bucket.Percentage.ToString("F1")%</span>
+                                        </div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Target ratio: @bucket.RatioLabel</MudText>
+                                    </MudCard>
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <!-- Tab 4: Image & Caption Gallery -->
+                    <MudTabPanel Text="Images & Captions" Icon="@Icons.Material.Filled.GridView">
+                        <div class="d-flex align-center justify-space-between mb-3 mt-2">
+                            <div class="d-flex gap-2">
+                                <MudSelect T="string" @bind-Value="_galleryFilter" Label="Filter Items" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 200px;">
+                                    <MudSelectItem Value="@("all")">All Images (@_report.TotalImages)</MudSelectItem>
+                                    <MudSelectItem Value="@("missing")">Missing Captions (@_report.MissingCaptions)</MudSelectItem>
+                                    <MudSelectItem Value="@("corrupt")">Corrupt / Errors (@_report.CorruptCount)</MudSelectItem>
+                                </MudSelect>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Showing @FilteredGalleryItems.Count items
+                            </MudText>
+                        </div>
+
+                        <div class="d-flex flex-column gap-2" style="max-height: 480px; overflow-y: auto;">
+                            @foreach (var item in FilteredGalleryItems) {
+                                <MudCard Elevation="0" Class="pa-2" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                                    <div class="d-flex gap-3 align-start">
+                                        <div style="width: 70px; height: 70px; flex-shrink: 0; background-color: #11111b; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #313244;">
+                                            @if (item.IsCorrupt) {
+                                                <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" />
+                                            } else {
+                                                <img src="@GetImageSrc(item.ImagePath)" alt="thumb" style="width: 100%; height: 100%; object-fit: cover;" />
+                                            }
+                                        </div>
+
+                                        <div class="d-flex flex-column flex-grow-1">
+                                            <div class="d-flex align-center justify-space-between mb-1">
+                                                <span style="font-weight: 600; font-size: 0.85rem; color: #cdd6f4;">@Path.GetFileName(item.ImagePath)</span>
+                                                <div class="d-flex gap-1 align-center">
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@item.FormattedDimensions</MudChip>
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">@item.BucketName</MudChip>
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">@item.FormattedSize</MudChip>
+                                                </div>
+                                            </div>
+
+                                            <div class="d-flex gap-2 align-center">
+                                                <MudTextField @bind-Value="item.CaptionText" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Enter image tags separated by comma..." FullWidth="true" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SaveSingleCaptionAsync(item))" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </MudCard>
+                            }
+                        </div>
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? InitialDatasetFolder { get; set; }
+
+    private string _datasetFolder = "";
+    private bool _isLoading;
+    private bool _isBatchMutating;
+    private DatasetCuratorReport? _report;
+
+    private string _tagFilter = "";
+    private string _batchTagInput = "";
+    private string _findText = "";
+    private string _replaceText = "";
+    private bool _matchCase;
+    private bool _useRegex;
+    private string _galleryFilter = "all";
+
+    private readonly Dictionary<string, string> _thumbnailCache = new();
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync() {
+        _datasetFolder = InitialDatasetFolder ?? "";
+        if (!string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
+            await ScanFolderAsync();
+        }
+    }
+
+    private async Task BrowseFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Dataset Folder to Curate");
+        if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder)) {
+            _datasetFolder = folder;
+            await ScanFolderAsync();
+        }
+    }
+
+    private async Task ScanFolderAsync() {
+        if (string.IsNullOrWhiteSpace(_datasetFolder) || !Directory.Exists(_datasetFolder)) {
+            Snackbar.Add("Selected folder does not exist.", Severity.Warning);
+            return;
+        }
+
+        _isLoading = true;
+        _thumbnailCache.Clear();
+        StateHasChanged();
+
+        try {
+            _report = await CuratorService.ScanDatasetAsync(_datasetFolder);
+            Snackbar.Add($"Scanned {_report.TotalImages} images and {_report.TotalCaptions} captions.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Scan failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private List<TagFrequencyEntry> FilteredTags {
+        get {
+            if (_report == null) {
+                return new();
+            }
+            if (string.IsNullOrWhiteSpace(_tagFilter)) {
+                return _report.TagFrequencies;
+            }
+            return _report.TagFrequencies
+                .Where(t => t.Tag.Contains(_tagFilter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    private List<DatasetCuratorItem> FilteredGalleryItems {
+        get {
+            if (_report == null) {
+                return new();
+            }
+            return _galleryFilter switch {
+                "missing" => _report.Items.Where(i => string.IsNullOrWhiteSpace(i.CaptionText)).ToList(),
+                "corrupt" => _report.Items.Where(i => i.IsCorrupt).ToList(),
+                _ => _report.Items
+            };
+        }
+    }
+
+    private void PopulateReplaceFind(string tag) {
+        _findText = tag;
+        Snackbar.Add($"Selected '{tag}' for find/replace.", Severity.Info);
+    }
+
+    private async Task PrependTagAsync() {
+        if (string.IsNullOrWhiteSpace(_batchTagInput) || string.IsNullOrWhiteSpace(_datasetFolder)) {
+            return;
+        }
+
+        _isBatchMutating = true;
+        StateHasChanged();
+        try {
+            await CuratorService.CreateCaptionBackupAsync(_datasetFolder);
+            int count = await CuratorService.BatchPrependTagAsync(_datasetFolder, _batchTagInput);
+            Snackbar.Add($"Prepended '{_batchTagInput}' to {count} files (auto-backup created).", Severity.Success);
+            _batchTagInput = "";
+            await ScanFolderAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Prepend failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBatchMutating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AppendTagAsync() {
+        if (string.IsNullOrWhiteSpace(_batchTagInput) || string.IsNullOrWhiteSpace(_datasetFolder)) {
+            return;
+        }
+
+        _isBatchMutating = true;
+        StateHasChanged();
+        try {
+            await CuratorService.CreateCaptionBackupAsync(_datasetFolder);
+            int count = await CuratorService.BatchAppendTagAsync(_datasetFolder, _batchTagInput);
+            Snackbar.Add($"Appended '{_batchTagInput}' to {count} files (auto-backup created).", Severity.Success);
+            _batchTagInput = "";
+            await ScanFolderAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Append failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBatchMutating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteTagAsync(string tag) {
+        _isBatchMutating = true;
+        StateHasChanged();
+        try {
+            await CuratorService.CreateCaptionBackupAsync(_datasetFolder);
+            int count = await CuratorService.BatchDeleteTagAsync(_datasetFolder, tag);
+            Snackbar.Add($"Removed '{tag}' from {count} caption files.", Severity.Success);
+            await ScanFolderAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Tag deletion failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBatchMutating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteFindReplaceAsync() {
+        if (string.IsNullOrEmpty(_findText) || string.IsNullOrWhiteSpace(_datasetFolder)) {
+            return;
+        }
+
+        _isBatchMutating = true;
+        StateHasChanged();
+        try {
+            await CuratorService.CreateCaptionBackupAsync(_datasetFolder);
+            int count = await CuratorService.BatchFindReplaceAsync(_datasetFolder, _findText, _replaceText, _matchCase, _useRegex);
+            Snackbar.Add($"Replaced occurrences across {count} caption files (auto-backup created).", Severity.Success);
+            await ScanFolderAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Find/Replace failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isBatchMutating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveSingleCaptionAsync(DatasetCuratorItem item) {
+        try {
+            await CuratorService.SaveItemCaptionAsync(item, item.CaptionText);
+            Snackbar.Add($"Saved caption for {Path.GetFileName(item.ImagePath)}", Severity.Success);
+            if (_report != null) {
+                _report.TagFrequencies = CuratorService.ComputeTagFrequencies(_report.Items);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save caption: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private string GetImageSrc(string path) {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) {
+            return string.Empty;
+        }
+        if (_thumbnailCache.TryGetValue(path, out var cached)) {
+            return cached;
+        }
+        try {
+            byte[] bytes = File.ReadAllBytes(path);
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            string mime = ext switch {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+            string uri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+            _thumbnailCache[path] = uri;
+            return uri;
+        } catch {
+            return string.Empty;
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

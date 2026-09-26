@@ -14,6 +14,15 @@
     <MudNavLink Icon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
         Ollama Vision Tagger
     </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.Collections" OnClick="OpenDatasetCuratorAsync">
+        Dataset Batch Curator
+    </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.SmartToy" OnClick="OpenComfyUiTestAsync">
+        ComfyUI Test Studio
+    </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.ContentCut" OnClick="OpenLoraSurgeryAsync">
+        LoRA Surgery & Merger
+    </MudNavLink>
 
     <MudDivider Class="my-4" Style="border-color: #313244;" />
 
@@ -39,5 +48,20 @@
     private async Task OpenOllamaTaggerAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         await DialogService.ShowAsync<OllamaTaggerDialog>("Ollama Vision LoRA Tagger", options);
+    }
+
+    private async Task OpenDatasetCuratorAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.DatasetCuratorDialog>("Dataset Curator & Caption Studio", options);
+    }
+
+    private async Task OpenComfyUiTestAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", options);
+    }
+
+    private async Task OpenLoraSurgeryAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraSurgeryDialog>("LoRA Surgery & Merger Studio", options);
     }
 }

@@ -177,6 +177,11 @@
                             <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Tune" Size="Size.Small" OnClick="@(() => OpenInWizardAsync(lora))">
                                 Edit in Wizard
                             </MudButton>
+                            @if (!string.IsNullOrWhiteSpace(lora.OutputFilePath) && File.Exists(lora.OutputFilePath)) {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.SmartToy" Size="Size.Small" OnClick="@(() => OpenComfyUiTestAsync(lora))">
+                                    Test in ComfyUI
+                                </MudButton>
+                            }
                             <MudButton Variant="Variant.Text" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" OnClick="@(() => CloneToWizard(lora))">
                                 Clone Config
                             </MudButton>
@@ -333,5 +338,21 @@
 
     public void Dispose() {
         HistoryService.OnHistoryChanged -= HandleHistoryChanged;
+    }
+
+    private async Task OpenComfyUiTestAsync(LoraHistoryRecord lora) {
+        var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog> {
+            { x => x.LoraFilePath, lora.OutputFilePath },
+            { x => x.LoraName, lora.Name },
+            { x => x.BaseArchitecture, lora.BaseArchitecture },
+            { x => x.TriggerWords, lora.TriggerWord }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
     }
 }

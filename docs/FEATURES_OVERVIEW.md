@@ -106,3 +106,59 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - Import custom themes from `.json` files or raw JSON strings.
   - Export active themes for sharing.
   - Custom themes persist in `~/.LoRAMancer/themes/*.json`.
+
+---
+
+## 9. One-Click ComfyUI Interactive Test Studio
+
+- **Zero-Config Prompt Graph Generation**:
+  - Automatically generates ComfyUI API execution graphs for FLUX.1 (Dev / Schnell), SDXL 1.0, and SD 1.5 without requiring manual workflow assembly.
+  - Automatically loads checkpoints, attaches LoRA nodes with custom weights, binds CLIP positive/negative text prompts, sets latent dimensions, and samples via KSampler.
+- **Local, LAN & WAN ComfyUI Connectivity**:
+  - Connects to local instances (`http://127.0.0.1:8188`), LAN hosts, or remote WAN endpoints over HTTP REST and WebSockets.
+  - Instant local symlinking (0ms, 0 extra disk space) into ComfyUI's `models/loras/` directory, with automatic multipart upload fallback for remote/WAN instances.
+- **Real-Time WebSocket Feedback & Rendering**:
+  - Connects to `/ws?clientId=...` to stream real-time sampling step percentages and stage progress directly inside LoRAMancer.
+  - Renders generated image directly inside the test modal with one-click Save to Desktop.
+  - Integrated into LoRA Library cards, Training Console, and Training History.
+
+---
+
+## 10. Dataset Curator & Batch Caption Studio
+
+- **Tag Frequency Analysis & Cloud**:
+  - Scans entire dataset directories, parses comma-separated tags, and calculates exact occurrence counts and dataset percentages.
+  - Interactive tag table with quick delete and find/replace population.
+- **Batch Prefix, Suffix & Mass Find/Replace**:
+  - Mass find-and-replace across all `.txt` caption files with case-sensitivity and regex support.
+  - 1-click prepend or append of trigger words and style tokens without duplicate tag contamination.
+  - Automatic timestamped caption backups (`.captions_backup_YYYYMMDD_HHMMSS`) created before every batch modification.
+- **Aspect Ratio Bucketing & Image Audit**:
+  - Analyzes image dimensions across dataset files without loading full bitmaps into RAM.
+  - Groups images into standard training buckets (1:1 Square, 3:4/2:3/9:16 Portrait, 4:3/3:2/16:9 Landscape) with distribution percentages.
+  - Detects corrupt, truncated, or unreadable image headers.
+
+---
+
+## 11. LoRA Surgery Studio (SVD Rank Resizing & Weight Merging)
+
+- **SVD Rank Reduction (Model Compression)**:
+  - Compresses heavy LoRAs (ranks 64, 128, 256) down to compact target ranks (16, 32) using truncated Singular Value Decomposition.
+  - Shrinks 400MB+ `.safetensors` files down to 25MB-50MB while retaining over 95% of concept likeness.
+  - Preserves Safetensors header metadata and updates `ss_network_dim`.
+- **LoRA Weight Matrix Merger**:
+  - Merges two trained LoRAs of the same architecture using linear interpolation weights ($W_{new} = w_A W_A + w_B W_B$).
+  - Produces unified standalone `.safetensors` outputs ready for immediate inference or testing.
+
+---
+
+## 12. TensorBoard & Pre-Flight OOM / VRAM Estimator
+
+- **Dry-Run Pre-Flight Hardware Auditing**:
+  - Analyzes model architecture (FLUX vs SDXL vs SD 1.5), network rank, batch size, and latent caching against detected physical GPU VRAM.
+  - Alerts users before launching if estimated VRAM exceeds hardware capacity, preventing out-of-memory driver crashes.
+  - Verifies target disk free space for latent cache files and checkpoints.
+- **Embedded TensorBoard Integration**:
+  - 1-click launch of TensorBoard server on port 6006 directly against the active run output directory.
+  - Interactive real-time loss curves, learning rate progression, and gradient norms in your browser.
+

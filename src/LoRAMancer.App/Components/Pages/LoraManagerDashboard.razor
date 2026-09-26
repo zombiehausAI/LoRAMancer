@@ -385,6 +385,12 @@
                             Use Settings
                         </MudButton>
                         <div class="d-flex gap-1">
+                            <MudTooltip Text="Test / Render in ComfyUI">
+                                <MudIconButton Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Color="Color.Success" OnClick="@(() => OpenComfyUiTestAsync(lora))" />
+                            </MudTooltip>
+                            <MudTooltip Text="LoRA Surgery & SVD Resizing">
+                                <MudIconButton Icon="@Icons.Material.Filled.ContentCut" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => OpenLoraSurgeryAsync(lora))" />
+                            </MudTooltip>
                             <MudTooltip Text="Save & Copy Metadata JSON">
                                 <MudIconButton Icon="@Icons.Material.Filled.DataObject" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SaveLoraMetadataJsonAsync(lora))" />
                             </MudTooltip>
@@ -1334,5 +1340,34 @@
         } catch (Exception ex) {
             Snackbar.Add($"Failed to export metadata JSON: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task OpenComfyUiTestAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<ComfyUiTestDialog> {
+            { x => x.LoraFilePath, lora.FilePath },
+            { x => x.LoraName, lora.CivitaiInfo?.ModelName ?? lora.FileName },
+            { x => x.BaseArchitecture, lora.EffectiveBaseModel },
+            { x => x.TriggerWords, GetPrimaryTrigger(lora) }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+    }
+
+    private async Task OpenLoraSurgeryAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<LoraSurgeryDialog> {
+            { x => x.InitialLoraPath, lora.FilePath }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<LoraSurgeryDialog>("LoRA Surgery & Merger Studio", parameters, options);
     }
 }

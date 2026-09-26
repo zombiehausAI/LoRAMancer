@@ -7,6 +7,8 @@
 @inject SettingsService Settings
 @inject RemoteTrainingClientService RemoteClient
 @inject LoraHistoryService HistoryService
+@inject TrainingEstimationService EstimationService
+@inject LoRAMancer.App.Engines.ProcessRunner ProcessRunner
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -18,6 +20,12 @@
     <div class="d-flex align-center flex-wrap gap-2">
         <MudButton Variant="Variant.Filled" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenTrainingWizardAsync">
             Training Wizard
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Collections" OnClick="OpenDatasetCuratorAsync">
+            Curate Dataset
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Insights" OnClick="OpenTensorBoardAsync">
+            TensorBoard
         </MudButton>
         @if (TrainingRunner.IsRunning) {
             <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="CancelTraining">
@@ -80,6 +88,12 @@
                 </MudButton>
             </div>
         </div>
+    </MudAlert>
+}
+
+@if (!string.IsNullOrWhiteSpace(_preFlightWarning)) {
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-4">
+        <b>Pre-Flight VRAM Warning:</b> @_preFlightWarning
     </MudAlert>
 }
 
@@ -283,6 +297,15 @@
             return;
         }
 
+        // Run Pre-Flight VRAM & Disk Check
+        var preCheck = EstimationService.RunPreFlightCheck("FLUX.1-dev", Path.GetDirectoryName(_configYamlPath) ?? "", 1);
+        if (preCheck.Warnings.Count > 0) {
+            _preFlightWarning = string.Join(" ", preCheck.Warnings);
+            Snackbar.Add($"Pre-flight alert: {preCheck.Warnings[0]}", Severity.Warning);
+        } else {
+            _preFlightWarning = null;
+        }
+
         try {
             if (Settings.Current.ClientRemoteMode) {
                 _logs.Add($"[REMOTE] Sending job to AI PC at: {Settings.Current.ClientRemoteHostUrl}");
@@ -406,6 +429,15 @@
         await DialogService.ShowAsync<TrainingWizardDialog>("New Training Wizard", options);
     }
 
+    private async Task OpenDatasetCuratorAsync() {
+        DialogOptions options = new() {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true
+        };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.DatasetCuratorDialog>("Dataset Curator & Caption Studio", options);
+    }
+
     private async Task EditFailedRunInWizardAsync() {
         LoraHistoryRecord? record = null;
         if (!string.IsNullOrWhiteSpace(_configYamlPath)) {
@@ -474,5 +506,56 @@
         _disposed = true;
         TrainingRunner.OnLogReceived -= HandleLogReceived;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+    }
+
+    private string? _preFlightWarning;
+    private bool _isTensorBoardRunning;
+
+    private async Task OpenTensorBoardAsync() {
+        try {
+            string defaultVenv = AiToolkitSetupService.GetDefaultVenvPath();
+            string pythonExe = Path.Combine(defaultVenv, "Scripts", "python.exe");
+            if (!File.Exists(pythonExe)) {
+                pythonExe = Settings.Current.PreferredPythonPath;
+            }
+
+            string logDir = "";
+            if (!string.IsNullOrWhiteSpace(_configYamlPath) && File.Exists(_configYamlPath)) {
+                logDir = Path.GetDirectoryName(_configYamlPath) ?? "";
+            }
+            if (string.IsNullOrWhiteSpace(logDir)) {
+                logDir = Path.Combine(AppContext.BaseDirectory, "output");
+            }
+            Directory.CreateDirectory(logDir);
+
+            if (!_isTensorBoardRunning) {
+                _ = Task.Run(async () => {
+                    try {
+                        _isTensorBoardRunning = true;
+                        await ProcessRunner.RunAsync(
+                            pythonExe,
+                            $"-m tensorboard.main --logdir \"{logDir}\" --port 6006 --bind_all",
+                            AppContext.BaseDirectory,
+                            ToolkitSetup.GetIsolatedEnvironmentVariables(),
+                            _ => { },
+                            _ => { },
+                            CancellationToken.None
+                        );
+                    } catch {
+                    } finally {
+                        _isTensorBoardRunning = false;
+                    }
+                });
+                await Task.Delay(1000);
+            }
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "http://localhost:6006",
+                UseShellExecute = true
+            });
+            Snackbar.Add("Launched TensorBoard dashboard at http://localhost:6006", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Unable to launch TensorBoard: {ex.Message}", Severity.Error);
+        }
     }
 }

@@ -68,6 +68,9 @@ public static class MauiProgram {
         builder.Services.AddSingleton<LoraDatabaseService>();
         builder.Services.AddSingleton<LoraLibraryService>();
         builder.Services.AddSingleton<LoraUpdaterService>();
+        builder.Services.AddSingleton<ComfyUiService>();
+        builder.Services.AddSingleton<DatasetCuratorService>();
+        builder.Services.AddSingleton<LoraSurgeryService>();
         builder.Services.AddSingleton<SystemTrayService>();
 
 #if DEBUG

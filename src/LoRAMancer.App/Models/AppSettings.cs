@@ -58,6 +58,12 @@ public sealed class AppSettings {
     public string OllamaApiKey { get; set; } = string.Empty;
     public string OllamaDefaultModel { get; set; } = "llama3.2-vision";
 
+    // ComfyUI Integration (Local, LAN, or WAN)
+    public string ComfyUiEndpointUrl { get; set; } = "http://127.0.0.1:8188";
+    public string ComfyUiLorasDirectory { get; set; } = string.Empty;
+    public string ComfyUiCustomWorkflowJson { get; set; } = string.Empty;
+    public bool ComfyUiAutoDeployLora { get; set; } = true;
+
     // Network Server / Remote Engine
     public bool ServerEnabled { get; set; }
     public int ServerPort { get; set; } = 8420;

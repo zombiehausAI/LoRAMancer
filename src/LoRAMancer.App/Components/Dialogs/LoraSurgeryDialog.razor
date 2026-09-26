@@ -1,0 +1,309 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject LoraSurgeryService SurgeryService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.ContentCut" Color="Color.Secondary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">LoRA Surgery Studio</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    SVD rank reduction compression & multi-LoRA weight matrix merging
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-3" Color="Color.Dark">
+                <!-- Tab 1: SVD Rank Resizing -->
+                <MudTabPanel Text="SVD Rank Resizing" Icon="@Icons.Material.Filled.Compress">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Reduce heavy LoRAs (ranks 64, 128, 256) down to lightweight ranks (16, 32) using truncated Singular Value Decomposition. Retains &gt;95% concept fidelity while reducing file size by up to 80%.
+                    </MudText>
+
+                    <MudGrid Spacing="2">
+                        <!-- Source LoRA -->
+                        <MudItem xs="12">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_resizeSourcePath" Label="Source LoRA (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseResizeSourceAsync" Disabled="_isProcessing" StartIcon="@Icons.Material.Filled.FileOpen">
+                                    Browse
+                                </MudButton>
+                            </div>
+                        </MudItem>
+
+                        <!-- Target Rank Selector -->
+                        <MudItem xs="12" md="6">
+                            <MudSelect T="int" @bind-Value="_targetRank" Label="Target Rank (Dimension)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isProcessing">
+                                <MudSelectItem Value="8">Rank 8 (Ultra-compact ~10MB)</MudSelectItem>
+                                <MudSelectItem Value="16">Rank 16 (Standard / Highly Recommended)</MudSelectItem>
+                                <MudSelectItem Value="32">Rank 32 (High Detail)</MudSelectItem>
+                                <MudSelectItem Value="64">Rank 64 (Original / Uncompressed)</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+
+                        <!-- Output LoRA Destination -->
+                        <MudItem xs="12" md="6">
+                            <MudTextField @bind-Value="_resizeOutputPath" Label="Output File Destination" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_isProcessing" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <div class="d-flex justify-end mt-3">
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="StartResizeAsync" Disabled="_isProcessing || string.IsNullOrWhiteSpace(_resizeSourcePath)" StartIcon="@Icons.Material.Filled.Compress">
+                            @(_isProcessing ? "Processing SVD..." : "Run SVD Compression")
+                        </MudButton>
+                    </div>
+                </MudTabPanel>
+
+                <!-- Tab 2: LoRA Weight Merger -->
+                <MudTabPanel Text="LoRA Weight Merger" Icon="@Icons.Material.Filled.MergeType">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Combine two LoRAs into a single unified .safetensors model with custom linear interpolation weights.
+                    </MudText>
+
+                    <MudGrid Spacing="2">
+                        <!-- Model A -->
+                        <MudItem xs="12" md="8">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_mergeModelAPath" Label="Model A (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseMergeModelAAsync" Disabled="_isProcessing" StartIcon="@Icons.Material.Filled.FileOpen">
+                                    Browse
+                                </MudButton>
+                            </div>
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudNumericField @bind-Value="_mergeWeightA" Label="Model A Weight" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0.0" Max="2.0" Step="0.05" Disabled="_isProcessing" />
+                        </MudItem>
+
+                        <!-- Model B -->
+                        <MudItem xs="12" md="8">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_mergeModelBPath" Label="Model B (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseMergeModelBAsync" Disabled="_isProcessing" StartIcon="@Icons.Material.Filled.FileOpen">
+                                    Browse
+                                </MudButton>
+                            </div>
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudNumericField @bind-Value="_mergeWeightB" Label="Model B Weight" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0.0" Max="2.0" Step="0.05" Disabled="_isProcessing" />
+                        </MudItem>
+
+                        <!-- Output Merged Destination -->
+                        <MudItem xs="12">
+                            <MudTextField @bind-Value="_mergeOutputPath" Label="Merged Output Destination" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <div class="d-flex justify-end mt-3">
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" OnClick="StartMergeAsync" Disabled="_isProcessing || string.IsNullOrWhiteSpace(_mergeModelAPath) || string.IsNullOrWhiteSpace(_mergeModelBPath)" StartIcon="@Icons.Material.Filled.CallMerge">
+                            @(_isProcessing ? "Merging Models..." : "Merge Models")
+                        </MudButton>
+                    </div>
+                </MudTabPanel>
+            </MudTabs>
+
+            <!-- Execution Logs Console -->
+            @if (_logs.Count > 0 || _isProcessing) {
+                <MudCard Elevation="0" Class="pa-2" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-family: 'JetBrains Mono', monospace;">
+                            Execution Console (@_statusMessage)
+                        </MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Default" OnClick="@(() => _logs.Clear())">Clear</MudButton>
+                    </div>
+                    <div style="max-height: 180px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #cdd6f4; white-space: pre-wrap; padding: 4px;">
+                        @foreach (var line in _logs) {
+                            <div style="color: @(line.Contains("Error", StringComparison.OrdinalIgnoreCase) ? "#f38ba8" : line.Contains("success", StringComparison.OrdinalIgnoreCase) ? "#a6e3a1" : "#cdd6f4")">
+                                @line
+                            </div>
+                        }
+                    </div>
+                </MudCard>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog" Disabled="_isProcessing">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? InitialLoraPath { get; set; }
+
+    private string _resizeSourcePath = "";
+    private string _resizeOutputPath = "";
+    private int _targetRank = 16;
+
+    private string _mergeModelAPath = "";
+    private double _mergeWeightA = 1.0;
+    private string _mergeModelBPath = "";
+    private double _mergeWeightB = 0.5;
+    private string _mergeOutputPath = "";
+
+    private bool _isProcessing;
+    private string _statusMessage = "Ready";
+    private readonly List<string> _logs = new();
+    private CancellationTokenSource? _cts;
+
+    protected override void OnInitialized() {
+        if (!string.IsNullOrWhiteSpace(InitialLoraPath) && File.Exists(InitialLoraPath)) {
+            _resizeSourcePath = InitialLoraPath;
+            UpdateSuggestedResizeOutput();
+            _mergeModelAPath = InitialLoraPath;
+            UpdateSuggestedMergeOutput();
+        }
+    }
+
+    private void UpdateSuggestedResizeOutput() {
+        if (!string.IsNullOrWhiteSpace(_resizeSourcePath)) {
+            string dir = Path.GetDirectoryName(_resizeSourcePath) ?? "";
+            string name = Path.GetFileNameWithoutExtension(_resizeSourcePath);
+            _resizeOutputPath = Path.Combine(dir, $"{name}_rank{_targetRank}.safetensors");
+        }
+    }
+
+    private void UpdateSuggestedMergeOutput() {
+        if (!string.IsNullOrWhiteSpace(_mergeModelAPath)) {
+            string dir = Path.GetDirectoryName(_mergeModelAPath) ?? "";
+            string nameA = Path.GetFileNameWithoutExtension(_mergeModelAPath);
+            string nameB = !string.IsNullOrWhiteSpace(_mergeModelBPath) ? Path.GetFileNameWithoutExtension(_mergeModelBPath) : "modelB";
+            _mergeOutputPath = Path.Combine(dir, $"{nameA}_{nameB}_merged.safetensors");
+        }
+    }
+
+    private async Task BrowseResizeSourceAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _resizeSourcePath = file;
+            UpdateSuggestedResizeOutput();
+        }
+    }
+
+    private async Task BrowseMergeModelAAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _mergeModelAPath = file;
+            UpdateSuggestedMergeOutput();
+        }
+    }
+
+    private async Task BrowseMergeModelBAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _mergeModelBPath = file;
+            UpdateSuggestedMergeOutput();
+        }
+    }
+
+    private async Task StartResizeAsync() {
+        if (string.IsNullOrWhiteSpace(_resizeSourcePath) || !File.Exists(_resizeSourcePath)) {
+            Snackbar.Add("Source LoRA file not found.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_resizeOutputPath)) {
+            UpdateSuggestedResizeOutput();
+        }
+
+        _isProcessing = true;
+        _statusMessage = "Resizing with SVD...";
+        _logs.Clear();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try {
+            var result = await SurgeryService.ResizeLoraAsync(
+                _resizeSourcePath,
+                _resizeOutputPath,
+                _targetRank,
+                line => {
+                    _logs.Add(line);
+                    InvokeAsync(StateHasChanged);
+                },
+                _cts.Token
+            );
+
+            if (result.Success) {
+                _statusMessage = "Resize complete!";
+                Snackbar.Add(result.Message, Severity.Success);
+            } else {
+                _statusMessage = "Resize failed";
+                Snackbar.Add(result.Message, Severity.Error);
+            }
+        } catch (Exception ex) {
+            _statusMessage = "Error: " + ex.Message;
+            Snackbar.Add($"SVD Resize failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartMergeAsync() {
+        if (string.IsNullOrWhiteSpace(_mergeModelAPath) || !File.Exists(_mergeModelAPath)) {
+            Snackbar.Add("Model A file not found.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_mergeModelBPath) || !File.Exists(_mergeModelBPath)) {
+            Snackbar.Add("Model B file not found.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_mergeOutputPath)) {
+            UpdateSuggestedMergeOutput();
+        }
+
+        _isProcessing = true;
+        _statusMessage = "Merging models...";
+        _logs.Clear();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try {
+            var result = await SurgeryService.MergeLorasAsync(
+                _mergeModelAPath,
+                (float)_mergeWeightA,
+                _mergeModelBPath,
+                (float)_mergeWeightB,
+                _mergeOutputPath,
+                line => {
+                    _logs.Add(line);
+                    InvokeAsync(StateHasChanged);
+                },
+                _cts.Token
+            );
+
+            if (result.Success) {
+                _statusMessage = "Merge complete!";
+                Snackbar.Add(result.Message, Severity.Success);
+            } else {
+                _statusMessage = "Merge failed";
+                Snackbar.Add(result.Message, Severity.Error);
+            }
+        } catch (Exception ex) {
+            _statusMessage = "Error: " + ex.Message;
+            Snackbar.Add($"Merge failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

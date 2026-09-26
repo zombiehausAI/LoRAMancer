@@ -21,6 +21,10 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 5. **Universal Hardware Provisioning**: Automated detection and provisioning of hardware-matched PyTorch environments for AMD ROCm, NVIDIA CUDA, Intel XPU, and CPU.
 6. **Remote Control & Public Serving**: Embedded Kestrel network server and Cloudflare Quick Tunnels to monitor training and manage LoRAs from any browser or mobile PWA.
 7. **In-App Document Viewer & Theme Engine**: Read full system documentation directly inside the application, and customize your workspace with high-contrast dark themes and importable/exportable JSON palettes.
+8. **One-Click ComfyUI Test Studio**: Automatically generate prompt graphs for FLUX.1, SDXL, and SD 1.5, deploy LoRAs locally via symlinks (or remote LAN/WAN multipart uploads), stream WebSocket sampling progress, and render test outputs directly inside LoRAMancer.
+9. **Dataset Curator & Batch Caption Studio**: Tag frequency analysis, mass find/replace across `.txt` captions, trigger word prefixing/suffixing with automatic backups, and aspect ratio bucketing distribution auditing.
+10. **LoRA Surgery Studio (SVD & Merging)**: Compress high-rank LoRAs (ranks 64/128) down to compact ranks (16/32) using truncated Singular Value Decomposition, and merge pairs of LoRAs with custom linear interpolation weights.
+11. **TensorBoard & Pre-Flight OOM Protection**: Dry-run hardware estimation comparing model requirements against detected GPU VRAM to prevent driver crashes, paired with 1-click TensorBoard launch.
 
 ## Documentation Index
 
