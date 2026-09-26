@@ -31,6 +31,9 @@
     <ItemGroup>
         <Compile Include="..\..\src\LoRAMancer.App\Models\*.cs" Link="Models\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Engines\*.cs" Link="Engines\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\Providers\*.cs" Link="Services\Providers\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\DanbooruTagService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraMetadataAggregatorService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\SettingsService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\ThemeService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\CivitaiService.cs" Link="Services\%(Filename)%(Extension)" />

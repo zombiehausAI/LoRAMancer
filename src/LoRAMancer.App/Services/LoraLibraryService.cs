@@ -7,6 +7,7 @@ namespace LoRAMancer.App.Services;
 public sealed class LoraLibraryService {
     private readonly SafeTensorsMetadataReader _metadataReader;
     private readonly CivitaiService _civitaiService;
+    private readonly LoraMetadataAggregatorService _aggregatorService;
     private readonly SettingsService _settingsService;
     private readonly LoraDatabaseService _databaseService;
     private readonly HttpClient _httpClient;
@@ -74,18 +75,28 @@ public sealed class LoraLibraryService {
     public event Action<string, int, int>? OnEnrichProgress;
     public event Action<LoraMetadata>? OnLoraEnriched;
 
+    public LoraMetadataAggregatorService Aggregator => _aggregatorService;
+
     public LoraLibraryService(
         SafeTensorsMetadataReader metadataReader,
         CivitaiService civitaiService,
         SettingsService settingsService,
         LoraDatabaseService? databaseService = null,
-        HttpClient? httpClient = null
+        HttpClient? httpClient = null,
+        LoraMetadataAggregatorService? aggregatorService = null
     ) {
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _civitaiService = civitaiService ?? throw new ArgumentNullException(nameof(civitaiService));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _databaseService = databaseService ?? new LoraDatabaseService();
         _httpClient = httpClient ?? new HttpClient();
+        _aggregatorService = aggregatorService ?? new LoraMetadataAggregatorService(
+            _civitaiService,
+            new HuggingFaceService(_settingsService, _httpClient),
+            new DanbooruTagService(_httpClient),
+            _settingsService,
+            _httpClient
+        );
 
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string primaryCacheDir = Path.Combine(userProfile, ".LoRAMancer", "lora_cache");
@@ -793,30 +804,46 @@ public sealed class LoraLibraryService {
                 }
             }
 
-            CivitaiModelVersionInfo? info = await _civitaiService.LookupByHashAsync(meta.Sha256Hash, cancellationToken);
-            if (info != null) {
-                meta.CivitaiInfo = info;
-                if (info.TrainedWords != null && info.TrainedWords.Count > 0) {
-                    meta.TrainedWords = info.TrainedWords;
-                }
-
+            AggregatedLoraEnrichmentResult result = await _aggregatorService.EnrichAsync(meta, cancellationToken);
+            if (meta.CivitaiInfo != null) {
                 // Cache metadata on disk and in SQLite
-                await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(info), cancellationToken);
+                await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(meta.CivitaiInfo), cancellationToken);
 
-                // Download & cache remote thumbnail if no local image exists
-                if (string.IsNullOrWhiteSpace(meta.ThumbnailPath) && !string.IsNullOrWhiteSpace(info.PreviewImageUrl)) {
-                    await DownloadAndCacheThumbnailAsync(meta, info.PreviewImageUrl, cancellationToken);
+                if (string.IsNullOrWhiteSpace(meta.ThumbnailPath) && !string.IsNullOrWhiteSpace(meta.CivitaiInfo.PreviewImageUrl)) {
+                    await DownloadAndCacheThumbnailAsync(meta, meta.CivitaiInfo.PreviewImageUrl, cancellationToken);
                 }
 
                 await _databaseService.UpsertSingleAsync(meta);
                 OnLoraEnriched?.Invoke(meta);
-                return info;
+                return meta.CivitaiInfo;
             }
         } catch {
             // Suppress lookup errors
         }
 
         return null;
+    }
+
+    public async Task<AggregatedLoraEnrichmentResult> EnrichMultiProviderAsync(LoraMetadata meta, CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(meta);
+
+        if (string.IsNullOrWhiteSpace(meta.Sha256Hash) && File.Exists(meta.FilePath)) {
+            try {
+                meta.Sha256Hash = await _civitaiService.ComputeFileSha256Async(meta.FilePath, cancellationToken: cancellationToken);
+            } catch {
+                // Ignore hash computation failure
+            }
+        }
+
+        AggregatedLoraEnrichmentResult result = await _aggregatorService.EnrichAsync(meta, cancellationToken);
+        if (meta.CivitaiInfo != null && !string.IsNullOrWhiteSpace(meta.Sha256Hash)) {
+            string cacheFile = Path.Combine(_cacheDirectory, $"{meta.Sha256Hash}.json");
+            await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(meta.CivitaiInfo), cancellationToken);
+        }
+
+        await _databaseService.UpsertSingleAsync(meta);
+        OnLoraEnriched?.Invoke(meta);
+        return result;
     }
 
     private void LoadCachedCivitaiInfo(LoraMetadata meta) {

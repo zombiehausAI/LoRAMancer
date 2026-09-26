@@ -52,6 +52,8 @@ public static class MauiProgram {
         builder.Services.AddSingleton<AiToolkitSetupService>();
         builder.Services.AddSingleton<CivitaiService>();
         builder.Services.AddSingleton<HuggingFaceService>();
+        builder.Services.AddSingleton<DanbooruTagService>();
+        builder.Services.AddSingleton<LoraMetadataAggregatorService>();
         builder.Services.AddSingleton<SafeTensorsMetadataReader>();
         builder.Services.AddSingleton<AiToolkitConfigBuilder>();
         builder.Services.AddSingleton<AmdVenvProvisioner>();

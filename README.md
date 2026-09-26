@@ -38,6 +38,7 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 17. **SVD Spectral Energy Decay & Overbake Radar**: SVD analysis measuring singular value monopolization ($\sigma_1$), Frobenius norms, and Shannon spectral entropy to diagnose overbaking and auto-audit multi-epoch checkpoints.
 18. **LoRA Ghost Hunter & Style Decoupler**: Gram-Schmidt orthogonal repulsion to purge bad traits/artifacts from donor models, and cross-attention attenuation to isolate character identity from art style bleed.
 19. **Forensic Reverse-Engineering & De-Anonymizer**: Reconstructs base architectures, effective rank/alpha scaling ratios, trained trigger keywords, and training recipes from raw weights.
+20. **Multi-Provider Metadata Lookup & Gap-Filling**: Queries Civitai (SHA-256), Hugging Face Hub (model cards, tags, and README `instance_prompt`), and Danbooru (tag frequency classification) to enrich LoRAs with trigger words, previews, and descriptions. Completely open and free by default, with optional API keys in Settings to unlock private models and higher rate limits.
 
 ## Documentation Index
 
@@ -101,6 +102,8 @@ LoRAMancer stands on the shoulders of incredible open-source projects and commun
 - **[PyTorch](https://github.com/pytorch/pytorch)** & **[AMD ROCm](https://rocm.docs.amd.com/)** — Universal deep learning framework and compute platform providing hardware acceleration across AMD Radeon, NVIDIA CUDA, Intel Arc, and CPU.
 - **[MudBlazor](https://mudblazor.com/)** — The Material Design component framework powering LoRAMancer's high-contrast desktop interface and responsive remote web client.
 - **[Civitai](https://civitai.com/)** — Community model repository whose public API provides automated metadata enrichment, trigger keyword detection, and preview caching.
+- **[Hugging Face Hub](https://huggingface.co/)** — Universal open-source machine learning hub used for model card and README `instance_prompt` trigger word extraction and weights discovery.
+- **[Danbooru](https://danbooru.donmai.us/)** — Open anime/art tagging platform whose public classification API isolates character, series, and artist tokens from raw `ss_tag_frequency` training headers.
 - **[Cloudflare Quick Tunnels](https://github.com/cloudflare/cloudflared)** — Secure zero-configuration tunnels providing encrypted remote studio access across LAN and WAN without manual port forwarding.
 
 ## Support & Contributions

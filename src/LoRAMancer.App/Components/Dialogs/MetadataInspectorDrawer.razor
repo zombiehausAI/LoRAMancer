@@ -1,5 +1,6 @@
 @inject IDialogService DialogService
 @inject CivitaiService Civitai
+@inject LoraMetadataAggregatorService Aggregator
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 
@@ -91,50 +92,71 @@
                     </MudSimpleTable>
                 </MudTabPanel>
 
-                <!-- Civitai Lookup Tab -->
-                <MudTabPanel Text="Civitai Lookup" Icon="@Icons.Material.Filled.Hub">
-                    @if (_isQueryingCivitai) {
+                <!-- Multi-Provider Lookup Tab -->
+                <MudTabPanel Text="Provider Lookup" Icon="@Icons.Material.Filled.Hub">
+                    @if (_isQueryingProviders) {
                         <div class="p-4 text-center">
                             <MudProgressCircular Color="Color.Primary" Indeterminate="true" Class="mb-2" />
-                            <MudText Typo="Typo.body2">@_civitaiStatus</MudText>
+                            <MudText Typo="Typo.body2">@_lookupStatus</MudText>
                             @if (_hashProgress > 0 && _hashProgress < 100) {
                                 <MudProgressLinear Color="Color.Primary" Value="@_hashProgress" Class="mt-2" />
                             }
                         </div>
-                    } else if (_civitaiInfo != null) {
+                    } else if (EffectiveInfo != null) {
                         <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244;" Class="mb-3">
-                            @if (!string.IsNullOrEmpty(_civitaiInfo.PreviewImageUrl)) {
-                                <MudCardMedia Image="@_civitaiInfo.PreviewImageUrl" Height="200" />
+                            @if (!string.IsNullOrEmpty(EffectiveInfo.PreviewImageUrl)) {
+                                <MudCardMedia Image="@EffectiveInfo.PreviewImageUrl" Height="200" />
                             }
                             <MudCardContent>
-                                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">@_civitaiInfo.ModelName</MudText>
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">Version: @_civitaiInfo.VersionName • Base: @_civitaiInfo.BaseModel</MudText>
+                                @if (_contributingProviders.Count > 0) {
+                                    <div class="d-flex align-center gap-1 mb-2 flex-wrap">
+                                        <span style="font-size: 0.72rem; color: #a6adc8;">Sources:</span>
+                                        @foreach (string p in _contributingProviders) {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Tertiary" Style="font-size: 0.7rem; height: 22px;">@p</MudChip>
+                                        }
+                                    </div>
+                                }
+                                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">@EffectiveInfo.ModelName</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Version: @EffectiveInfo.VersionName • Base: @EffectiveInfo.BaseModel</MudText>
 
-                                @if (_civitaiInfo.TrainedWords.Count > 0) {
+                                @if (EffectiveInfo.TrainedWords.Count > 0) {
                                     <div class="mt-3">
-                                        <MudText Typo="Typo.subtitle2" Class="mb-1" Color="Color.Primary">Trained Trigger Words:</MudText>
+                                        <MudText Typo="Typo.subtitle2" Class="mb-1" Color="Color.Primary">Trained Trigger Words (@EffectiveInfo.TrainedWords.Count):</MudText>
                                         <div class="d-flex flex-wrap gap-1">
-                                            @foreach (var word in _civitaiInfo.TrainedWords) {
+                                            @foreach (var word in EffectiveInfo.TrainedWords) {
                                                 <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@word</MudChip>
                                             }
                                         </div>
                                     </div>
                                 }
                             </MudCardContent>
-                            <MudCardActions>
-                                @if (!string.IsNullOrEmpty(_civitaiInfo.CivitaiUrl)) {
-                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" Href="@_civitaiInfo.CivitaiUrl" Target="_blank" StartIcon="@Icons.Material.Filled.OpenInNew">
-                                        Open on Civitai
+                            <MudCardActions Class="d-flex flex-wrap gap-2">
+                                @if (!string.IsNullOrEmpty(EffectiveInfo.CivitaiUrl)) {
+                                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" Href="@EffectiveInfo.CivitaiUrl" Target="_blank" StartIcon="@Icons.Material.Filled.OpenInNew">
+                                        Open Source
                                     </MudButton>
                                 }
+                                @foreach (var kvp in _providerSourceUrls) {
+                                    @if (!string.IsNullOrEmpty(kvp.Value) && kvp.Value != EffectiveInfo.CivitaiUrl) {
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" Href="@kvp.Value" Target="_blank" StartIcon="@Icons.Material.Filled.OpenInNew">
+                                            @kvp.Key
+                                        </MudButton>
+                                    }
+                                }
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LookupProvidersAsync">
+                                    Re-query
+                                </MudButton>
                             </MudCardActions>
                         </MudCard>
                     } else {
                         <div class="p-4 text-center" style="background-color: #11111b; border: 1px dashed #313244; border-radius: 8px;">
-                            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">Lookup model details, thumbnails, and trigger words directly from Civitai via SHA256 hash.</MudText>
-                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudSync" OnClick="LookupCivitaiAsync">
-                                Query Civitai
+                            <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-1">Multi-Provider Enrichment</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3 d-block">
+                                Queries Civitai (SHA-256), Hugging Face Hub (Model Card &amp; README), and Danbooru (Tag Classifier) to fill in missing details.
+                            </MudText>
+                            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudSync" OnClick="LookupProvidersAsync">
+                                Query All Providers
                             </MudButton>
                         </div>
                     }
@@ -168,10 +190,14 @@
     public LoraMetadata? Metadata { get; set; }
 
     private string _filterKey = string.Empty;
-    private bool _isQueryingCivitai;
-    private string _civitaiStatus = string.Empty;
+    private bool _isQueryingProviders;
+    private string _lookupStatus = string.Empty;
     private int _hashProgress;
     private CivitaiModelVersionInfo? _civitaiInfo;
+    private List<string> _contributingProviders = new();
+    private Dictionary<string, string> _providerSourceUrls = new();
+
+    private CivitaiModelVersionInfo? EffectiveInfo => Metadata?.CivitaiInfo ?? _civitaiInfo;
 
     private IEnumerable<KeyValuePair<string, string>> FilteredMetadata {
         get {
@@ -185,35 +211,42 @@
         }
     }
 
-    private async Task LookupCivitaiAsync() {
+    private async Task LookupProvidersAsync() {
         if (Metadata == null || !File.Exists(Metadata.FilePath)) {
             Snackbar.Add("LoRA file path not available.", Severity.Warning);
             return;
         }
 
-        _isQueryingCivitai = true;
-        _civitaiStatus = "Computing SHA256 model hash...";
+        _isQueryingProviders = true;
+        _lookupStatus = "Computing SHA256 model hash...";
         _hashProgress = 0;
 
         try {
-            string hash = await Civitai.ComputeFileSha256Async(Metadata.FilePath, p => {
-                _hashProgress = p;
-                InvokeAsync(StateHasChanged);
-            });
+            if (string.IsNullOrWhiteSpace(Metadata.Sha256Hash)) {
+                Metadata.Sha256Hash = await Civitai.ComputeFileSha256Async(Metadata.FilePath, p => {
+                    _hashProgress = p;
+                    InvokeAsync(StateHasChanged);
+                });
+            }
 
-            _civitaiStatus = $"Querying Civitai API for hash {hash[..10]}...";
+            _lookupStatus = "Querying Civitai, Hugging Face Hub, and Danbooru...";
             StateHasChanged();
 
-            _civitaiInfo = await Civitai.LookupByHashAsync(hash);
-            if (_civitaiInfo != null) {
-                Snackbar.Add($"Found Civitai model: {_civitaiInfo.ModelName}", Severity.Success);
+            AggregatedLoraEnrichmentResult result = await Aggregator.EnrichAsync(Metadata);
+            _civitaiInfo = Metadata.CivitaiInfo;
+            _contributingProviders = result.ContributingProviders;
+            _providerSourceUrls = result.ProviderSourceUrls;
+
+            if (result.Success) {
+                string provs = string.Join(", ", result.ContributingProviders);
+                Snackbar.Add($"Enriched from {provs}!", Severity.Success);
             } else {
-                Snackbar.Add("Model hash not found on Civitai (might be unlisted or local).", Severity.Info);
+                Snackbar.Add("No metadata found across active providers.", Severity.Info);
             }
         } catch (Exception ex) {
-            Snackbar.Add($"Civitai lookup failed: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Multi-provider lookup failed: {ex.Message}", Severity.Error);
         } finally {
-            _isQueryingCivitai = false;
+            _isQueryingProviders = false;
         }
     }
 

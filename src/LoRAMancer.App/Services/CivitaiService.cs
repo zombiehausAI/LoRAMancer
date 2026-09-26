@@ -1,16 +1,62 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using LoRAMancer.App.Models;
+using LoRAMancer.App.Services.Providers;
 
 namespace LoRAMancer.App.Services;
 
-public sealed class CivitaiService {
+public sealed class CivitaiService : ILoraMetadataProvider {
     private readonly HttpClient _httpClient;
     private readonly SettingsService _settingsService;
+
+    public string ProviderId => "civitai";
+    public string DisplayName => "Civitai";
+    public int Priority => 10;
 
     public CivitaiService(SettingsService settingsService, HttpClient? httpClient = null) {
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _httpClient = httpClient ?? new HttpClient();
+    }
+
+    public async Task<ProviderLookupResult?> LookupAsync(LoraMetadata meta, CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(meta);
+
+        string? hash = meta.Sha256Hash;
+        if (string.IsNullOrWhiteSpace(hash) && File.Exists(meta.FilePath)) {
+            try {
+                hash = await ComputeFileSha256Async(meta.FilePath, null, ct);
+                meta.Sha256Hash = hash;
+            } catch {
+                return null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(hash)) {
+            return null;
+        }
+
+        CivitaiModelVersionInfo? info = await LookupByHashAsync(hash, ct);
+        if (info == null) {
+            return null;
+        }
+
+        return new ProviderLookupResult {
+            ProviderId = ProviderId,
+            ProviderDisplayName = DisplayName,
+            ModelName = info.ModelName,
+            VersionName = info.VersionName,
+            BaseModel = info.BaseModel,
+            TriggerWords = info.TrainedWords ?? new List<string>(),
+            Description = info.Description,
+            PreviewImageUrl = info.PreviewImageUrl,
+            ModelUrl = info.CivitaiUrl,
+            DownloadUrl = info.DownloadUrl,
+            SamplePrompts = info.SamplePrompts ?? new List<string>(),
+            ExtraMetadata = new Dictionary<string, string> {
+                ["ModelId"] = info.ModelId.ToString(),
+                ["VersionId"] = info.VersionId.ToString()
+            }
+        };
     }
 
     public async Task<string> ComputeFileSha256Async(string filePath, Action<int>? onProgress = null, CancellationToken cancellationToken = default) {
@@ -125,3 +171,4 @@ public sealed class CivitaiService {
         }
     }
 }
+
