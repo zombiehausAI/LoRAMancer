@@ -197,5 +197,22 @@ public class PluginManagerServiceTests : IDisposable {
         Assert.False(Directory.Exists(venvDir));
         Assert.False(manifest.HasDedicatedVenv);
     }
+
+    [Fact]
+    public async Task DiscoverPlugins_FindsAndRegistersOllamaTagger_Automatically() {
+        // Arrange
+        ProcessRunner runner = new();
+        PluginManagerService service = new(runner);
+
+        // Act
+        await service.DiscoverAndInitializePluginsAsync();
+
+        // Assert
+        Assert.Contains(service.Plugins, p => p.Id == "ollama-lora-tagger");
+        var tagger = service.Plugins.First(p => p.Id == "ollama-lora-tagger");
+        Assert.Equal("Ollama Vision LoRA Tagger & Captioner", tagger.Name);
+        Assert.Equal("plugin.py", tagger.EntryPoint);
+        Assert.Equal("Python", tagger.PluginType);
+    }
 }
 

@@ -18,38 +18,84 @@ public sealed class PluginManagerService {
 
     public IReadOnlyCollection<PluginManifest> Plugins => _registeredPlugins.Values;
 
-    public PluginManagerService(ProcessRunner processRunner, AmdVenvProvisioner? provisioner = null) {
+    public PluginManagerService(ProcessRunner processRunner, AmdVenvProvisioner? provisioner = null, string? pluginsDirectory = null) {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
         _provisioner = provisioner;
-        PluginsDirectory = Path.Combine(AppContext.BaseDirectory, "plugins");
+        PluginsDirectory = !string.IsNullOrWhiteSpace(pluginsDirectory) && Directory.Exists(pluginsDirectory)
+            ? pluginsDirectory
+            : ResolvePluginsDirectory();
+    }
+
+    public static string ResolvePluginsDirectory() {
+        string baseDir = AppContext.BaseDirectory;
+        string appPlugins = Path.Combine(baseDir, "plugins");
+        if (Directory.Exists(appPlugins) && Directory.GetDirectories(appPlugins).Length > 0) {
+            return appPlugins;
+        }
+
+        // Search upward from AppContext.BaseDirectory for a repository/app root 'plugins' directory
+        DirectoryInfo? current = new DirectoryInfo(baseDir);
+        while (current != null) {
+            string candidate = Path.Combine(current.FullName, "plugins");
+            if (Directory.Exists(candidate) && Directory.GetDirectories(candidate).Length > 0) {
+                return candidate;
+            }
+            current = current.Parent;
+        }
+
+        // Check current working directory
+        string cwdPlugins = Path.Combine(Directory.GetCurrentDirectory(), "plugins");
+        if (Directory.Exists(cwdPlugins) && Directory.GetDirectories(cwdPlugins).Length > 0) {
+            return cwdPlugins;
+        }
+
+        return appPlugins;
     }
 
     public async Task DiscoverAndInitializePluginsAsync(CancellationToken cancellationToken = default) {
-        if (!Directory.Exists(PluginsDirectory)) {
+        var directoriesToScan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (Directory.Exists(PluginsDirectory)) {
+            directoriesToScan.Add(PluginsDirectory);
+        }
+
+        string resolved = ResolvePluginsDirectory();
+        if (Directory.Exists(resolved)) {
+            directoriesToScan.Add(resolved);
+        }
+
+        string basePlugins = Path.Combine(AppContext.BaseDirectory, "plugins");
+        if (Directory.Exists(basePlugins)) {
+            directoriesToScan.Add(basePlugins);
+        }
+
+        if (directoriesToScan.Count == 0) {
             Directory.CreateDirectory(PluginsDirectory);
             return;
         }
 
-        string[] subDirs = Directory.GetDirectories(PluginsDirectory);
-        foreach (string dir in subDirs) {
-            string folderName = Path.GetFileName(dir);
-            bool isGit = Directory.Exists(Path.Combine(dir, ".git"));
-            bool isDisabled = File.Exists(Path.Combine(dir, ".disabled"));
+        foreach (string pluginDir in directoriesToScan) {
+            string[] subDirs = Directory.GetDirectories(pluginDir);
+            foreach (string dir in subDirs) {
+                string folderName = Path.GetFileName(dir);
+                bool isGit = Directory.Exists(Path.Combine(dir, ".git"));
+                bool isDisabled = File.Exists(Path.Combine(dir, ".disabled"));
 
-            // 1. Check for C# plugin (.dll matching folder or any .dll implementing ILoRAMancerPlugin)
-            string[] dllFiles = Directory.GetFiles(dir, "*.dll");
-            if (dllFiles.Length > 0) {
-                await LoadCSharpPluginFromDirectoryAsync(dir, dllFiles, isGit, isDisabled, cancellationToken);
-                continue;
-            }
+                // 1. Check for C# plugin (.dll matching folder or any .dll implementing ILoRAMancerPlugin)
+                string[] dllFiles = Directory.GetFiles(dir, "*.dll");
+                if (dllFiles.Length > 0) {
+                    await LoadCSharpPluginFromDirectoryAsync(dir, dllFiles, isGit, isDisabled, cancellationToken);
+                    continue;
+                }
 
-            // 2. Check for Python plugin (folder containing plugin.json, plugin.py, or requirements.txt)
-            string pythonScript = Path.Combine(dir, "plugin.py");
-            string manifestFile = Path.Combine(dir, "plugin.json");
-            string reqFile = Path.Combine(dir, "requirements.txt");
+                // 2. Check for Python plugin (folder containing plugin.json, plugin.py, or requirements.txt)
+                string pythonScript = Path.Combine(dir, "plugin.py");
+                string manifestFile = Path.Combine(dir, "plugin.json");
+                string reqFile = Path.Combine(dir, "requirements.txt");
 
-            if (File.Exists(pythonScript) || File.Exists(manifestFile) || File.Exists(reqFile) || isGit) {
-                await RegisterPythonPluginAsync(dir, manifestFile, pythonScript, reqFile, folderName, isGit, isDisabled, cancellationToken);
+                if (File.Exists(pythonScript) || File.Exists(manifestFile) || File.Exists(reqFile) || isGit) {
+                    await RegisterPythonPluginAsync(dir, manifestFile, pythonScript, reqFile, folderName, isGit, isDisabled, cancellationToken);
+                }
             }
         }
     }
@@ -435,6 +481,11 @@ public sealed class PluginManagerService {
         CancellationToken cancellationToken = default
     ) {
         if (!_registeredPlugins.TryGetValue(pluginId, out PluginManifest? manifest)) {
+            await DiscoverAndInitializePluginsAsync(cancellationToken);
+            _registeredPlugins.TryGetValue(pluginId, out manifest);
+        }
+
+        if (manifest == null) {
             return PluginResult.Fail($"Plugin '{pluginId}' is not registered.");
         }
 
