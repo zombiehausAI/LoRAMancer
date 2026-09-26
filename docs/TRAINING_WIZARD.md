@@ -1,6 +1,6 @@
 # LoRAMancer Training Wizard & Estimators
 
-LoRAMancer provides a streamlined, Civitai-inspired training creation workflow tailored specifically for AMD ROCm hardware on Windows.
+LoRAMancer provides a streamlined, Easy Use training creation workflow tailored specifically for AMD ROCm hardware on Windows.
 
 ## 1. Subject-Type Intelligent Presets
 

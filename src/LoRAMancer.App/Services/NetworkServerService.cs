@@ -1842,20 +1842,20 @@ self.addEventListener('fetch', (e) => {
                 </div>
             </div>
 
-            <!-- VIEW: 2. TRAIN & FORGE (Civitai-Style Wizard + Advanced Studio) -->
+            <!-- VIEW: 2. TRAIN & FORGE (Easy Use Wizard + Advanced Studio) -->
             <div id="view-train" class="view-panel active">
                 
                 <!-- Mode Switcher Tabs -->
                 <div class="segmented-tabs">
                     <button id="tabBtnWizard" class="tab-btn active" onclick="switchTrainMode('wizard')">
-                        <span>🪄</span> Civitai-Style Training Wizard
+                        <span>🪄</span> Easy Use Training Wizard
                     </button>
                     <button id="tabBtnManual" class="tab-btn" onclick="switchTrainMode('manual')">
                         <span>⚙️</span> Advanced Studio &amp; Queue Management
                     </button>
                 </div>
 
-                <!-- SUB-VIEW 1: CIVITAI-STYLE TRAINING WIZARD -->
+                <!-- SUB-VIEW 1: EASY USE TRAINING WIZARD -->
                 <div id="trainWizardView">
                     
                     <!-- Cloned Donor Recipe Banner -->

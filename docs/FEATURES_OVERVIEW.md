@@ -45,7 +45,7 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 
 ---
 
-## 3. Civitai-Style Training Wizard & Hyperparameter Cloning
+## 3. Easy Use Training Wizard & Hyperparameter Cloning
 
 - **Hyperparameter Cloning ("Use Settings")**:
   - Borrow mathematical hyperparameter recipes directly from any donor LoRA: rank (dim), alpha, learning rates, optimizer, epochs, and resolution.
@@ -67,7 +67,7 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 
 ## 4. Permanent Training History & Vault (`/history`)
 
-- **Local Civitai-Style Ledger**:
+- **Local Training History Ledger**:
   - Logs every training run locally to permanent storage: trigger words, full hyperparameter snapshots, loss sparklines, and duration.
   - Records never expire or get purged by cloud retention limits.
   - 1-click **Clone Config** from historical runs to iterate on versions.
@@ -82,7 +82,7 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - **Configurable Remote Ingestion & Uploads Directory**: Setting in Settings & Admin (`RemoteUploadsDirectory`) with native folder picker allowing users to route all web/remote uploads (donor LoRAs, datasets) to any custom directory, with automatic indexing into the Library Vault.
 - **Desktop-Mirrored Full Studio Web UI**:
   - **Identical Visual Design**: Dark Catppuccin Mocha UI with matching 260px navigation sidebar, breadcrumb pipeline stages (`1. Curate`, `2. Train & Forge`, `3. Diagnostic Lab`, `4. ComfyUI Test`, `5. Library & Vault`), and hardware acceleration pills.
-  - **Civitai-Style New Training Wizard**:
+  - **Easy Use New Training Wizard**:
     - **Step 1: What are you training?**: 5 interactive subject preset cards (*Character / Person*, *Art Style / Aesthetic*, *Concept / Object*, *Clothing / Outfit*, *Custom*) that automatically populate hyperparameters.
     - **Donor LoRA Cloned Recipe**: Upload any `.safetensors` LoRA from your local computer or pick from the server vault to instantly extract and clone its architecture, rank, alpha, learning rate, optimizer, scheduler, and precision.
     - **Step 2: Dataset & Health Audit**: ZIP upload with auto-extraction, image/caption count audit, missing caption detection, and 1-click trigger prepending.
@@ -158,7 +158,7 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 - **Tag Frequency Analysis & Lexicon Explorer**:
   - Scans entire dataset directories, parses comma-separated tags, and calculates exact occurrence counts and dataset percentages.
   - Interactive tag table with quick delete and find/replace population.
-- **Civitai-Style In-Place Ollama Auto-Tagging**:
+- **In-Place Ollama Auto-Tagging**:
   - Automatically loads the active studio dataset directly into the Ollama LoRA Tagger with 1 click.
   - Writes `.txt` captions in-place next to source images with zero zip/duplicate folder overhead.
   - Instantly refreshes dataset metadata, gallery cards, and tag frequencies upon completion.
