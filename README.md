@@ -90,6 +90,18 @@ See the [Standalone AMD ROCm AI-Toolkit Technical Guide](docs/AMD_AI_TOOLKIT_STA
 
 This project and its accompanying utilities were developed with AI assistance (*Assisted by AI, for AI*). We believe in open transparency: if you prefer not to use or engage with AI-assisted software, please be aware before installing, evaluating, or running this application.
 
+## Acknowledgements & Credits
+
+LoRAMancer stands on the shoulders of incredible open-source projects and communities:
+
+- **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — The powerful, modular node-based visual inference engine powering interactive test canvas generation, live sampling streams, and automated benchmark matrices.
+- **[ai-toolkit](https://github.com/ostris/ai-toolkit)** (by ostris) — The state-of-the-art training suite orchestrating LoRAMancer's multi-architecture fine-tuning, training queues, and LoRA surgery extraction pipelines.
+- **[Ollama](https://github.com/ollama/ollama)** — Fast, lightweight local LLM and vision model runtime powering local image captioning and concept tagging in the Dataset Curator Studio.
+- **[PyTorch](https://github.com/pytorch/pytorch)** & **[AMD ROCm](https://rocm.docs.amd.com/)** — Universal deep learning framework and compute platform providing hardware acceleration across AMD Radeon, NVIDIA CUDA, Intel Arc, and CPU.
+- **[MudBlazor](https://mudblazor.com/)** — The Material Design component framework powering LoRAMancer's high-contrast desktop interface and responsive remote web client.
+- **[Civitai](https://civitai.com/)** — Community model repository whose public API provides automated metadata enrichment, trigger keyword detection, and preview caching.
+- **[Cloudflare Quick Tunnels](https://github.com/cloudflare/cloudflared)** — Secure zero-configuration tunnels providing encrypted remote studio access across LAN and WAN without manual port forwarding.
+
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
