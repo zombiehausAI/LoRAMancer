@@ -79,16 +79,26 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 - **Embedded Kestrel Network Server**:
   - Host runs locally on Windows/Linux workstation while providing remote desktop-mirroring control from any browser or Linux client.
   - **Auto-Start on Application Launch**: Toggle in Settings & Admin (`AutoStartServerOnAppLaunch`) automatically boots the HTTP/WebSocket server upon LoRAMancer launch.
+  - **Configurable Remote Ingestion & Uploads Directory**: Setting in Settings & Admin (`RemoteUploadsDirectory`) with native folder picker allowing users to route all web/remote uploads (donor LoRAs, datasets) to any custom directory, with automatic indexing into the Library Vault.
 - **Desktop-Mirrored Full Studio Web UI**:
   - **Identical Visual Design**: Dark Catppuccin Mocha UI with matching 260px navigation sidebar, breadcrumb pipeline stages (`1. Curate`, `2. Train & Forge`, `3. Diagnostic Lab`, `4. ComfyUI Test`, `5. Library & Vault`), and hardware acceleration pills.
-  - **Full-Featured Trainer**: Comprehensive hyperparameters (Dim/Rank, Alpha, Optimizer selection, Learning Rate, Precision, Max Steps, Batch Size, Resolution, and Sample Prompts), interactive live console with autoscroll, and real-time hardware telemetry (VRAM bar, temperature, GPU utilization).
-  - **Sequential Training Queue**: Complete remote queue management (Enqueue, Pause/Resume, Cancel All, Clear Logs, Prioritize) with single-GPU concurrency safety.
+  - **Civitai-Style New Training Wizard**:
+    - **Step 1: What are you training?**: 5 interactive subject preset cards (*Character / Person*, *Art Style / Aesthetic*, *Concept / Object*, *Clothing / Outfit*, *Custom*) that automatically populate hyperparameters.
+    - **Donor LoRA Cloned Recipe**: Upload any `.safetensors` LoRA from your local computer or pick from the server vault to instantly extract and clone its architecture, rank, alpha, learning rate, optimizer, scheduler, and precision.
+    - **Step 2: Dataset & Health Audit**: ZIP upload with auto-extraction, image/caption count audit, missing caption detection, and 1-click trigger prepending.
+    - **Step 3: Live Training Estimators**: Real-time recalculation of total steps, estimated VRAM (with green/red AMD ROCm hardware safety checks), estimated checkpoint size, and duration.
+    - **Pro Mode Expansion**: Full granular access to fine-tune Dim/Rank, Alpha, Optimizer, LR, Precision, Batch Size, Epochs, Repeats, and Sample Prompts.
+  - **Sequential Training Queue & Console**: Complete remote queue management (Enqueue, Pause/Resume, Cancel All, Clear Logs) with single-GPU concurrency safety and real-time streaming terminal logs with autoscroll lock.
+  - **LoRA Chop-Shop with Direct Upload**:
+    - **Direct `.safetensors` Donor Upload**: Drag-and-drop or browse any LoRA from your remote computer into the garage shelf.
+    - **Multi-Model Garage**: Inspects donor architecture, rank, energy footprint, dominant visual feature (e.g. *Facial Likeness & Anatomy*, *Lighting, Atmosphere & Style*, *Micro-Textures & Outfits*), and inferred trigger tokens.
+    - **Anatomical Assembly Bay**: 7 high-level visual parts (*Face & Anatomy*, *Eyes & Iris*, *Hair & Hairstyle*, *Clothing & Outfit*, *Lighting & Ambiance*, *Skin & Micro-Details*, *Prompt Triggers*) with source donor selectors and grafting blend sliders ($0.00\times - 2.00\times$).
+    - **Smart Auto-Assign & SVD Bake**: Automatically pairs donors to their strongest anatomical traits and compiles the resulting Franken-LoRA on the server without retraining.
   - **Remote Studio Stages**:
     - *1. Curate & Caption*: Dataset upload, image gallery, and caption inspector.
     - *3. Diagnostic Lab*: SVD Overbake radar analysis, layer surgery multipliers, and SVD compression rank pruning.
     - *4. ComfyUI Test*: Remote prompt inference on the host GPU with live image preview and download.
-    - *5. Library & Vault*: Server `.safetensors` model cards with *Send to Lab*, *Send to Chop*, and *Test in ComfyUI* actions.
-    - *LoRA Chop-Shop*: Multi-donor garage with dominant feature tags, anatomical parts grafting, and remote SVD compilation.
+    - *5. Library & Vault*: Server `.safetensors` model cards with *Use as Wizard Donor*, *Send to Lab*, *Send to Chop*, and *Test in ComfyUI* actions.
 - **Progressive Web App (PWA)**:
   - Installable on iOS, Android, macOS, and Linux with offline shell caching and native app chrome.
 - **Public Internet Tunnels (Cloudflare Quick Tunnels)**:

@@ -543,6 +543,23 @@
                             </MudText>
                         </div>
 
+                        <div class="mb-3">
+                            <MudText Typo="Typo.subtitle2" Class="mb-1" Style="font-weight: 600;">
+                                <MudIcon Icon="@Icons.Material.Filled.FolderZip" Size="Size.Small" Class="mr-1" /> Remote Ingestion &amp; Uploads Directory
+                            </MudText>
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_settings.RemoteUploadsDirectory" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Leave blank for default (~/.loramancer/uploads)..." FullWidth="true" HelperText="Folder where uploaded LoRAs, donor models, and datasets from the web UI are stored on this machine." />
+                                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseUploadsFolderAsync">
+                                    Browse...
+                                </MudButton>
+                                @if (!string.IsNullOrWhiteSpace(_settings.RemoteUploadsDirectory)) {
+                                    <MudTooltip Text="Reset to Default">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Clear" Color="Color.Default" Size="Size.Small" OnClick="@(() => _settings.RemoteUploadsDirectory = string.Empty)" />
+                                    </MudTooltip>
+                                }
+                            </div>
+                        </div>
+
                         <MudDivider Class="my-2" />
 
                         <MudText Typo="Typo.subtitle2" Class="mb-1" Style="font-weight: 600;">
@@ -1734,6 +1751,13 @@
         string? folder = await FileDialogService.PickFolderAsync("Select Default Output Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _settings.DefaultOutputDirectory = folder;
+        }
+    }
+
+    private async Task BrowseUploadsFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Remote Ingestion & Uploads Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _settings.RemoteUploadsDirectory = folder;
         }
     }
 

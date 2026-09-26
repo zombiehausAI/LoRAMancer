@@ -86,6 +86,7 @@ public sealed class AppSettings {
     public string ServerBindAddress { get; set; } = "0.0.0.0";
     public string ServerAccessToken { get; set; } = string.Empty;
     public bool RequireAuthForWebAccess { get; set; } = true;
+    public string RemoteUploadsDirectory { get; set; } = string.Empty;
 
     // Public Internet Sharing & Tunneling
     public bool EnablePublicInternetTunnel { get; set; }

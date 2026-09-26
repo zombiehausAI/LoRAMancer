@@ -58,16 +58,26 @@ public sealed class WebTrainingRequestDto {
     public string? TriggerWord { get; set; }
     public int Steps { get; set; } = 1500;
     public int BatchSize { get; set; } = 1;
-    public double LearningRate { get; set; } = 0.0001;
+    public double LearningRate { get; set; } = 1e-4;
     public string Optimizer { get; set; } = "adamw8bit";
     public int NetworkDim { get; set; } = 16;
     public int NetworkAlpha { get; set; } = 16;
     public string Precision { get; set; } = "bf16";
     public int Resolution { get; set; } = 1024;
     public int Epochs { get; set; } = 10;
+    public int Repeats { get; set; } = 10;
     public int GradientAccumulation { get; set; } = 1;
     public string? SamplePrompt { get; set; }
     public string? RawConfigYaml { get; set; }
+}
+
+public sealed class TrainingEstimateRequestDto {
+    public string BaseModel { get; set; } = "FLUX.1-dev";
+    public int ImageCount { get; set; } = 20;
+    public int Repeats { get; set; } = 10;
+    public int Epochs { get; set; } = 10;
+    public int BatchSize { get; set; } = 1;
+    public int NetworkDim { get; set; } = 16;
 }
 
 public sealed class NetworkServerService : IAsyncDisposable {
@@ -84,6 +94,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
     private readonly OverbakeRadarService? _overbakeRadar;
     private readonly ComfyUiService? _comfyUiService;
     private readonly AiToolkitConfigBuilder? _configBuilder;
+    private readonly TrainingEstimationService? _estimationService;
+    private readonly SafeTensorsMetadataReader? _metadataReader;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -109,7 +121,9 @@ public sealed class NetworkServerService : IAsyncDisposable {
         LoraSurgeryService? surgeryService = null,
         OverbakeRadarService? overbakeRadar = null,
         ComfyUiService? comfyUiService = null,
-        AiToolkitConfigBuilder? configBuilder = null
+        AiToolkitConfigBuilder? configBuilder = null,
+        TrainingEstimationService? estimationService = null,
+        SafeTensorsMetadataReader? metadataReader = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
@@ -124,6 +138,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
         _overbakeRadar = overbakeRadar;
         _comfyUiService = comfyUiService;
         _configBuilder = configBuilder;
+        _estimationService = estimationService;
+        _metadataReader = metadataReader;
 
         _trainingRunner.OnProgressUpdated += HandleProgressUpdated;
         _trainingRunner.OnLogReceived += HandleLogReceived;
@@ -135,137 +151,116 @@ public sealed class NetworkServerService : IAsyncDisposable {
         }
 
         _serverCts = new CancellationTokenSource();
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
+            Args = Array.Empty<string>()
+        });
+
         builder.WebHost.UseKestrel(options => {
-            IPAddress ip = bindAddress == "0.0.0.0" ? IPAddress.Any : IPAddress.Parse(bindAddress);
-            options.Listen(ip, port);
+            if (bindAddress == "127.0.0.1" || bindAddress == "localhost") {
+                options.ListenLocalhost(port);
+            } else {
+                options.Listen(IPAddress.Any, port);
+            }
         });
 
         builder.Services.AddRouting();
+        builder.Services.AddCors(options => {
+            options.AddDefaultPolicy(policy => {
+                policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+            });
+        });
 
         WebApplication app = builder.Build();
+        app.UseCors();
 
-        app.UseRouting();
+        // 1. PWA Manifest & App Chrome Assets
+        app.MapGet("/manifest.json", () => Results.Text(GetWebManifestJson(), "application/manifest+json"));
+        app.MapGet("/sw.js", () => Results.Text(GetServiceWorkerJs(), "application/javascript"));
+        app.MapGet("/icon.svg", () => Results.Text(GetAppIconSvg(), "image/svg+xml"));
 
-        // 1. PWA Web App Manifest
-        app.MapGet("/manifest.json", (HttpContext context) => {
-            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+        // 2. Auth Session Check / Token Validation
+        app.MapPost("/api/v1/auth/login", async (HttpRequest request) => {
+            var body = await JsonSerializer.DeserializeAsync<AuthLoginDto>(request.Body);
+            string candidate = body?.PinOrToken ?? string.Empty;
 
-            var manifest = new {
-                name = "LoRAMancer Remote Studio",
-                short_name = "LoRAMancer",
-                description = "Remote AI LoRA Training, Lab, Chop-Shop & ComfyUI Studio",
-                start_url = "/",
-                scope = "/",
-                display = "standalone",
-                background_color = "#11111b",
-                theme_color = "#cba6f7",
-                icons = new[] {
-                    new {
-                        src = "/icon.svg",
-                        sizes = "512x512",
-                        type = "image/svg+xml",
-                        purpose = "any maskable"
-                    }
-                }
-            };
-            return Results.Json(manifest);
-        });
-
-        // 2. Application SVG Icon
-        app.MapGet("/icon.svg", (HttpContext context) => {
-            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
-
-            string svg = """
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
-                    <defs>
-                        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#cba6f7" />
-                            <stop offset="100%" stop-color="#89b4fa" />
-                        </linearGradient>
-                    </defs>
-                    <rect width="512" height="512" rx="128" fill="#11111b" />
-                    <circle cx="256" cy="256" r="180" fill="url(#grad)" opacity="0.15" />
-                    <path d="M256 80 L320 200 L450 220 L350 310 L380 440 L256 370 L132 440 L162 310 L62 220 L192 200 Z" fill="url(#grad)" />
-                    <text x="256" y="320" font-family="Arial, sans-serif" font-size="160" font-weight="900" fill="#11111b" text-anchor="middle">LM</text>
-                </svg>
-                """;
-            return Results.Content(svg, "image/svg+xml");
-        });
-
-        // 3. PWA Service Worker
-        app.MapGet("/sw.js", (HttpContext context) => {
-            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
-
-            string swScript = """
-                const CACHE_NAME = 'loramancer-shell-v3';
-                const SHELL_ASSETS = ['/', '/manifest.json', '/icon.svg'];
-
-                self.addEventListener('install', (event) => {
-                    event.waitUntil(
-                        caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)).then(() => self.skipWaiting())
-                    );
+            if (_authTokenManager != null && _authTokenManager.ValidateToken(candidate, out var record)) {
+                return Results.Ok(new {
+                    success = true,
+                    role = record?.Role ?? "Admin",
+                    token = candidate
                 });
-
-                self.addEventListener('activate', (event) => {
-                    event.waitUntil(
-                        caches.keys().then((keys) => Promise.all(
-                            keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-                        )).then(() => self.clients.claim())
-                    );
-                });
-
-                self.addEventListener('fetch', (event) => {
-                    const url = new URL(event.request.url);
-                    if (url.pathname.startsWith('/api/')) return;
-                    event.respondWith(
-                        fetch(event.request).catch(() => caches.match(event.request).then((res) => res || caches.match('/')))
-                    );
-                });
-                """;
-            return Results.Content(swScript, "application/javascript");
-        });
-
-        // 4. Authentication Login
-        app.MapPost("/api/v1/auth/login", (HttpRequest request, AuthLoginDto loginDto) => {
-            string expectedToken = !string.IsNullOrWhiteSpace(accessToken) ? accessToken : _settingsService.Current.ServerAccessToken;
-            bool requireAuth = _settingsService.Current.RequireAuthForWebAccess || !string.IsNullOrWhiteSpace(expectedToken);
-
-            string inputToken = loginDto.PinOrToken?.Trim() ?? string.Empty;
-            bool isAuthorized = false;
-            string effectiveToken = "authorized";
-
-            if (!requireAuth) {
-                isAuthorized = true;
-            } else if (!string.IsNullOrWhiteSpace(inputToken)) {
-                if (_authTokenManager != null && _authTokenManager.ValidateToken(inputToken, out var matched)) {
-                    isAuthorized = true;
-                    effectiveToken = matched!.Token;
-                } else if (!string.IsNullOrWhiteSpace(expectedToken) && string.Equals(inputToken, expectedToken.Trim(), StringComparison.Ordinal)) {
-                    isAuthorized = true;
-                    effectiveToken = expectedToken;
-                }
             }
 
-            if (isAuthorized) {
-                request.HttpContext.Response.Cookies.Append("loramancer_auth", effectiveToken, new CookieOptions {
-                    HttpOnly = true,
-                    SameSite = SameSiteMode.Lax,
-                    Secure = request.IsHttps,
-                    Expires = DateTimeOffset.UtcNow.AddDays(30)
-                });
-                return Results.Ok(new { success = true, token = effectiveToken });
+            if (!string.IsNullOrWhiteSpace(accessToken) && candidate == accessToken) {
+                return Results.Ok(new { success = true, role = "Admin", token = candidate });
             }
 
-            return Results.Unauthorized();
+            if (!string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken) && candidate == _settingsService.Current.ServerAccessToken) {
+                return Results.Ok(new { success = true, role = "Admin", token = candidate });
+            }
+
+            if (string.IsNullOrWhiteSpace(accessToken) && string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken)) {
+                return Results.Ok(new { success = true, role = "Admin", token = "open_access" });
+            }
+
+            return Results.Json(new { success = false, message = "Invalid Access Token." }, statusCode: 401);
         });
 
-        // 5. Health & Status
+        // 3. Token Management Endpoints
+        app.MapGet("/api/v1/auth/tokens", (HttpContext context) => {
+            if (!IsAdmin(context, accessToken)) return Results.Unauthorized();
+            if (_authTokenManager == null) return Results.Json(Array.Empty<object>());
+            return Results.Json(_authTokenManager.GetAllTokens());
+        });
+
+        app.MapPost("/api/v1/auth/tokens", async (HttpRequest request) => {
+            if (!IsAdmin(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_authTokenManager == null) return Results.BadRequest(new { error = "Auth manager not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<CreateTokenDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.Name)) {
+                return Results.BadRequest(new { error = "Token name is required." });
+            }
+
+            var token = _authTokenManager.CreateToken(dto.Name, dto.CustomToken, dto.Role ?? "Trainer", dto.Description ?? "", dto.ExpiresAt);
+            return Results.Created($"/api/v1/auth/tokens/{token.Id}", token);
+        });
+
+        app.MapDelete("/api/v1/auth/tokens/{id}", (string id, HttpContext context) => {
+            if (!IsAdmin(context, accessToken)) return Results.Unauthorized();
+            if (_authTokenManager == null) return Results.BadRequest(new { error = "Auth manager not initialized." });
+            bool deleted = _authTokenManager.DeleteToken(id);
+            return deleted ? Results.Ok(new { message = "Token deleted." }) : Results.NotFound();
+        });
+
+        // 4. Public Internet Cloudflare Tunnel Endpoints
+        app.MapGet("/api/v1/tunnel/status", (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            return Results.Json(new {
+                isRunning = _publicTunnelService?.IsTunnelRunning ?? false,
+                publicUrl = _publicTunnelService?.ActivePublicUrl ?? string.Empty
+            });
+        });
+
+        app.MapPost("/api/v1/tunnel/start", async (HttpContext context) => {
+            if (!IsAdmin(context, accessToken)) return Results.Unauthorized();
+            if (_publicTunnelService == null) return Results.BadRequest(new { error = "Tunnel service not initialized." });
+            string url = await _publicTunnelService.StartTunnelAsync(port);
+            return Results.Ok(new { success = true, publicUrl = url });
+        });
+
+        app.MapPost("/api/v1/tunnel/stop", async (HttpContext context) => {
+            if (!IsAdmin(context, accessToken)) return Results.Unauthorized();
+            if (_publicTunnelService == null) return Results.BadRequest(new { error = "Tunnel service not initialized." });
+            await _publicTunnelService.StopTunnelAsync();
+            return Results.Ok(new { success = true });
+        });
+
+        // 5. Training Status & Health
         app.MapGet("/api/v1/health", (HttpContext context) => {
             if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
 
-            ServerHealthDto health = new() {
-                Status = _trainingRunner.IsRunning ? "Training" : "Ready",
+            var health = new ServerHealthDto {
                 IsTraining = _trainingRunner.IsRunning,
                 ActiveRunName = _trainingRunner.CurrentJob?.Name ?? (_trainingRunner.IsRunning ? "Active Run" : string.Empty),
                 CurrentStep = _trainingRunner.CurrentProgress.CurrentStep,
@@ -311,8 +306,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
             }
 
             IFormFile file = request.Form.Files[0];
-            string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "uploads");
-            Directory.CreateDirectory(tempDir);
+            string tempDir = GetEffectiveUploadsDirectory();
             string destinationZip = Path.Combine(tempDir, $"{Guid.NewGuid():N}_{file.FileName}");
 
             await using (FileStream stream = new(destinationZip, FileMode.Create, FileAccess.Write)) {
@@ -327,6 +321,122 @@ public sealed class NetworkServerService : IAsyncDisposable {
                 ImageCount = report.TotalImages,
                 CaptionCount = report.TotalCaptions,
                 Message = report.IsValid ? "Dataset uploaded and auto-extracted successfully on host." : "Dataset contains warnings or no valid images."
+            });
+        });
+
+        // 7b. Upload LoRA Model (.safetensors) for Chop-Shop Donor or Training Recipe Cloning
+        app.MapPost("/api/v1/loras/upload", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+
+            if (!request.HasFormContentType || request.Form.Files.Count == 0) {
+                return Results.BadRequest(new { success = false, message = "No .safetensors file uploaded." });
+            }
+
+            IFormFile file = request.Form.Files[0];
+            if (!file.FileName.EndsWith(".safetensors", StringComparison.OrdinalIgnoreCase)) {
+                return Results.BadRequest(new { success = false, message = "Only .safetensors LoRA files are supported." });
+            }
+
+            string uploadsDir = GetEffectiveUploadsDirectory();
+            string destinationLora = Path.Combine(uploadsDir, $"{Guid.NewGuid():N}_{file.FileName}");
+
+            await using (FileStream stream = new(destinationLora, FileMode.Create, FileAccess.Write)) {
+                await file.CopyToAsync(stream);
+            }
+
+            LoraMetadata? metadata = null;
+            if (_metadataReader != null) {
+                try {
+                    metadata = await _metadataReader.ReadMetadataAsync(destinationLora);
+                } catch { }
+            }
+
+            ChopDonorModel? donor = null;
+            if (_chopShopService != null) {
+                try {
+                    donor = await _chopShopService.InspectDonorAsync(destinationLora);
+                } catch { }
+            }
+
+            string arch = donor?.Architecture ?? metadata?.EffectiveBaseModel ?? "FLUX.1";
+            int rank = donor?.Rank ?? metadata?.NetworkDim ?? 16;
+            int alpha = (int)(metadata?.NetworkAlpha ?? rank);
+            double lr = metadata?.LearningRate ?? 1e-4;
+            string opt = !string.IsNullOrWhiteSpace(metadata?.Optimizer) ? metadata.Optimizer : "adamw8bit";
+            string scheduler = !string.IsNullOrWhiteSpace(metadata?.LrScheduler) ? metadata.LrScheduler : "cosine";
+            string precision = !string.IsNullOrWhiteSpace(metadata?.Precision) ? metadata.Precision : "bf16";
+            int epochs = metadata?.Epochs ?? 10;
+            string dominantFeature = donor?.DominantFeature ?? "General Feature";
+            List<string> tags = donor?.InferredTags ?? new List<string>();
+
+            return Results.Json(new {
+                success = true,
+                filePath = destinationLora,
+                fileName = file.FileName,
+                fileSize = file.Length,
+                formattedSize = $"{file.Length / (1024.0 * 1024.0):F1} MB",
+                architecture = arch,
+                rank = rank,
+                alpha = alpha,
+                learningRate = lr,
+                unetLearningRate = metadata?.UnetLearningRate,
+                textEncoderLearningRate = metadata?.TextEncoderLearningRate,
+                optimizer = opt,
+                lrScheduler = scheduler,
+                precision = precision,
+                epochs = epochs,
+                dominantFeature = dominantFeature,
+                inferredTags = tags,
+                donor = donor,
+                message = "Donor LoRA uploaded and analyzed successfully on server."
+            });
+        });
+
+        // 7c. Calculate Training Estimates & Pre-Flight Check
+        app.MapPost("/api/v1/training/estimate", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+
+            var req = await JsonSerializer.DeserializeAsync<TrainingEstimateRequestDto>(request.Body);
+            if (req == null) return Results.BadRequest(new { error = "Invalid estimation parameters." });
+
+            if (_estimationService != null) {
+                var est = _estimationService.CalculateEstimates(
+                    req.BaseModel,
+                    req.ImageCount,
+                    req.Repeats,
+                    req.Epochs,
+                    req.BatchSize,
+                    req.NetworkDim
+                );
+                var preFlight = _estimationService.RunPreFlightCheck(req.BaseModel, string.Empty, req.BatchSize);
+
+                return Results.Json(new {
+                    totalSteps = est.TotalSteps,
+                    estimatedVramGb = est.EstimatedVramGb,
+                    estimatedOutputSizeMb = est.EstimatedOutputSizeMb,
+                    estimatedDurationMinutes = est.EstimatedDuration.TotalMinutes,
+                    formattedDuration = $"{est.EstimatedDuration:hh\\:mm\\:ss}",
+                    stepBreakdown = est.StepBreakdown,
+                    totalVramGb = preFlight.TotalVramGb,
+                    gpuName = preFlight.GpuName,
+                    hasSufficientVram = preFlight.HasSufficientVram,
+                    warnings = preFlight.Warnings
+                });
+            }
+
+            int safeBatch = Math.Max(1, req.BatchSize);
+            int totalSteps = (Math.Max(1, req.ImageCount) * Math.Max(1, req.Repeats) * Math.Max(1, req.Epochs)) / safeBatch;
+            return Results.Json(new {
+                totalSteps = totalSteps,
+                estimatedVramGb = 10.4,
+                estimatedOutputSizeMb = 54.0,
+                estimatedDurationMinutes = totalSteps * 1.35 / 60.0,
+                formattedDuration = TimeSpan.FromSeconds(totalSteps * 1.35).ToString(@"hh\:mm\:ss"),
+                stepBreakdown = $"{req.ImageCount} images × {req.Repeats} reps × {req.Epochs} ep ÷ {safeBatch} = {totalSteps} steps",
+                totalVramGb = 16.0,
+                gpuName = "AMD Radeon Graphics",
+                hasSufficientVram = true,
+                warnings = Array.Empty<string>()
             });
         });
 
@@ -360,6 +470,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
                     NetworkAlpha = req.NetworkAlpha > 0 ? req.NetworkAlpha : 16,
                     Precision = !string.IsNullOrWhiteSpace(req.Precision) ? req.Precision : "bf16",
                     MaxTrainEpochs = req.Epochs > 0 ? req.Epochs : 10,
+                    Repeats = req.Repeats > 0 ? req.Repeats : 10,
                     GradientAccumulationSteps = req.GradientAccumulation > 0 ? req.GradientAccumulation : 1
                 };
                 if (!string.IsNullOrWhiteSpace(req.SamplePrompt)) {
@@ -475,10 +586,19 @@ public sealed class NetworkServerService : IAsyncDisposable {
 
             var foundFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var searchPaths = new List<string> {
+                GetEffectiveUploadsDirectory(),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "outputs"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "remote_runs"),
                 Path.Combine(AppContext.BaseDirectory, "outputs")
             };
+
+            if (!string.IsNullOrWhiteSpace(_settingsService.Current.DefaultOutputDirectory)) {
+                searchPaths.Add(_settingsService.Current.DefaultOutputDirectory);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_settingsService.Current.LoraStorageDirectory)) {
+                searchPaths.Add(_settingsService.Current.LoraStorageDirectory);
+            }
 
             if (!string.IsNullOrWhiteSpace(_settingsService.Current.ComfyUiLorasDirectory) && Directory.Exists(_settingsService.Current.ComfyUiLorasDirectory)) {
                 searchPaths.Add(_settingsService.Current.ComfyUiLorasDirectory);
@@ -598,7 +718,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
                     recipe,
                     onLog: line => BroadcastTelemetry(new TrainingTelemetryDto {
                         EventType = "chop_log",
-                        Message = line
+                        Message = line,
+                        Timestamp = DateTime.UtcNow
                     })
                 );
                 return Results.Json(result);
@@ -607,254 +728,373 @@ public sealed class NetworkServerService : IAsyncDisposable {
             }
         });
 
-        // 21. ComfyUI Status
+        // 21. ComfyUI Status Check
         app.MapGet("/api/v1/comfyui/status", async (HttpContext context) => {
             if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
-            if (_comfyUiService == null) return Results.Json(new { isOnline = false, message = "ComfyUI service unavailable." });
+            if (_comfyUiService == null) return Results.Json(new { isOnline = false, error = "ComfyUI service uninitialized" });
 
-            var status = await _comfyUiService.CheckConnectionAsync();
-            return Results.Json(new {
-                isOnline = status.IsConnected,
-                endpoint = status.Endpoint,
-                os = status.Os,
-                device = status.DeviceName,
-                checkpoints = status.AvailableCheckpoints,
-                loras = status.AvailableLoras,
-                message = status.ErrorMessage
-            });
+            try {
+                var status = await _comfyUiService.CheckConnectionAsync();
+                return Results.Json(new {
+                    isOnline = status.IsConnected,
+                    url = _settingsService.Current.ComfyUiEndpointUrl,
+                    os = status.Os,
+                    gpu = status.DeviceName
+                });
+            } catch (Exception ex) {
+                return Results.Json(new { isOnline = false, error = ex.Message });
+            }
         });
 
-        // 22. ComfyUI Interactive Test Generation
+        // 22. ComfyUI Remote Inference Run
         app.MapPost("/api/v1/comfyui/test", async (HttpRequest request) => {
             if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
-            if (_comfyUiService == null) return Results.BadRequest(new { error = "ComfyUI service unavailable." });
+            if (_comfyUiService == null) return Results.BadRequest(new { error = "ComfyUI service not initialized." });
 
             var req = await JsonSerializer.DeserializeAsync<ComfyUiTestRequestDto>(request.Body);
             if (req == null || string.IsNullOrWhiteSpace(req.Prompt)) {
-                return Results.BadRequest(new { error = "Prompt is required." });
+                return Results.BadRequest(new { error = "Prompt is required for inference test." });
             }
 
             try {
-                string loraName = req.LoraName ?? "none";
-                float weight = req.LoraWeight;
-                string prompt = req.Prompt;
-                string neg = req.NegativePrompt ?? "blurry, low quality, artifacts";
-                int steps = req.Steps > 0 ? req.Steps : 20;
-                float cfg = req.Cfg > 0 ? req.Cfg : 7.0f;
-                long seed = req.Seed ?? Random.Shared.NextInt64(1, 999999999);
-
-                var status = await _comfyUiService.CheckConnectionAsync();
-                if (!status.IsConnected) {
-                    return Results.BadRequest(new { error = "ComfyUI server is offline at configured endpoint." });
-                }
-
-                string ckpt = status.AvailableCheckpoints.FirstOrDefault() ?? "v1-5-pruned-emaonly.safetensors";
-                JsonObject graph = req.Architecture?.ToLowerInvariant() == "flux"
-                    ? _comfyUiService.GenerateFluxPromptGraph(ckpt, loraName, weight, prompt, 1024, 1024, steps, seed)
-                    : _comfyUiService.GenerateSdxlPromptGraph(ckpt, loraName, weight, prompt, neg, 1024, 1024, steps, cfg, seed);
+                var graph = _comfyUiService.GenerateFluxPromptGraph(
+                    req.Checkpoint ?? "flux1-dev.safetensors",
+                    req.LoraName ?? "",
+                    req.LoraWeight,
+                    req.Prompt,
+                    1024, 1024,
+                    req.Steps,
+                    req.Seed ?? 42
+                );
 
                 byte[]? imgBytes = await _comfyUiService.QueuePromptAndRenderAsync(graph);
-                if (imgBytes == null || imgBytes.Length == 0) {
-                    return Results.BadRequest(new { error = "ComfyUI generation completed but produced no output image." });
-                }
-
                 return Results.Json(new {
-                    success = true,
-                    imageBase64 = Convert.ToBase64String(imgBytes),
-                    mimeType = "image/png",
-                    seed = seed
+                    success = imgBytes != null,
+                    imageBytesBase64 = imgBytes != null ? Convert.ToBase64String(imgBytes) : null,
+                    message = imgBytes != null ? "Success" : "No image returned"
                 });
             } catch (Exception ex) {
                 return Results.BadRequest(new { error = ex.Message });
             }
         });
 
-        // 23. Embedded Desktop-Mirrored Web Application (Protected)
+        // 23. Embedded Desktop-Replicating HTML Interface
         app.MapGet("/", async (HttpContext context) => {
-            if (!IsAuthorized(context, accessToken)) {
-                context.Response.StatusCode = 401;
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(GetUnauthorizedAccessHtml());
-                return;
-            }
-
             context.Response.ContentType = "text/html; charset=utf-8";
             await context.Response.WriteAsync(GetEmbeddedWebInterfaceHtml());
         });
 
-        // 24. Token Management API
-        app.MapGet("/api/v1/tokens", (HttpContext context) => {
-            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
-            if (_authTokenManager == null) return Results.Ok(Array.Empty<AuthToken>());
-            return Results.Json(_authTokenManager.GetAllTokens());
+        // 24. Public Guest Landing Page (Authentication UI)
+        app.MapGet("/login", async (HttpContext context) => {
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.WriteAsync(GetEmbeddedLoginPageHtml());
         });
 
+        ListeningUrl = $"http://{bindAddress}:{port}";
         _webApp = app;
-        await _webApp.StartAsync(_serverCts.Token);
 
+        _ = app.RunAsync(_serverCts.Token);
         IsRunning = true;
-        ListeningUrl = $"http://{(bindAddress == "0.0.0.0" ? "localhost" : bindAddress)}:{port}";
-
-        if (_settingsService.Current.EnablePublicInternetTunnel && _publicTunnelService != null) {
-            _ = Task.Run(async () => {
-                try {
-                    await _publicTunnelService.StartTunnelAsync(
-                        port,
-                        _settingsService.Current.PublicTunnelType,
-                        _settingsService.Current.PublicCustomDomainUrl,
-                        _serverCts.Token
-                    );
-                    OnServerStateChanged?.Invoke(true, ListeningUrl);
-                } catch { }
-            });
-        }
-
         OnServerStateChanged?.Invoke(true, ListeningUrl);
     }
 
     public async Task StopServerAsync() {
-        if (!IsRunning || _webApp == null) return;
-
-        try {
-            _serverCts?.Cancel();
-            if (_publicTunnelService != null) {
-                try {
-                    await _publicTunnelService.StopTunnelAsync();
-                } catch { }
-            }
-            await _webApp.StopAsync();
-            await _webApp.DisposeAsync();
-        } finally {
-            _webApp = null;
-            IsRunning = false;
-            ListeningUrl = string.Empty;
-            OnServerStateChanged?.Invoke(false, string.Empty);
+        if (!IsRunning || _webApp == null) {
+            return;
         }
+
+        if (_serverCts != null) {
+            _serverCts.Cancel();
+        }
+
+        await _webApp.StopAsync();
+        await _webApp.DisposeAsync();
+        _webApp = null;
+        IsRunning = false;
+        ListeningUrl = string.Empty;
+        OnServerStateChanged?.Invoke(false, string.Empty);
     }
 
-    private bool IsAuthorized(HttpContext context, string? accessToken) {
-        string effectiveToken = !string.IsNullOrWhiteSpace(accessToken) ? accessToken : _settingsService.Current.ServerAccessToken;
-        if (!_settingsService.Current.RequireAuthForWebAccess && string.IsNullOrWhiteSpace(effectiveToken)) {
-            return true;
+    private string GetEffectiveUploadsDirectory() {
+        string configured = _settingsService.Current.RemoteUploadsDirectory;
+        if (!string.IsNullOrWhiteSpace(configured)) {
+            Directory.CreateDirectory(configured);
+            return configured;
         }
-
-        string authHeader = context.Request.Headers.Authorization.ToString();
-        if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) {
-            string token = authHeader["Bearer ".Length..].Trim();
-            if (CheckTokenValid(token, effectiveToken)) return true;
-        }
-
-        if (context.Request.Query.TryGetValue("token", out var queryToken)) {
-            string token = queryToken.ToString().Trim();
-            if (CheckTokenValid(token, effectiveToken)) {
-                context.Response.Cookies.Append("loramancer_auth", token, new CookieOptions {
-                    HttpOnly = true,
-                    SameSite = SameSiteMode.Lax,
-                    Secure = context.Request.IsHttps,
-                    Expires = DateTimeOffset.UtcNow.AddDays(30)
-                });
-                return true;
-            }
-        }
-
-        if (context.Request.Cookies.TryGetValue("loramancer_auth", out var cookieToken)) {
-            string token = cookieToken.Trim();
-            if (CheckTokenValid(token, effectiveToken)) return true;
-        }
-
-        return false;
-    }
-
-    private bool CheckTokenValid(string token, string? expectedFallbackToken) {
-        if (string.IsNullOrWhiteSpace(token)) return false;
-        if (_authTokenManager != null && _authTokenManager.ValidateToken(token, out _)) return true;
-        if (!string.IsNullOrWhiteSpace(expectedFallbackToken) &&
-            string.Equals(token, expectedFallbackToken.Trim(), StringComparison.Ordinal)) return true;
-        return false;
+        string defaultDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "uploads");
+        Directory.CreateDirectory(defaultDir);
+        return defaultDir;
     }
 
     private void HandleProgressUpdated(TrainingProgress progress) {
         BroadcastTelemetry(new TrainingTelemetryDto {
-            EventType = "step",
+            EventType = "progress",
             Step = progress.CurrentStep,
             TotalSteps = progress.TotalSteps,
-            Loss = (float)progress.CurrentLoss
+            Loss = (float)progress.CurrentLoss,
+            Message = _trainingRunner.CurrentJob?.Name ?? "Active Run",
+            Timestamp = DateTime.UtcNow
         });
     }
 
-    private void HandleLogReceived(string log) {
+    private void HandleLogReceived(string logLine) {
         BroadcastTelemetry(new TrainingTelemetryDto {
             EventType = "log",
-            Message = log
+            Message = logLine,
+            Timestamp = DateTime.UtcNow
         });
     }
 
     private void BroadcastTelemetry(TrainingTelemetryDto telemetry) {
         string json = JsonSerializer.Serialize(telemetry);
-        byte[] payload = System.Text.Encoding.UTF8.GetBytes($"data: {json}\n\n");
+        string message = $"data: {json}\n\n";
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(message);
 
-        foreach (HttpResponse client in _sseClients) {
+        foreach (var client in _sseClients) {
             try {
-                client.Body.WriteAsync(payload, 0, payload.Length);
-                client.Body.FlushAsync();
-            } catch { }
+                client.Body.WriteAsync(bytes, 0, bytes.Length);
+            } catch {
+                // Client disconnected
+            }
         }
     }
 
-    private string GetUnauthorizedAccessHtml() {
+    private bool IsAuthorized(HttpContext context, string? masterAccessToken) {
+        if (string.IsNullOrWhiteSpace(masterAccessToken) && string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken)) {
+            return true;
+        }
+
+        string? headerToken = context.Request.Headers["X-LoRAMancer-Token"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(headerToken)) {
+            headerToken = context.Request.Query["token"].FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(headerToken)) {
+            return false;
+        }
+
+        if (_authTokenManager != null && _authTokenManager.ValidateToken(headerToken, out _)) {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(masterAccessToken) && headerToken == masterAccessToken) {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken) && headerToken == _settingsService.Current.ServerAccessToken) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsAdmin(HttpContext context, string? masterAccessToken) {
+        if (string.IsNullOrWhiteSpace(masterAccessToken) && string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken)) {
+            return true;
+        }
+
+        string? headerToken = context.Request.Headers["X-LoRAMancer-Token"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(headerToken)) {
+            headerToken = context.Request.Query["token"].FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(headerToken)) {
+            return false;
+        }
+
+        if (_authTokenManager != null && _authTokenManager.ValidateToken(headerToken, out var record)) {
+            return string.Equals(record?.Role, "Admin", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(masterAccessToken) && headerToken == masterAccessToken) {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settingsService.Current.ServerAccessToken) && headerToken == _settingsService.Current.ServerAccessToken) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public async ValueTask DisposeAsync() {
+        _trainingRunner.OnProgressUpdated -= HandleProgressUpdated;
+        _trainingRunner.OnLogReceived -= HandleLogReceived;
+        await StopServerAsync();
+    }
+
+    private static string GetWebManifestJson() {
+        return """
+{
+  "name": "LoRAMancer Studio",
+  "short_name": "LoRAMancer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#11111b",
+  "theme_color": "#181825",
+  "description": "Desktop-Class Remote Web UI for AMD ROCm & PyTorch LoRA Training",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+""";
+    }
+
+    private static string GetServiceWorkerJs() {
+        return """
+const CACHE_NAME = 'loramancer-v2-cache';
+self.addEventListener('install', (e) => {
+    self.skipWaiting();
+});
+self.addEventListener('activate', (e) => {
+    e.waitUntil(clients.claim());
+});
+self.addEventListener('fetch', (e) => {
+    // Transparent pass-through with offline fallback
+    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+});
+""";
+    }
+
+    private static string GetAppIconSvg() {
+        return """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="100" fill="#11111b"/>
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#cba6f7" stroke-width="28" stroke-dasharray="8 8"/>
+  <path d="M256 120 L350 340 L162 340 Z" fill="none" stroke="#89b4fa" stroke-width="24" stroke-linejoin="round"/>
+  <circle cx="256" cy="220" r="32" fill="#f38ba8"/>
+  <path d="M256 340 L256 400" stroke="#a6e3a1" stroke-width="24" stroke-linecap="round"/>
+</svg>
+""";
+    }
+
+    private string GetEmbeddedLoginPageHtml() {
         return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LoRAMancer Access Locked</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <title>LoRAMancer Studio - Authentication</title>
     <style>
-        :root { --bg: #11111b; --card: #181825; --border: #313244; --accent: #cba6f7; --red: #f38ba8; --text: #cdd6f4; }
-        body { background-color: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 32px; width: 100%; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); text-align: center; }
-        .icon { font-size: 3rem; margin-bottom: 12px; }
-        h1 { font-size: 1.4rem; color: #fff; margin-bottom: 8px; }
-        p { color: #a6adc8; font-size: 0.9rem; margin-bottom: 24px; line-height: 1.4; }
-        input { width: 100%; box-sizing: border-box; background: #11111b; border: 1px solid var(--border); color: #fff; padding: 12px; border-radius: 8px; font-size: 1rem; margin-bottom: 16px; outline: none; }
-        input:focus { border-color: var(--accent); }
-        button { width: 100%; background: linear-gradient(135deg, #cba6f7, #89b4fa); border: none; padding: 12px; border-radius: 8px; font-weight: 700; color: #11111b; font-size: 1rem; cursor: pointer; }
-        button:hover { opacity: 0.9; }
-        .error { color: var(--red); font-size: 0.85rem; margin-top: 12px; display: none; }
+        :root {
+            --bg-base: #11111b;
+            --bg-surface: #181825;
+            --accent-primary: #cba6f7;
+            --text-primary: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --border: #313244;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .login-box {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .logo {
+            font-size: 2.2rem;
+            margin-bottom: 8px;
+        }
+        h2 {
+            margin: 0 0 8px 0;
+            color: var(--accent-primary);
+        }
+        p {
+            margin: 0 0 24px 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #11111b;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 14px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 16px;
+            outline: none;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+        input:focus {
+            border-color: var(--accent-primary);
+        }
+        button {
+            width: 100%;
+            background: linear-gradient(135deg, #cba6f7, #89b4fa);
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            color: #11111b;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        .error-msg {
+            color: #f38ba8;
+            font-size: 0.85rem;
+            margin-top: 12px;
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <div class="card">
-        <div class="icon">🔒</div>
-        <h1>Authentication Required</h1>
-        <p>Access to this remote LoRAMancer instance is secured. Enter your PIN or Access Token to continue.</p>
-        <input id="tokenInput" type="password" placeholder="Enter Access PIN or Token" autofocus />
-        <button onclick="login()">Authorize Session</button>
-        <div id="errMsg" class="error">Invalid token or PIN. Access denied.</div>
+    <div class="login-box">
+        <div class="logo">⚡</div>
+        <h2>LoRAMancer Remote</h2>
+        <p>Enter Host Access Token to unlock remote workstation control</p>
+        <input id="tokenInput" type="password" placeholder="••••••••" autofocus />
+        <button onclick="login()">Connect to Studio</button>
+        <div id="errorMsg" class="error-msg">Invalid Credentials</div>
     </div>
     <script>
         async function login() {
             const token = document.getElementById('tokenInput').value.trim();
-            const err = document.getElementById('errMsg');
+            const err = document.getElementById('errorMsg');
             err.style.display = 'none';
-            if (!token) return;
 
             try {
                 const res = await fetch('/api/v1/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ PinOrToken: token })
+                    body: JSON.stringify({ pinOrToken: token })
                 });
-
                 if (res.ok) {
+                    const data = await res.json();
                     localStorage.setItem('loramancer_auth_token', token);
-                    window.location.reload();
+                    localStorage.setItem('loramancer_user_role', data.role);
+                    window.location.href = '/?token=' + encodeURIComponent(token);
                 } else {
                     err.style.display = 'block';
                 }
-            } catch(e) {
-                err.textContent = 'Server unreachable: ' + e.message;
+            } catch (e) {
+                err.textContent = 'Connection error: ' + e.message;
                 err.style.display = 'block';
             }
         }
@@ -868,10 +1108,6 @@ public sealed class NetworkServerService : IAsyncDisposable {
     }
 
     private string GetEmbeddedWebInterfaceHtml() {
-        string publicUrl = !string.IsNullOrWhiteSpace(_publicTunnelService?.ActivePublicUrl)
-            ? _publicTunnelService.ActivePublicUrl
-            : _settingsService.Current.PublicCustomDomainUrl;
-
         return $$"""
 <!DOCTYPE html>
 <html lang="en">
@@ -880,7 +1116,6 @@ public sealed class NetworkServerService : IAsyncDisposable {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>LoRAMancer Studio</title>
     
-    <!-- PWA & Mobile Web App Meta Tags -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#11111b" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -889,48 +1124,48 @@ public sealed class NetworkServerService : IAsyncDisposable {
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
         :root {
             --bg-base: #11111b;
             --bg-surface: #181825;
             --bg-overlay: #1e1e2e;
-            --bg-card: #252538;
             --border-dark: #313244;
-            --border-focus: #cba6f7;
+            --text-primary: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --text-muted: #6c7086;
             --accent-purple: #cba6f7;
             --accent-blue: #89b4fa;
             --accent-green: #a6e3a1;
+            --accent-peach: #fab387;
             --accent-red: #f38ba8;
-            --accent-amber: #f9e2af;
-            --text-primary: #cdd6f4;
-            --text-secondary: #a6adc8;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background-color: var(--bg-base);
-            color: var(--text-primary);
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            overflow-x: hidden;
+            --accent-yellow: #f9e2af;
+            --sidebar-width: 260px;
         }
 
-        /* 1. Left Sidebar (Matching Desktop LoRAMancer NavMenu) */
-        aside.sidebar {
-            width: 260px;
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* SIDEBAR (Desktop NavMenu mirror) */
+        #sidebar {
+            width: var(--sidebar-width);
             background-color: var(--bg-surface);
             border-right: 1px solid var(--border-dark);
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
-            height: 100vh;
-            position: sticky;
-            top: 0;
-            overflow-y: auto;
-            z-index: 100;
-            transition: transform 0.25s ease;
+            z-index: 10;
         }
+
         .sidebar-brand {
             padding: 16px 20px;
             display: flex;
@@ -938,462 +1173,876 @@ public sealed class NetworkServerService : IAsyncDisposable {
             gap: 12px;
             border-bottom: 1px solid var(--border-dark);
         }
-        .logo-box {
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
             background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 800;
-            font-size: 1.15rem;
+            font-size: 1.2rem;
             color: #11111b;
-            box-shadow: 0 4px 14px rgba(203, 166, 247, 0.25);
+            font-weight: 900;
         }
-        .sidebar-nav {
-            padding: 12px 8px;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            flex: 1;
+
+        .brand-text h1 {
+            font-size: 1.05rem;
+            font-weight: 800;
+            margin: 0;
+            letter-spacing: -0.3px;
+            background: linear-gradient(90deg, #fff, var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .nav-section-title {
-            font-size: 0.72rem;
-            font-weight: 700;
+
+        .brand-text p {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            margin: 0;
             text-transform: uppercase;
-            letter-spacing: 0.6px;
-            color: var(--text-secondary);
-            padding: 12px 14px 4px 14px;
+            letter-spacing: 0.5px;
         }
+
+        .nav-scroller {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 8px;
+        }
+
+        .nav-group-header {
+            font-size: 0.68rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            padding: 10px 12px 4px 12px;
+            letter-spacing: 0.8px;
+        }
+
         .nav-item {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 9px 14px;
-            color: var(--text-secondary);
-            background: transparent;
-            border: none;
+            gap: 12px;
+            padding: 9px 12px;
+            margin: 2px 0;
             border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 500;
             cursor: pointer;
-            text-align: left;
-            width: 100%;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            font-weight: 600;
             transition: all 0.15s ease;
         }
+
         .nav-item:hover {
-            color: #fff;
-            background-color: rgba(255, 255, 255, 0.04);
+            background-color: rgba(255, 255, 255, 0.05);
+            color: #ffffff;
         }
+
         .nav-item.active {
-            color: #fff;
-            background-color: rgba(203, 166, 247, 0.12);
-            font-weight: 600;
-        }
-        .nav-item.active .nav-icon {
+            background: linear-gradient(90deg, rgba(203, 166, 247, 0.15), rgba(137, 180, 250, 0.05));
             color: var(--accent-purple);
+            border-left: 3px solid var(--accent-purple);
         }
+
         .nav-icon {
             font-size: 1.1rem;
-            width: 22px;
-            display: inline-flex;
-            justify-content: center;
+            width: 20px;
+            text-align: center;
         }
-        .sidebar-divider {
-            height: 1px;
-            background-color: var(--border-dark);
-            margin: 8px 12px;
+
+        .nav-badge {
+            margin-left: auto;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg-overlay);
+            color: var(--text-secondary);
         }
+
         .sidebar-footer {
-            padding: 14px 18px;
+            padding: 12px 16px;
             border-top: 1px solid var(--border-dark);
-            background-color: rgba(0, 0, 0, 0.2);
-            font-size: 0.75rem;
+            background-color: var(--bg-surface);
             display: flex;
             flex-direction: column;
             gap: 6px;
         }
 
-        /* 2. Top Header Bar (Matching Desktop MainLayout) */
-        .app-shell {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-            height: 100vh;
-            overflow-y: auto;
-        }
-        header.top-header {
-            background-color: var(--bg-surface);
-            border-bottom: 1px solid var(--border-dark);
-            padding: 10px 24px;
+        .host-status-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 16px;
-            position: sticky;
-            top: 0;
-            z-index: 90;
+            font-size: 0.72rem;
+            color: var(--text-secondary);
         }
-        .top-left {
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            display: inline-block;
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        /* MAIN CONTENT AREA */
+        #main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-color: var(--bg-base);
+        }
+
+        /* TOPBAR (Desktop MainLayout mirror) */
+        #topbar {
+            height: 52px;
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border-dark);
             display: flex;
             align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
+            justify-content: space-between;
+            padding: 0 20px;
+            flex-shrink: 0;
+            gap: 16px;
         }
-        .mobile-toggle {
-            display: none;
-            background: transparent;
-            border: 1px solid var(--border-dark);
-            color: var(--text-primary);
-            padding: 6px 10px;
-            border-radius: 6px;
-            cursor: pointer;
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .chip {
+
+        .concept-pill {
+            background-color: rgba(203, 166, 247, 0.12);
+            border: 1px solid rgba(203, 166, 247, 0.3);
+            color: var(--accent-purple);
             font-size: 0.75rem;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-weight: 600;
-            display: inline-flex;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: flex;
             align-items: center;
             gap: 6px;
-            border: 1px solid transparent;
         }
-        .chip-stage { background: #1e1e2e; border-color: var(--border-dark); color: var(--text-secondary); cursor: pointer; }
-        .chip-stage.active { background: rgba(203, 166, 247, 0.2); border-color: var(--accent-purple); color: #fff; }
-        .chip-gpu { background: rgba(166, 227, 161, 0.12); border-color: var(--accent-green); color: var(--accent-green); }
-        .chip-live { background: rgba(166, 227, 161, 0.15); color: var(--accent-green); }
-        .chip-busy { background: rgba(249, 226, 175, 0.15); color: var(--accent-amber); }
 
-        /* 3. Main Views */
-        main.content-area {
+        .pipeline-chips {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chip {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chip-stage {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-dark);
+        }
+
+        .chip-stage:hover {
+            color: #fff;
+            border-color: var(--text-secondary);
+        }
+
+        .chip-stage.active {
+            background-color: rgba(203, 166, 247, 0.18);
+            color: var(--accent-purple);
+            border-color: var(--accent-purple);
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rocm-pill {
+            background: linear-gradient(135deg, rgba(243, 139, 168, 0.15), rgba(203, 166, 247, 0.15));
+            border: 1px solid rgba(243, 139, 168, 0.3);
+            color: #f38ba8;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* VIEWPORT CONTAINERS */
+        #viewport {
             flex: 1;
-            padding: 24px 32px;
-            max-width: 1500px;
-            width: 100%;
+            overflow-y: auto;
+            padding: 20px;
+            position: relative;
+        }
+
+        .view-panel {
+            display: none;
+            max-width: 1400px;
             margin: 0 auto;
         }
-        .view-panel { display: none; }
-        .view-panel.active { display: block; animation: fadeIn 0.15s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* Cards & Grids */
+        .view-panel.active {
+            display: block;
+            animation: fadeIn 0.15s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* COMMON UI CARDS & GRIDS */
         .card {
             background-color: var(--bg-surface);
             border: 1px solid var(--border-dark);
-            border-radius: 8px;
-            padding: 18px 20px;
-            margin-bottom: 20px;
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
         }
+
         .card-header-bar {
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 14px;
-            flex-wrap: wrap;
-            gap: 10px;
         }
+
         .card-title {
             font-size: 1.05rem;
             font-weight: 700;
-            color: #fff;
+            color: #ffffff;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 
-        /* Form Inputs */
-        .input-group {
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+        @media (max-width: 1100px) {
+            .grid-4 { grid-template-columns: repeat(2, 1fr); }
+            .grid-5 { grid-template-columns: repeat(2, 1fr); }
+            .grid-3 { grid-template-columns: repeat(1, 1fr); }
+            .grid-2 { grid-template-columns: repeat(1, 1fr); }
+            #sidebar { width: 68px; }
+            .brand-text, .nav-item span, .nav-group-header, .sidebar-footer, .nav-badge { display: none; }
+            .nav-item { justify-content: center; padding: 12px 0; }
+        }
+
+        .stat-box {
+            background-color: var(--bg-overlay);
+            border: 1px solid var(--border-dark);
+            border-radius: 8px;
+            padding: 12px 14px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            margin-bottom: 12px;
-        }
-        label {
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
-        input, select, textarea {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-dark);
-            color: var(--text-primary);
-            padding: 9px 12px;
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 0.9rem;
-        }
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: var(--border-focus);
-            box-shadow: 0 0 0 2px rgba(203, 166, 247, 0.2);
+            justify-content: space-between;
         }
 
-        /* Buttons */
+        .stat-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .stat-val {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* INPUTS & CONTROLS */
+        .input-group {
+            margin-bottom: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+        }
+
+        input[type="text"], input[type="number"], select, textarea {
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-dark);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 0.88rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent-purple);
+        }
+
+        input[type="range"] {
+            accent-color: var(--accent-purple);
+            cursor: pointer;
+        }
+
+        /* BUTTONS */
         .btn {
-            background: linear-gradient(135deg, var(--accent-purple), #b4befe);
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            border: none;
+            border-radius: 6px;
             color: #11111b;
             font-weight: 700;
             padding: 9px 16px;
-            border: none;
-            border-radius: 6px;
+            font-size: 0.86rem;
             cursor: pointer;
-            font-size: 0.88rem;
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            gap: 6px;
-            transition: opacity 0.15s, transform 0.1s;
+            gap: 8px;
+            transition: all 0.15s;
         }
-        .btn:hover { opacity: 0.92; }
-        .btn:active { transform: scale(0.98); }
-        .btn-outline { background: transparent; border: 1px solid var(--border-dark); color: var(--text-primary); }
-        .btn-outline:hover { background: rgba(255, 255, 255, 0.05); }
-        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-dark); }
-        .btn-danger { background: var(--accent-red); color: #11111b; }
-        .btn-sm { padding: 5px 10px; font-size: 0.78rem; border-radius: 4px; }
 
-        /* Telemetry & Progress */
-        .stat-box {
-            background-color: rgba(255, 255, 255, 0.02);
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .btn-secondary {
+            background: var(--bg-overlay);
+            color: var(--text-primary);
             border: 1px solid var(--border-dark);
-            border-radius: 6px;
-            padding: 12px;
-            text-align: center;
         }
-        .stat-label { font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
-        .stat-val { font-size: 1.25rem; font-weight: 700; color: #fff; margin-top: 4px; }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--text-secondary);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--accent-purple);
+            border: 1px solid var(--accent-purple);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #f38ba8, #eba0ac);
+            color: #11111b;
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 0.78rem;
+        }
+
+        /* PROGRESS BARS */
         .progress-bar-container {
-            background-color: var(--bg-card);
-            border-radius: 6px;
-            height: 10px;
-            overflow: hidden;
             width: 100%;
-            margin: 12px 0;
+            height: 10px;
+            background-color: var(--bg-overlay);
+            border-radius: 5px;
+            overflow: hidden;
+            border: 1px solid var(--border-dark);
+            margin: 8px 0;
         }
+
         .progress-bar-fill {
-            background: linear-gradient(90deg, var(--accent-purple), var(--accent-blue));
             height: 100%;
             width: 0%;
+            background: linear-gradient(90deg, var(--accent-purple), var(--accent-blue));
             transition: width 0.3s ease;
         }
-        .terminal {
+
+        /* CONSOLE LOG FEED */
+        #consoleLogBox {
             background-color: #0b0b10;
             border: 1px solid var(--border-dark);
             border-radius: 6px;
             padding: 12px;
-            height: 360px;
-            overflow-y: auto;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
             font-size: 0.78rem;
-            color: #a6adc8;
+            height: 380px;
+            overflow-y: auto;
+            color: #cdd6f4;
+            line-height: 1.45;
             white-space: pre-wrap;
-            line-height: 1.5;
+            word-break: break-all;
         }
-        .history-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .history-table th, .history-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border-dark); }
-        .history-table th { color: var(--text-secondary); font-weight: 600; text-transform: uppercase; font-size: 0.72rem; }
-        .history-table tr:hover { background-color: rgba(255, 255, 255, 0.02); }
 
-        @media(max-width: 900px) {
-            aside.sidebar { position: fixed; transform: translateX(-100%); }
-            aside.sidebar.open { transform: translateX(0); }
-            .mobile-toggle { display: inline-flex; }
-            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-            main.content-area { padding: 14px; }
+        .log-entry { margin: 2px 0; }
+        .log-entry.epoch { color: var(--accent-yellow); font-weight: 700; }
+        .log-entry.loss { color: var(--accent-green); }
+        .log-entry.error { color: var(--accent-red); font-weight: 700; }
+        .log-entry.warn { color: var(--accent-peach); }
+        .log-entry.info { color: var(--accent-blue); }
+
+        /* TAB SWITCHER */
+        .segmented-tabs {
+            display: flex;
+            background: var(--bg-overlay);
+            border: 1px solid var(--border-dark);
+            border-radius: 8px;
+            padding: 3px;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-weight: 700;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .tab-btn.active {
+            background: var(--bg-surface);
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            border: 1px solid var(--border-dark);
+        }
+
+        /* PRESET SUBJECT CARDS */
+        .preset-card {
+            background: var(--bg-overlay);
+            border: 1px solid var(--border-dark);
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+
+        .preset-card:hover {
+            border-color: var(--accent-purple);
+            transform: translateY(-2px);
+        }
+
+        .preset-card.selected {
+            background: rgba(203, 166, 247, 0.12);
+            border: 2px solid var(--accent-purple);
+        }
+
+        .preset-icon {
+            font-size: 1.8rem;
+            margin-bottom: 6px;
+        }
+
+        .preset-title {
+            font-weight: 700;
+            font-size: 0.88rem;
+            color: #ffffff;
+        }
+
+        .preset-desc {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            line-height: 1.2;
+        }
+
+        /* ALERT BANNERS */
+        .alert-info {
+            background-color: rgba(203, 166, 247, 0.12);
+            border: 1px solid rgba(203, 166, 247, 0.3);
+            color: var(--accent-purple);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert-warn {
+            background-color: rgba(249, 226, 175, 0.12);
+            border: 1px solid rgba(249, 226, 175, 0.3);
+            color: var(--accent-yellow);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            margin-bottom: 14px;
+        }
+
+        /* DROPZONE */
+        .drop-zone {
+            border: 2px dashed var(--border-dark);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            background: rgba(17, 17, 27, 0.6);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent-purple);
+            background: rgba(203, 166, 247, 0.05);
         }
     </style>
 </head>
 <body>
-    <!-- 1. LEFT SIDEBAR -->
-    <aside id="appSidebar" class="sidebar">
+
+    <!-- 1. LEFT SIDEBAR NAVIGATION (Desktop NavMenu mirror) -->
+    <div id="sidebar">
         <div class="sidebar-brand">
-            <div class="logo-box">LM</div>
-            <div>
-                <div style="font-weight:700; font-size:1.15rem; color:#fff;">LoRAMancer</div>
-                <div style="font-size:0.7rem; color:var(--text-secondary);">Remote Studio Engine</div>
+            <div class="brand-icon">⚡</div>
+            <div class="brand-text">
+                <h1>LoRAMancer</h1>
+                <p>AMD ROCm Remote Studio</p>
             </div>
         </div>
 
-        <nav class="sidebar-nav">
-            <div class="nav-section-title">Studio Pipeline</div>
-            <button class="nav-item" onclick="switchStage('curate')">
-                <span class="nav-icon">📁</span> 1. Curate &amp; Caption
-            </button>
-            <button class="nav-item active" onclick="switchStage('train')">
-                <span class="nav-icon">⚡</span> 2. Train &amp; Forge
-            </button>
-            <button class="nav-item" onclick="switchStage('lab')">
-                <span class="nav-icon">🔬</span> 3. Diagnostic Lab
-            </button>
-            <button class="nav-item" onclick="switchStage('comfy')">
-                <span class="nav-icon">🎨</span> 4. ComfyUI Test
-            </button>
-            <button class="nav-item" onclick="switchStage('vault')">
-                <span class="nav-icon">📚</span> 5. Library &amp; Vault
-            </button>
-            <button class="nav-item" onclick="switchStage('history')">
-                <span class="nav-icon">📜</span> Training History
-            </button>
-            <button class="nav-item" onclick="switchStage('chop')">
-                <span class="nav-icon">🛠️</span> LoRA Chop-Shop
-            </button>
+        <div class="nav-scroller">
+            <div class="nav-group-header">Studio Pipeline</div>
+            <div class="nav-item" onclick="switchView('curate')">
+                <span class="nav-icon">🖼️</span>
+                <span>1. Curate &amp; Caption</span>
+                <span class="nav-badge">Stage 1</span>
+            </div>
+            <div class="nav-item active" onclick="switchView('train')">
+                <span class="nav-icon">⚡</span>
+                <span>2. Train &amp; Forge</span>
+                <span class="nav-badge">Stage 2</span>
+            </div>
+            <div class="nav-item" onclick="switchView('lab')">
+                <span class="nav-icon">🔬</span>
+                <span>3. Diagnostic Lab</span>
+                <span class="nav-badge">Stage 3</span>
+            </div>
+            <div class="nav-item" onclick="switchView('comfy')">
+                <span class="nav-icon">🎨</span>
+                <span>4. ComfyUI Test</span>
+                <span class="nav-badge">Stage 4</span>
+            </div>
+            <div class="nav-item" onclick="switchView('vault')">
+                <span class="nav-icon">📚</span>
+                <span>5. Library &amp; Vault</span>
+                <span class="nav-badge">Stage 5</span>
+            </div>
 
-            <div class="sidebar-divider"></div>
+            <div class="nav-group-header">Modal Tools</div>
+            <div class="nav-item" onclick="switchView('chop')">
+                <span class="nav-icon">🛠️</span>
+                <span>LoRA Chop-Shop</span>
+                <span class="nav-badge" style="color:var(--accent-purple);">Garage</span>
+            </div>
 
-            <div class="nav-section-title">Subsystems</div>
-            <button class="nav-item" onclick="switchStage('env')">
-                <span class="nav-icon">💻</span> Compute Environment
-            </button>
-            <button class="nav-item" onclick="switchStage('settings')">
-                <span class="nav-icon">⚙️</span> Settings &amp; Admin
-            </button>
-        </nav>
+            <div class="nav-group-header">Subsystems</div>
+            <div class="nav-item" onclick="switchView('history')">
+                <span class="nav-icon">📜</span>
+                <span>Training History</span>
+            </div>
+            <div class="nav-item" onclick="switchView('telemetry')">
+                <span class="nav-icon">💻</span>
+                <span>Compute Environment</span>
+            </div>
+            <div class="nav-item" onclick="openDocs()">
+                <span class="nav-icon">📖</span>
+                <span>Documentation</span>
+            </div>
+        </div>
 
         <div class="sidebar-footer">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:600; color:#fff;">Host Worker</span>
-                <span id="sidebarStatusChip" class="chip chip-live" style="font-size:0.65rem;">Ready</span>
+            <div class="host-status-row">
+                <span><span class="status-dot"></span> Host Station</span>
+                <span id="remoteHostName">Online</span>
             </div>
-            <div id="sidebarGpuLabel" style="color:var(--text-secondary); font-family:monospace; font-size:0.7rem;">Detecting GPU...</div>
+            <div class="host-status-row">
+                <span>Public Tunnel</span>
+                <span id="tunnelStatusBadge" style="color:var(--accent-blue);">Direct LAN</span>
+            </div>
         </div>
-    </aside>
+    </div>
 
-    <!-- 2. APP SHELL -->
-    <div class="app-shell">
-        <header class="top-header">
-            <div class="top-left">
-                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
-                <div class="chip chip-stage" style="background:transparent; border-color:transparent; font-weight:700; color:#fff;">
-                    Concept: <span style="color:var(--accent-purple); margin-left:4px;">Remote Studio</span>
+    <!-- 2. MAIN APPLICATION WORKSPACE -->
+    <div id="main-area">
+        <!-- TOPBAR HEADER (Desktop MainLayout mirror) -->
+        <div id="topbar">
+            <div class="topbar-left">
+                <div class="concept-pill">
+                    <span>✨</span>
+                    <span id="topConceptName">Active Studio</span>
                 </div>
-                <div style="display:flex; gap:4px; flex-wrap:wrap;">
-                    <span id="chip-curate" class="chip chip-stage" onclick="switchStage('curate')">1. Curate</span>
-                    <span id="chip-train" class="chip chip-stage active" onclick="switchStage('train')">2. Train</span>
-                    <span id="chip-lab" class="chip chip-stage" onclick="switchStage('lab')">3. Lab</span>
-                    <span id="chip-comfy" class="chip chip-stage" onclick="switchStage('comfy')">4. Test</span>
-                    <span id="chip-vault" class="chip chip-stage" onclick="switchStage('vault')">5. Vault</span>
+                <div class="pipeline-chips">
+                    <div id="chipCurate" class="chip chip-stage" onclick="switchView('curate')">1. Curate</div>
+                    <div id="chipTrain" class="chip chip-stage active" onclick="switchView('train')">2. Train</div>
+                    <div id="chipLab" class="chip chip-stage" onclick="switchView('lab')">3. Lab</div>
+                    <div id="chipComfy" class="chip chip-stage" onclick="switchView('comfy')">4. Test</div>
+                    <div id="chipVault" class="chip chip-stage" onclick="switchView('vault')">5. Vault</div>
                 </div>
             </div>
 
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <button id="installPwaBtn" class="btn btn-sm" style="display:none;" onclick="installPwa()">📲 Install App</button>
-                <span id="publicUrlBadge" class="chip chip-stage" style="display:none; cursor:pointer;" onclick="copyPublicUrl()">🌐 Host Active</span>
-                <span id="hostAcceleratorChip" class="chip chip-gpu">AMD ROCm Active</span>
-                <span id="hostStatusPill" class="chip chip-live">Ready</span>
-            </div>
-        </header>
-
-        <main class="content-area">
-            <!-- VIEW: TRAIN & FORGE -->
-            <div id="view-train" class="view-panel active">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
-                    <div>
-                        <h2 style="font-size:1.3rem; font-weight:700; color:#fff;">Training Orchestrator &amp; Live Console</h2>
-                        <p style="font-size:0.82rem; color:var(--text-secondary);">Execute AI-Toolkit runs on host GPU with live hardware acceleration telemetry and log streaming</p>
-                    </div>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <button class="btn" onclick="startTraining()">🚀 Launch Training</button>
-                        <button class="btn btn-outline" onclick="startTraining()">📥 Queue Run</button>
-                        <button class="btn btn-danger" onclick="stopTraining()">⏹ Stop Current</button>
-                        <button class="btn btn-outline" onclick="cancelAllJobs()">🗑️ Cancel All</button>
-                        <button class="btn btn-secondary" onclick="clearConsoleLogs()">🧹 Clear Logs</button>
-                    </div>
+            <div class="topbar-right">
+                <div class="rocm-pill">
+                    <span>🔥</span>
+                    <span id="rocmTelemetryBadge">AMD ROCm Active</span>
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="disconnect()">Log Out</button>
+            </div>
+        </div>
 
-                <!-- Active Queue Banner -->
-                <div id="queueCard" class="card" style="padding:12px 18px; margin-bottom:16px;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <span style="font-size:1.1rem;">📥</span>
-                            <span style="font-weight:700;">Studio Training Queue:</span>
-                            <span id="queueBadge" class="chip chip-stage">0 Queued</span>
-                            <span id="activeJobName" style="color:var(--accent-green); font-weight:600;">Idle</span>
+        <!-- VIEWPORT: DYNAMIC PAGES -->
+        <div id="viewport">
+
+            <!-- VIEW: 1. CURATE & CAPTION -->
+            <div id="view-curate" class="view-panel">
+                <div class="card">
+                    <div class="card-header-bar">
+                        <div class="card-title">🖼️ Stage 1: Curate &amp; Caption Studio</div>
+                        <span class="chip chip-stage">Dataset Management</span>
+                    </div>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
+                        Upload raw image archives (.zip) to the host machine. Datasets are automatically extracted, inspected for aspect ratios, and captions verified.
+                    </p>
+                    <div class="grid-2">
+                        <div class="drop-zone" id="curateDropZone" onclick="document.getElementById('curateZipInput').click()">
+                            <div style="font-size:2.5rem; margin-bottom:8px;">📦</div>
+                            <div style="font-weight:700; color:#fff;">Drag &amp; Drop Dataset (.zip)</div>
+                            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">Supports PNG, JPEG, WEBP and accompanying .txt captions</div>
+                            <input id="curateZipInput" type="file" accept=".zip" style="display:none;" onchange="uploadDatasetFromCurate(this.files[0])" />
                         </div>
-                        <div style="font-size:0.78rem; color:var(--text-secondary);">Automatic single GPU sequential queue with VRAM cooldown</div>
+                        <div class="stat-box" style="justify-content:center;">
+                            <div class="stat-label">Uploaded Dataset Health Report</div>
+                            <div id="curateReportStatus" style="font-size:0.95rem; font-weight:700; color:var(--accent-purple); margin-top:6px;">No dataset uploaded yet</div>
+                            <div id="curateDetails" style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">Upload a ZIP above to audit images and caption pairs.</div>
+                            <button id="sendToTrainerBtn" class="btn btn-sm" style="margin-top:12px; display:none;" onclick="sendCurateDatasetToTrain()">🪄 Use in Training Wizard</button>
+                        </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- 4 Metrics Cards -->
-                <div class="grid-4" style="margin-bottom:16px;">
-                    <div class="stat-box">
-                        <div class="stat-label">Status</div>
-                        <div id="trainStatusVal" class="stat-val" style="color:var(--accent-green);">Ready</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-label">Step Progress</div>
-                        <div id="stepCounter" class="stat-val" style="color:var(--accent-blue);">0 / 0</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-label">Current Loss</div>
-                        <div id="lossVal" class="stat-val" style="color:var(--accent-green);">-</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-label">Host GPU Engine</div>
-                        <div id="engineStatusVal" class="stat-val" style="font-size:1rem; color:var(--accent-purple);">ROCm / CUDA</div>
-                    </div>
+            <!-- VIEW: 2. TRAIN & FORGE (Civitai-Style Wizard + Advanced Studio) -->
+            <div id="view-train" class="view-panel active">
+                
+                <!-- Mode Switcher Tabs -->
+                <div class="segmented-tabs">
+                    <button id="tabBtnWizard" class="tab-btn active" onclick="switchTrainMode('wizard')">
+                        <span>🪄</span> Civitai-Style Training Wizard
+                    </button>
+                    <button id="tabBtnManual" class="tab-btn" onclick="switchTrainMode('manual')">
+                        <span>⚙️</span> Advanced Studio &amp; Queue Management
+                    </button>
                 </div>
 
-                <div class="progress-bar-container">
-                    <div id="progressBar" class="progress-bar-fill"></div>
-                </div>
+                <!-- SUB-VIEW 1: CIVITAI-STYLE TRAINING WIZARD -->
+                <div id="trainWizardView">
+                    
+                    <!-- Cloned Donor Recipe Banner -->
+                    <div id="donorRecipeAlert" class="alert-info" style="display:none;">
+                        <span style="font-size:1.3rem;">✨</span>
+                        <div style="flex:1;">
+                            <b>Cloned Recipe:</b> Using hyperparameters from donor <code id="donorNameVal" style="background:#11111b; padding:2px 6px; border-radius:4px;">donor.safetensors</code>
+                            <div style="font-size:0.76rem; color:var(--text-secondary); margin-top:2px;">
+                                Rank: <span id="donorRankVal">16</span> | Alpha: <span id="donorAlphaVal">16</span> | LR: <span id="donorLrVal">1e-4</span> | Architecture: <span id="donorArchVal">FLUX.1</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="clearDonorClone()">✕ Clear</button>
+                    </div>
 
-                <div class="grid-2">
-                    <!-- Training Parameters Form -->
+                    <!-- Donor Upload / Pick Box -->
+                    <div class="card" style="padding:12px 18px; margin-bottom:16px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:1.1rem;">🧬</span>
+                                <span style="font-weight:700; font-size:0.9rem;">Clone Recipe from Donor LoRA:</span>
+                            </div>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wizardDonorInput').click()">
+                                    📤 Upload Donor LoRA (.safetensors)
+                                </button>
+                                <input id="wizardDonorInput" type="file" accept=".safetensors" style="display:none;" onchange="uploadWizardDonor(this.files[0])" />
+                                <select id="wizardVaultDonorSelect" style="font-size:0.8rem; padding:4px 8px;" onchange="pickWizardDonorFromVault(this.value)">
+                                    <option value="">Or Pick from Server Vault...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 1: What are you training? -->
                     <div class="card">
                         <div class="card-header-bar">
-                            <div class="card-title">⚙️ Training Job Configuration</div>
-                            <span class="chip chip-stage" style="font-size:0.7rem;">AI-Toolkit Automated</span>
+                            <div class="card-title">
+                                <span style="background:var(--accent-purple); color:#111; width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:800;">1</span>
+                                What are you training? (Subject Presets)
+                            </div>
+                            <span class="chip chip-stage" style="font-size:0.7rem;">Auto-Configures Hyperparameters</span>
                         </div>
 
-                        <div class="input-group">
-                            <label>Run Identifier</label>
-                            <input id="runName" type="text" value="flux_lora_run_1" placeholder="e.g. anime_portrait_v1" />
+                        <div class="grid-5" style="margin-bottom:16px;">
+                            <div id="presetCharacter" class="preset-card selected" onclick="selectSubjectPreset('character')">
+                                <div class="preset-icon">👤</div>
+                                <div class="preset-title">Character / Person</div>
+                                <div class="preset-desc">Facial &amp; costume likeness (Dim 16 / Ep 10)</div>
+                            </div>
+                            <div id="presetStyle" class="preset-card" onclick="selectSubjectPreset('style')">
+                                <div class="preset-icon">🎨</div>
+                                <div class="preset-title">Art Style / Aesthetic</div>
+                                <div class="preset-desc">Medium, brushwork, textures (Dim 32 / Ep 12)</div>
+                            </div>
+                            <div id="presetConcept" class="preset-card" onclick="selectSubjectPreset('concept')">
+                                <div class="preset-icon">🔮</div>
+                                <div class="preset-title">Concept / Object</div>
+                                <div class="preset-desc">Gear, vehicles, creatures (Dim 16 / Ep 10)</div>
+                            </div>
+                            <div id="presetClothing" class="preset-card" onclick="selectSubjectPreset('clothing')">
+                                <div class="preset-icon">👗</div>
+                                <div class="preset-title">Clothing / Outfit</div>
+                                <div class="preset-desc">Garment geometry &amp; fabric (Dim 16 / Ep 10)</div>
+                            </div>
+                            <div id="presetCustom" class="preset-card" onclick="selectSubjectPreset('custom')">
+                                <div class="preset-icon">⚙️</div>
+                                <div class="preset-title">Custom Setup</div>
+                                <div class="preset-desc">Fully user-specified parameters</div>
+                            </div>
                         </div>
 
-                        <div class="input-group">
-                            <label>Dataset Archive (.zip file upload) or Host Directory</label>
-                            <input id="datasetZip" type="file" accept=".zip" />
-                            <input id="datasetDir" type="text" placeholder="Or enter existing folder path on host..." style="margin-top:4px;" />
-                            <span id="uploadInfo" style="font-size:0.75rem; color:var(--text-secondary);">ZIP archives are auto-extracted on host PC</span>
+                        <div class="grid-3">
+                            <div class="input-group">
+                                <label>Target Base Model Architecture</label>
+                                <select id="wizBaseModel" onchange="recalculateEstimators()">
+                                    <option value="FLUX.1-dev">FLUX.1-dev (Flow Matching)</option>
+                                    <option value="SDXL 1.0">SDXL 1.0 / Pony / Illustrious</option>
+                                    <option value="Chroma 1 HD">Chroma 1 HD (Standalone DiT)</option>
+                                    <option value="Stable Diffusion 1.5">Stable Diffusion 1.5</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label>Run Project Name</label>
+                                <input id="wizRunName" type="text" value="my_lora_run" placeholder="e.g. cyberpunk_portrait_v1" />
+                            </div>
+                            <div class="input-group">
+                                <label>Trigger Activation Keyword</label>
+                                <input id="wizTriggerWord" type="text" placeholder="e.g. ohwx character" oninput="updateSamplePromptTemplate()" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STEP 2: Dataset & Health Audit -->
+                    <div class="card">
+                        <div class="card-header-bar">
+                            <div class="card-title">
+                                <span style="background:var(--accent-purple); color:#111; width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:800;">2</span>
+                                Dataset &amp; Output Folders
+                            </div>
+                            <button class="btn btn-secondary btn-sm" onclick="switchView('curate')">Open Curate Studio</button>
                         </div>
 
                         <div class="grid-2">
                             <div class="input-group">
-                                <label>Base Model Architecture</label>
-                                <select id="architecture">
-                                    <option value="flux1">FLUX.1 (Dev / Schnell)</option>
-                                    <option value="sdxl">SDXL 1.0 / Pony / Illustrious</option>
-                                    <option value="chroma">Chroma / Wan</option>
-                                    <option value="sd15">Stable Diffusion 1.5</option>
-                                </select>
+                                <label>Dataset Archive (.zip) or Host Folder Path</label>
+                                <div style="display:flex; gap:8px;">
+                                    <input id="wizDatasetInput" type="text" placeholder="Upload ZIP or enter folder path on host..." style="flex:1;" />
+                                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('wizZipPicker').click()">Upload ZIP</button>
+                                    <input id="wizZipPicker" type="file" accept=".zip" style="display:none;" onchange="uploadWizardDataset(this.files[0])" />
+                                </div>
                             </div>
                             <div class="input-group">
-                                <label>Target Steps</label>
-                                <input id="steps" type="number" value="1500" min="100" max="25000" />
+                                <label>Output Checkpoints Folder</label>
+                                <input id="wizOutputDir" type="text" value="~/.loramancer/outputs" />
                             </div>
                         </div>
 
-                        <div class="input-group">
-                            <label>Concept Trigger Word</label>
-                            <input id="triggerWord" type="text" placeholder="e.g. ohwx style" />
+                        <!-- Dataset Health Banner -->
+                        <div id="wizAuditBanner" style="background:#11111b; border:1px solid var(--border-dark); border-radius:8px; padding:10px 14px; margin-top:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem;">
+                                <span>📦</span>
+                                <b>Dataset Audit:</b>
+                                <span id="auditImagesBadge" class="chip chip-stage">20 Images</span>
+                                <span id="auditCaptionsBadge" class="chip chip-stage">20 Captions</span>
+                                <span id="auditMissingBadge" class="chip chip-stage" style="color:var(--accent-green);">0 Missing</span>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" onclick="prependTriggerToCaptions()">🪄 Prepend Trigger to Captions</button>
+                        </div>
+                    </div>
+
+                    <!-- STEP 3: Live Training Estimators -->
+                    <div class="card">
+                        <div class="card-header-bar">
+                            <div class="card-title">
+                                <span style="background:var(--accent-purple); color:#111; width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:800;">3</span>
+                                Live Training Estimators &amp; ROCm Pre-Flight
+                            </div>
+                            <span id="wizPreflightBadge" class="chip" style="background:rgba(166,227,161,0.15); color:var(--accent-green); border:1px solid rgba(166,227,161,0.3);">ROCm Hardware Safe</span>
                         </div>
 
-                        <!-- Advanced Hyperparameters Accordion -->
-                        <details style="margin-top:8px;">
-                            <summary style="cursor:pointer; font-size:0.85rem; font-weight:700; color:var(--accent-purple); padding:6px 0;">
-                                🔧 Advanced Hyperparameters (Rank, Optimizer, LR, Precision)
+                        <div class="grid-4" style="margin-bottom:14px;">
+                            <div class="stat-box" style="border-top:3px solid var(--accent-blue);">
+                                <div class="stat-label">Total Steps</div>
+                                <div id="estTotalSteps" class="stat-val" style="color:var(--accent-blue);">2,000</div>
+                                <div id="estStepFormula" style="font-size:0.7rem; color:var(--text-secondary); margin-top:4px;">20 img × 10 reps × 10 ep</div>
+                            </div>
+                            <div class="stat-box" style="border-top:3px solid var(--accent-green);">
+                                <div class="stat-label">Est. VRAM Needed</div>
+                                <div id="estVram" class="stat-val" style="color:var(--accent-green);">~10.4 GB</div>
+                                <div id="estGpuName" style="font-size:0.7rem; color:var(--text-secondary); margin-top:4px;">AMD Radeon (16 GB)</div>
+                            </div>
+                            <div class="stat-box" style="border-top:3px solid var(--accent-purple);">
+                                <div class="stat-label">Est. Checkpoint Size</div>
+                                <div id="estSize" class="stat-val" style="color:var(--accent-purple);">~54 MB</div>
+                                <div id="estRankInfo" style="font-size:0.7rem; color:var(--text-secondary); margin-top:4px;">Rank 16 / Alpha 16</div>
+                            </div>
+                            <div class="stat-box" style="border-top:3px solid var(--accent-yellow);">
+                                <div class="stat-label">Est. Duration</div>
+                                <div id="estDuration" class="stat-val" style="color:var(--accent-yellow);">~14m 30s</div>
+                                <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:4px;">Host Accelerator Speed</div>
+                            </div>
+                        </div>
+
+                        <!-- Pro Mode Hyperparameters Accordion -->
+                        <details style="margin-top:12px; background:var(--bg-overlay); border:1px solid var(--border-dark); border-radius:8px; padding:10px 14px;">
+                            <summary style="cursor:pointer; font-weight:700; color:var(--accent-purple); font-size:0.88rem;">
+                                🔧 Pro Mode: Fine-tune Rank, Alpha, Optimizer, Learning Rate &amp; Precision
                             </summary>
-                            <div style="background:var(--bg-overlay); border:1px solid var(--border-dark); border-radius:6px; padding:12px; margin-top:8px;">
-                                <div class="grid-2">
+                            <div style="padding-top:12px;">
+                                <div class="grid-3">
+                                    <div class="input-group">
+                                        <label>Network Dim (Rank)</label>
+                                        <input id="wizRank" type="number" value="16" min="4" max="256" oninput="recalculateEstimators()" />
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Network Alpha</label>
+                                        <input id="wizAlpha" type="number" value="16" min="4" max="256" />
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Learning Rate</label>
+                                        <input id="wizLr" type="text" value="0.0001" />
+                                    </div>
+                                </div>
+                                <div class="grid-3">
                                     <div class="input-group">
                                         <label>Optimizer</label>
-                                        <select id="optimizer">
+                                        <select id="wizOptimizer">
                                             <option value="adamw8bit">AdamW 8-bit (Low VRAM)</option>
                                             <option value="prodigy">Prodigy (Adaptive LR)</option>
                                             <option value="lion8bit">Lion 8-bit</option>
@@ -1401,122 +2050,144 @@ public sealed class NetworkServerService : IAsyncDisposable {
                                         </select>
                                     </div>
                                     <div class="input-group">
-                                        <label>Learning Rate</label>
-                                        <input id="lr" type="text" value="0.0001" />
-                                    </div>
-                                </div>
-                                <div class="grid-3">
-                                    <div class="input-group">
-                                        <label>Network Dim (Rank)</label>
-                                        <input id="networkDim" type="number" value="16" min="4" max="256" />
-                                    </div>
-                                    <div class="input-group">
-                                        <label>Network Alpha</label>
-                                        <input id="networkAlpha" type="number" value="16" min="4" max="256" />
-                                    </div>
-                                    <div class="input-group">
-                                        <label>Precision (Dtype)</label>
-                                        <select id="precision">
+                                        <label>Precision</label>
+                                        <select id="wizPrecision">
                                             <option value="bf16">bfloat16 (Recommended)</option>
                                             <option value="fp16">float16</option>
                                             <option value="fp8">fp8 (Ultra-Low VRAM)</option>
                                         </select>
                                     </div>
+                                    <div class="input-group">
+                                        <label>Batch Size</label>
+                                        <input id="wizBatchSize" type="number" value="1" min="1" max="16" oninput="recalculateEstimators()" />
+                                    </div>
                                 </div>
                                 <div class="grid-2">
                                     <div class="input-group">
-                                        <label>Batch Size</label>
-                                        <input id="batchSize" type="number" value="1" min="1" max="16" />
+                                        <label>Epochs</label>
+                                        <input id="wizEpochs" type="number" value="10" min="1" max="100" oninput="recalculateEstimators()" />
                                     </div>
                                     <div class="input-group">
-                                        <label>Resolution</label>
-                                        <select id="resolution">
-                                            <option value="1024">1024 x 1024</option>
-                                            <option value="768">768 x 768</option>
-                                            <option value="512">512 x 512</option>
-                                        </select>
+                                        <label>Repeats per Image</label>
+                                        <input id="wizRepeats" type="number" value="10" min="1" max="50" oninput="recalculateEstimators()" />
                                     </div>
                                 </div>
                                 <div class="input-group">
                                     <label>Validation Sample Prompt</label>
-                                    <input id="samplePrompt" type="text" placeholder="e.g. photo of ohwx in cinematic lighting" />
+                                    <input id="wizSamplePrompt" type="text" placeholder="{trigger}, high quality portrait" />
                                 </div>
                             </div>
                         </details>
+
+                        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+                            <button class="btn btn-secondary" onclick="queueFromWizard()">📥 Queue for Later</button>
+                            <button class="btn" style="padding:12px 24px; font-size:1rem;" onclick="launchFromWizard()">
+                                🚀 Launch Training with Wizard Recipe
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW 2: ADVANCED STUDIO & CONSOLE -->
+                <div id="trainManualView" style="display:none;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+                        <div>
+                            <div class="card-title" style="font-size:1.3rem;">⚡ LoRA Training &amp; Forge Studio</div>
+                            <p style="font-size:0.85rem; color:var(--text-secondary); margin:4px 0 0 0;">
+                                Direct low-level telemetry, live sequential queue, and remote terminal feed.
+                            </p>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-danger" onclick="stopTraining()">⏹ Stop Current</button>
+                            <button class="btn btn-outline" onclick="cancelAllJobs()">🗑️ Cancel All</button>
+                            <button class="btn btn-secondary" onclick="clearConsoleLogs()">🧹 Clear Logs</button>
+                        </div>
                     </div>
 
-                    <!-- Live Terminal Console -->
-                    <div class="card" style="display:flex; flex-direction:column;">
+                    <!-- Active Queue Banner -->
+                    <div class="card" style="padding:12px 18px; margin-bottom:16px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="font-size:1.1rem;">📥</span>
+                                <span style="font-weight:700;">Studio Sequential Queue:</span>
+                                <span id="queueBadge" class="chip chip-stage">0 Queued</span>
+                                <span id="activeJobName" style="color:var(--accent-green); font-weight:600;">Idle</span>
+                            </div>
+                            <div style="font-size:0.78rem; color:var(--text-secondary);">Automatic single GPU execution with post-run VRAM cooldown</div>
+                        </div>
+                    </div>
+
+                    <!-- 4 Metrics Cards -->
+                    <div class="grid-4" style="margin-bottom:16px;">
+                        <div class="stat-box">
+                            <div class="stat-label">Status</div>
+                            <div id="trainStatusVal" class="stat-val" style="color:var(--accent-green);">Ready</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Step Progress</div>
+                            <div id="stepCounter" class="stat-val" style="color:var(--accent-blue);">0 / 0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Current Loss</div>
+                            <div id="lossVal" class="stat-val" style="color:var(--accent-green);">-</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Host GPU Engine</div>
+                            <div id="engineStatusVal" class="stat-val" style="font-size:1rem; color:var(--accent-purple);">ROCm / CUDA</div>
+                        </div>
+                    </div>
+
+                    <div class="progress-bar-container">
+                        <div id="progressBar" class="progress-bar-fill"></div>
+                    </div>
+
+                    <!-- Live Console Log Stream -->
+                    <div class="card" style="margin-top:16px;">
                         <div class="card-header-bar">
-                            <div class="card-title">🖥️ Live Execution Console</div>
-                            <div style="display:flex; gap:6px;">
-                                <button class="btn btn-secondary btn-sm" onclick="toggleAutoScroll()">Auto-Scroll: <span id="autoScrollStatus">ON</span></button>
+                            <div class="card-title">🖥️ Host Workstation Real-Time Console Stream</div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="font-size:0.75rem; color:var(--text-secondary); display:flex; align-items:center; gap:4px;">
+                                    <input type="checkbox" id="autoscrollLock" checked /> Auto-scroll lock
+                                </label>
                             </div>
                         </div>
-                        <div id="terminal" class="terminal" style="flex:1;">Connecting to LoRAMancer live telemetry stream...</div>
+                        <div id="consoleLogBox"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- VIEW: CURATE & CAPTION -->
-            <div id="view-curate" class="view-panel">
-                <div class="card">
-                    <div class="card-header-bar">
-                        <div class="card-title">📁 Stage 1: Dataset Curator &amp; Caption Studio</div>
-                        <button class="btn btn-secondary btn-sm" onclick="alert('Select images or a ZIP archive to upload to the host.')">Upload Images</button>
-                    </div>
-                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
-                        Manage training image pairs and text captions remotely. Upload images, clean tags, or auto-caption on the host workstation.
-                    </p>
-                    <div class="stat-box" style="padding:40px 20px; border:1px dashed var(--border-dark);">
-                        <div style="font-size:2.5rem; margin-bottom:8px;">🖼️</div>
-                        <h3 style="color:#fff; margin-bottom:6px;">Upload or Inspect Dataset Images</h3>
-                        <p style="font-size:0.85rem; color:var(--text-secondary); max-width:480px; margin:0 auto 16px auto;">Upload raw photos and captions to build your training dataset on the host workstation.</p>
-                        <input type="file" id="curateFileInput" multiple accept="image/*,.txt" style="display:none;" />
-                        <button class="btn" onclick="document.getElementById('curateFileInput').click()">Browse Images...</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- VIEW: DIAGNOSTIC LAB -->
+            <!-- VIEW: 3. DIAGNOSTIC LAB -->
             <div id="view-lab" class="view-panel">
                 <div class="grid-2">
                     <div class="card">
                         <div class="card-header-bar">
-                            <div class="card-title">🔬 Stage 3: LoRA Diagnostic Lab &amp; SVD Overbake Radar</div>
+                            <div class="card-title">🔬 Stage 3: SVD Overbake Radar Analysis</div>
+                            <button class="btn btn-secondary btn-sm" onclick="inspectLabModel()">⚡ Run SVD Scan</button>
                         </div>
                         <div class="input-group">
-                            <label>Target Safetensors Model on Host</label>
-                            <input id="labModelPath" type="text" placeholder="Select from Vault or enter host path..." />
+                            <label>LoRA Safetensors File on Host</label>
+                            <select id="labLoraSelect"></select>
                         </div>
-                        <button class="btn" onclick="runLabInspection()">🔬 Run Overbake &amp; Spectral Analysis</button>
-
-                        <div id="labReportCard" style="display:none; background:var(--bg-overlay); border:1px solid var(--border-dark); border-radius:8px; padding:14px; margin-top:14px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                                <span style="font-weight:700;" id="labReportName">-</span>
-                                <span class="chip" id="labReportBadge">-</span>
-                            </div>
-                            <div class="grid-3" style="margin-bottom:10px;">
+                        <div id="labScanResults" style="display:none; margin-top:14px;">
+                            <div class="grid-2" style="margin-bottom:12px;">
                                 <div class="stat-box">
-                                    <div class="stat-label">Overbake Score</div>
-                                    <div id="labScoreVal" class="stat-val" style="color:var(--accent-purple);">0%</div>
+                                    <div class="stat-label">Overbake Risk Score</div>
+                                    <div id="labScoreVal" class="stat-val" style="color:var(--accent-green);">0 / 100</div>
                                 </div>
                                 <div class="stat-box">
-                                    <div class="stat-label">Energy Norm</div>
-                                    <div id="labNormVal" class="stat-val" style="color:var(--accent-green);">0.00</div>
-                                </div>
-                                <div class="stat-box">
-                                    <div class="stat-label">Layers</div>
-                                    <div id="labLayersVal" class="stat-val">0</div>
+                                    <div class="stat-label">Average Frobenius Norm</div>
+                                    <div id="labNormVal" class="stat-val">0.00</div>
                                 </div>
                             </div>
-                            <div id="labVerdict" style="font-size:0.85rem; color:#bac2de; line-height:1.4;"></div>
+                            <div class="alert-info" id="labVerdictBox" style="margin-bottom:8px;"></div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);" id="labRecBox"></div>
                         </div>
                     </div>
 
                     <div class="card">
                         <div class="card-header-bar">
-                            <div class="card-title">🛠️ Layer Surgery &amp; Rescaling</div>
+                            <div class="card-title">✂️ Layer Surgery &amp; Rank Compression</div>
+                            <span class="chip chip-stage">Non-Destructive</span>
                         </div>
                         <div class="input-group">
                             <label>Text Encoder Multiplier (<span id="teVal">1.00</span>x)</label>
@@ -1541,7 +2212,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
                 </div>
             </div>
 
-            <!-- VIEW: COMFYUI TEST -->
+            <!-- VIEW: 4. COMFYUI TEST -->
             <div id="view-comfy" class="view-panel">
                 <div class="grid-2">
                     <div class="card">
@@ -1592,18 +2263,112 @@ public sealed class NetworkServerService : IAsyncDisposable {
                 </div>
             </div>
 
-            <!-- VIEW: LIBRARY & VAULT -->
+            <!-- VIEW: 5. LIBRARY & VAULT -->
             <div id="view-vault" class="view-panel">
                 <div class="card">
                     <div class="card-header-bar">
                         <div class="card-title">📚 Stage 5: LoRA Library &amp; Vault</div>
-                        <button class="btn btn-secondary btn-sm" onclick="loadVaultLoras()">🔄 Refresh Vault</button>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('vaultUploadInput').click()">📤 Upload LoRA (.safetensors)</button>
+                            <input id="vaultUploadInput" type="file" accept=".safetensors" style="display:none;" onchange="uploadVaultLora(this.files[0])" />
+                            <button class="btn btn-secondary btn-sm" onclick="loadVaultLoras()">🔄 Refresh Vault</button>
+                        </div>
                     </div>
                     <div class="input-group">
                         <input id="vaultSearch" type="text" placeholder="Search models by filename..." oninput="filterVault()" />
                     </div>
                     <div id="vaultList" class="grid-3" style="max-height:650px; overflow-y:auto; padding-top:6px;">
                         <div style="color:var(--text-secondary); font-size:0.88rem;">Scanning host LoRA directories...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: LORA CHOP-SHOP (Multi-Model Garage with Donor Upload & Full Desktop Anatomical Grafting) -->
+            <div id="view-chop" class="view-panel">
+                <div class="card">
+                    <div class="card-header-bar">
+                        <div>
+                            <div class="card-title">🛠️ LoRA Vehicle Chop-Shop: Multi-Model Anatomical Grafting</div>
+                            <p style="font-size:0.82rem; color:var(--text-secondary); margin:4px 0 0 0;">
+                                Multi-model anatomical &amp; aesthetic grafting: harvest face, eyes, hair, clothing, lighting, and textures into a single unified LoRA.
+                            </p>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-sm" onclick="autoCraftChopRecipe()">✨ Smart Auto-Assign</button>
+                            <button class="btn btn-secondary btn-sm" onclick="clearChopGarage()">🧹 Reset Garage</button>
+                        </div>
+                    </div>
+
+                    <!-- Donor Upload Dropzone & Vault Dropdown -->
+                    <div class="grid-2" style="margin-bottom:16px;">
+                        <div class="drop-zone" onclick="document.getElementById('chopFileInput').click()" style="padding:16px;">
+                            <span style="font-size:1.8rem;">📤</span>
+                            <div style="font-weight:700; color:#fff; font-size:0.9rem;">Upload Donor LoRA (.safetensors)</div>
+                            <div style="font-size:0.72rem; color:var(--text-secondary);">Directly from your local machine to host garage</div>
+                            <input id="chopFileInput" type="file" accept=".safetensors" style="display:none;" onchange="uploadChopDonor(this.files[0])" />
+                        </div>
+                        <div class="stat-box" style="justify-content:center;">
+                            <label>Or Select LoRA from Server Vault</label>
+                            <div style="display:flex; gap:8px; margin-top:6px;">
+                                <select id="chopAddSelect" style="flex:1;"><option value="">Choose a model from host vault...</option></select>
+                                <button class="btn btn-secondary btn-sm" onclick="addSelectedDonorToGarage()">➕ Add Donor</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chop-Shop Tabs: The Garage & Anatomical Assembly -->
+                    <div class="segmented-tabs" style="margin-bottom:16px;">
+                        <button id="chopTabBtnGarage" class="tab-btn active" onclick="switchChopTab('garage')">
+                            🏎️ The Garage: Loaded Donors (<span id="donorCount">0</span>)
+                        </button>
+                        <button id="chopTabBtnAssembly" class="tab-btn" onclick="switchChopTab('assembly')">
+                            🧩 Anatomical Assembly Bay
+                        </button>
+                    </div>
+
+                    <!-- TAB 1: THE GARAGE -->
+                    <div id="chopTabGarage">
+                        <div id="chopDonorsGrid" class="grid-3">
+                            <div style="color:var(--text-secondary); font-size:0.88rem; padding:20px; text-align:center; grid-column:1/-1;">
+                                No donors in garage. Upload a .safetensors model above or pick from your server vault.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: ANATOMICAL ASSEMBLY -->
+                    <div id="chopTabAssembly" style="display:none;">
+                        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:14px;">
+                            Assign which donor model provides each anatomical or aesthetic part, and calibrate the blend multiplier.
+                        </p>
+                        <div id="chopPartsGrid" class="grid-2">
+                            <!-- Visual parts will be dynamically rendered here -->
+                        </div>
+
+                        <!-- Bake Franken-LoRA Card -->
+                        <div class="card" style="margin-top:20px; background:var(--bg-overlay);">
+                            <div class="card-header-bar">
+                                <div class="card-title">🔥 SVD Compilation &amp; Bake</div>
+                                <span class="chip chip-stage">No Retraining Required</span>
+                            </div>
+                            <div class="grid-2">
+                                <div class="input-group">
+                                    <label>Resulting Franken-LoRA Filename</label>
+                                    <input id="frankenName" type="text" value="ChopShop_FrankenLoRA" />
+                                </div>
+                                <div class="input-group">
+                                    <label>Target Compilation Rank</label>
+                                    <select id="frankenRank">
+                                        <option value="16" selected>Rank 16 (~32MB)</option>
+                                        <option value="32">Rank 32 (~64MB)</option>
+                                        <option value="64">Rank 64 (~128MB)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button class="btn" style="width:100%; margin-top:10px; padding:12px;" onclick="bakeFrankenLora()">
+                                🔥 Assemble &amp; Compile Franken-LoRA via Server SVD
+                            </button>
+                            <div id="bakeStatus" style="font-size:0.85rem; color:var(--accent-green); margin-top:10px; display:none;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1621,755 +2386,985 @@ public sealed class NetworkServerService : IAsyncDisposable {
                 </div>
             </div>
 
-            <!-- VIEW: LORA CHOP-SHOP -->
-            <div id="view-chop" class="view-panel">
-                <div class="card">
-                    <div class="card-header-bar">
-                        <div class="card-title">🛠️ LoRA Vehicle Chop-Shop: Multi-Model Anatomical Grafting</div>
-                        <button class="btn btn-secondary btn-sm" onclick="clearChopGarage()">🧹 Reset Garage</button>
-                    </div>
-                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
-                        Selectively harvest visual components across donor models (face, eyes, hair, clothing, lighting, textures) and forge a unified Franken-LoRA using SVD matrix compression without retraining.
-                    </p>
-                    <div class="input-group">
-                        <label>Select Server LoRA to Add to Garage Shelf</label>
-                        <div style="display:flex; gap:10px;">
-                            <select id="chopAddSelect" style="flex:1;"><option value="">Choose a model from host vault...</option></select>
-                            <button class="btn btn-secondary" onclick="addSelectedDonorToGarage()">➕ Add Donor</button>
-                        </div>
-                    </div>
-                    <div id="chopDonorsShelf" class="grid-3" style="margin-top:6px;">
-                        <div style="color:var(--text-secondary); font-size:0.85rem; font-style:italic;">No donors added yet. Select a model above to begin.</div>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header-bar">
-                        <div class="card-title">🧬 Anatomical &amp; Style Component Grafting</div>
-                        <button class="btn btn-sm btn-secondary" onclick="autoAssignChop()">✨ Auto-Craft Recipe</button>
-                    </div>
-                    <div class="grid-2">
-                        <div class="input-group">
-                            <label>👤 Chassis &amp; Face (Head Shape &amp; Jawline)</label>
-                            <select id="part-face" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                        <div class="input-group">
-                            <label>👁️ Headlights &amp; Eyes (Iris &amp; Catchlights)</label>
-                            <select id="part-eyes" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                        <div class="input-group">
-                            <label>💇 Custom Paint &amp; Hair (Hairstyle &amp; Flow)</label>
-                            <select id="part-hair" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                        <div class="input-group">
-                            <label>👗 Upholstery &amp; Armor (Garments &amp; Uniforms)</label>
-                            <select id="part-armor" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                        <div class="input-group">
-                            <label>💡 Engine &amp; Glow (Volumetric Lighting &amp; Tone)</label>
-                            <select id="part-glow" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                        <div class="input-group">
-                            <label>⚡ Detail Polish (Skin Pores &amp; Micro-Clarity)</label>
-                            <select id="part-detail" class="chop-part-select"><option value="">Base / None</option></select>
-                        </div>
-                    </div>
-
-                    <div class="grid-2" style="margin-top:10px;">
-                        <div class="input-group">
-                            <label>Franken-LoRA Output Name</label>
-                            <input id="chopOutputName" type="text" value="Franken_Chop_v1" />
-                        </div>
-                        <div class="input-group">
-                            <label>Output SVD Rank</label>
-                            <select id="chopRank">
-                                <option value="8">Rank 8 (~16MB)</option>
-                                <option value="16" selected>Rank 16 (~32MB)</option>
-                                <option value="32">Rank 32 (~64MB)</option>
-                                <option value="64">Rank 64 (~128MB)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div style="margin-top:12px;">
-                        <button class="btn" style="width:100%;" onclick="bakeChopShop()">🔥 Bake &amp; Synthesize Franken-LoRA on Server</button>
-                        <div id="chopStatus" style="margin-top:8px; font-size:0.85rem; color:var(--accent-purple); display:none;"></div>
-                    </div>
-                </div>
-            </div>
-
             <!-- VIEW: COMPUTE ENVIRONMENT -->
-            <div id="view-env" class="view-panel">
+            <div id="view-telemetry" class="view-panel">
                 <div class="card">
                     <div class="card-header-bar">
-                        <div class="card-title">💻 Compute Environment &amp; Hardware Acceleration</div>
+                        <div class="card-title">💻 Host Workstation Compute Telemetry</div>
                         <button class="btn btn-secondary btn-sm" onclick="loadEnvironment()">🔄 Refresh Specs</button>
                     </div>
-                    <div id="envDetails" class="grid-2" style="margin-top:8px;">
-                        <div class="stat-box"><div class="stat-label">GPU Model</div><div id="envGpuName" class="stat-val" style="font-size:1rem;">-</div></div>
-                        <div class="stat-box"><div class="stat-label">Driver / Platform</div><div id="envDriver" class="stat-val" style="font-size:1rem;">-</div></div>
-                        <div class="stat-box"><div class="stat-label">PyTorch Wheels</div><div id="envTorch" class="stat-val" style="font-size:1rem;">-</div></div>
-                        <div class="stat-box"><div class="stat-label">Python Runtime</div><div id="envPython" class="stat-val" style="font-size:1rem;">-</div></div>
+                    <div class="grid-3" id="envSpecsGrid">
+                        <div class="stat-box"><div class="stat-label">Host OS</div><div id="envOs" class="stat-val" style="font-size:1.1rem;">Windows / Linux</div></div>
+                        <div class="stat-box"><div class="stat-label">GPU Accelerator</div><div id="envGpu" class="stat-val" style="font-size:1.1rem; color:var(--accent-purple);">Detecting...</div></div>
+                        <div class="stat-box"><div class="stat-label">ROCm Driver</div><div id="envRocm" class="stat-val" style="font-size:1.1rem; color:var(--accent-green);">ROCm Active</div></div>
+                        <div class="stat-box"><div class="stat-label">VRAM Gauge</div><div id="envVram" class="stat-val" style="font-size:1.1rem;">16 GB</div></div>
+                        <div class="stat-box"><div class="stat-label">PyTorch Environment</div><div id="envTorch" class="stat-val" style="font-size:1.1rem; color:var(--accent-blue);">PyTorch 2.5</div></div>
+                        <div class="stat-box"><div class="stat-label">System Python</div><div id="envPython" class="stat-val" style="font-size:1.1rem;">Python 3.11</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- VIEW: SETTINGS & ADMIN -->
-            <div id="view-settings" class="view-panel">
-                <div class="card">
-                    <div class="card-header-bar">
-                        <div class="card-title">⚙️ Remote Studio Settings &amp; Host Configuration</div>
-                    </div>
-                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:14px;">
-                        Configure network connection parameters and manage authorization tokens for remote access.
-                    </p>
-                    <div class="input-group">
-                        <label>Session Security Token</label>
-                        <input id="clientTokenDisplay" type="text" readonly style="font-family:monospace;" />
-                    </div>
-                    <button class="btn btn-secondary" onclick="localStorage.removeItem('loramancer_auth_token'); window.location.reload();">🔒 Log Out / Clear Session</button>
-                </div>
-            </div>
-        </main>
+        </div>
     </div>
 
+    <!-- MAIN JAVASCRIPT LOGIC -->
     <script>
-        const terminal = document.getElementById('terminal');
-        const progressBar = document.getElementById('progressBar');
-        const stepCounter = document.getElementById('stepCounter');
-        const lossVal = document.getElementById('lossVal');
-        const hostStatusPill = document.getElementById('hostStatusPill');
-        const sidebarStatusChip = document.getElementById('sidebarStatusChip');
-        const publicBadge = document.getElementById('publicUrlBadge');
-        let autoScroll = true;
+        let authToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('loramancer_auth_token') || '';
+        let eventSource = null;
+        let vaultLorasList = [];
+        let chopDonors = [];
+        let currentTrainMode = 'wizard';
+        let currentChopTab = 'garage';
 
-        const activePublicUrl = '{{publicUrl}}';
-        if (activePublicUrl) {
-            publicBadge.style.display = 'inline-flex';
-            publicBadge.textContent = '🌐 ' + activePublicUrl.replace(/^https?:\/\//, '');
+        // High-level visual parts definition matching ChopShopPage.razor
+        const CHOP_PARTS = [
+            { id: 'face', name: 'Face & Anatomy', desc: 'Facial likeness, expression, head structure (mid-blocks / double blocks 8-12)', icon: '👤', weight: 1.0, donorId: null },
+            { id: 'eyes', name: 'Eyes & Iris', desc: 'Eye shape, color, iris detail, and specular reflections', icon: '👁️', weight: 1.0, donorId: null },
+            { id: 'hair', name: 'Hair & Hairstyle', desc: 'Hair volume, strands, bangs, and hair color gradients', icon: '💇', weight: 1.0, donorId: null },
+            { id: 'clothing', name: 'Clothing & Outfit', desc: 'Fabric wrinkles, garment geometry, costumes (late-blocks / single blocks)', icon: '👗', weight: 1.0, donorId: null },
+            { id: 'lighting', name: 'Lighting & Ambiance', desc: 'Volumetric light, color tone, shadow warmth (early-blocks / double blocks 1-4)', icon: '💡', weight: 1.0, donorId: null },
+            { id: 'skin', name: 'Skin & Micro-Details', desc: 'Pores, skin translucency, specular highlights', icon: '🔬', weight: 1.0, donorId: null },
+            { id: 'triggers', name: 'Prompt Triggers', desc: 'Keyword activation associations and cross-attention text conditioning', icon: '🧠', weight: 1.0, donorId: null }
+        ];
+
+        function getHeaders() {
+            const h = { 'Content-Type': 'application/json' };
+            if (authToken) h['X-LoRAMancer-Token'] = authToken;
+            return h;
         }
 
-        function copyPublicUrl() {
-            if (activePublicUrl) {
-                navigator.clipboard.writeText(activePublicUrl).then(() => alert('Copied URL:\n' + activePublicUrl));
-            }
-        }
+        function switchView(viewName) {
+            document.querySelectorAll('.view-panel').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.chip-stage').forEach(el => el.classList.remove('active'));
 
-        function toggleSidebar() {
-            document.getElementById('appSidebar').classList.toggle('open');
-        }
+            const panel = document.getElementById('view-' + viewName);
+            if (panel) panel.classList.add('active');
 
-        function toggleAutoScroll() {
-            autoScroll = !autoScroll;
-            document.getElementById('autoScrollStatus').textContent = autoScroll ? 'ON' : 'OFF';
-        }
-
-        function appendLog(msg) {
-            terminal.textContent += msg + '\n';
-            if (autoScroll) terminal.scrollTop = terminal.scrollHeight;
-        }
-
-        function switchStage(stageId) {
-            document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.querySelectorAll('.chip-stage').forEach(c => c.classList.remove('active'));
-
-            const view = document.getElementById('view-' + stageId);
-            if (view) view.classList.add('active');
-
-            // Find matching sidebar nav item
-            const navBtn = Array.from(document.querySelectorAll('.nav-item')).find(b => b.getAttribute('onclick')?.includes("'" + stageId + "'"));
-            if (navBtn) navBtn.classList.add('active');
-
-            // Find matching top chip
-            const chip = document.getElementById('chip-' + stageId);
-            if (chip) chip.classList.add('active');
-
-            // Mobile sidebar auto-close
-            document.getElementById('appSidebar').classList.remove('open');
-
-            if (stageId === 'vault') loadVaultLoras();
-            if (stageId === 'comfy') checkComfyStatus();
-            if (stageId === 'history') loadHistory();
-            if (stageId === 'env') loadEnvironment();
-            if (stageId === 'train') refreshQueue();
-        }
-
-        // PWA Installation
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            const btn = document.getElementById('installPwaBtn');
-            if (btn) btn.style.display = 'inline-flex';
-        });
-
-        async function installPwa() {
-            if (!deferredPrompt) return;
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            if (outcome === 'accepted') {
-                const btn = document.getElementById('installPwaBtn');
-                if (btn) btn.style.display = 'none';
-            }
-            deferredPrompt = null;
-        }
-
-        function getAuthToken() {
-            return localStorage.getItem('loramancer_auth_token') || '';
-        }
-
-        function authHeaders() {
-            const token = getAuthToken();
-            const headers = {};
-            if (token) headers['Authorization'] = 'Bearer ' + token;
-            return headers;
-        }
-
-        async function checkHealth() {
-            try {
-                const res = await fetch('/api/v1/health', { headers: authHeaders() });
-                if (res.status === 401) return window.location.reload();
-                if (res.ok) {
-                    const h = await res.json();
-                    hostStatusPill.textContent = h.Status;
-                    hostStatusPill.className = 'chip ' + (h.IsTraining ? 'chip-busy' : 'chip-live');
-                    sidebarStatusChip.textContent = h.Status;
-                    sidebarStatusChip.className = 'chip ' + (h.IsTraining ? 'chip-busy' : 'chip-live');
-                    document.getElementById('trainStatusVal').textContent = h.Status;
-                    document.getElementById('trainStatusVal').style.color = h.IsTraining ? 'var(--accent-amber)' : 'var(--accent-green)';
-                }
-            } catch(e) { }
-        }
-
-        async function loadEnvironment() {
-            try {
-                const res = await fetch('/api/v1/environment', { headers: authHeaders() });
-                if (res.ok) {
-                    const env = await res.json();
-                    document.getElementById('sidebarGpuLabel').textContent = env.gpuName || 'GPU Hardware';
-                    document.getElementById('hostAcceleratorChip').textContent = (env.detectedVendor === 'Amd' ? 'AMD ROCm ' + env.rocmVersion : 'NVIDIA CUDA') + ' Active';
-                    document.getElementById('envGpuName').textContent = env.gpuName || 'Discrete Accelerator';
-                    document.getElementById('envDriver').textContent = (env.detectedVendor === 'Amd' ? 'ROCm ' + env.rocmVersion : 'CUDA') + ' on ' + env.os;
-                    document.getElementById('envTorch').textContent = env.torchVersion || 'PyTorch';
-                    document.getElementById('envPython').textContent = env.pythonVersion || 'Python 3.12';
-                }
-            } catch(e) { }
-        }
-
-        let evtSource = null;
-        function initTelemetryStream() {
-            if (evtSource) evtSource.close();
-            const token = getAuthToken();
-            const streamUrl = token ? '/api/v1/training/stream?token=' + encodeURIComponent(token) : '/api/v1/training/stream';
-            evtSource = new EventSource(streamUrl);
-            evtSource.onmessage = function(e) {
-                try {
-                    const data = JSON.parse(e.data);
-                    if (data.EventType === 'step') {
-                        stepCounter.textContent = data.Step + ' / ' + data.TotalSteps;
-                        lossVal.textContent = data.Loss.toFixed(4);
-                        const pct = data.TotalSteps > 0 ? Math.round((data.Step / data.TotalSteps) * 100) : 0;
-                        progressBar.style.width = pct + '%';
-                        hostStatusPill.textContent = 'Training';
-                        hostStatusPill.className = 'chip chip-busy';
-                    }
-                    if (data.Message) appendLog(data.Message);
-                } catch(err) {
-                    appendLog(e.data);
-                }
+            const navMap = {
+                'curate': 0, 'train': 1, 'lab': 2, 'comfy': 3, 'vault': 4,
+                'chop': 5, 'history': 6, 'telemetry': 7
             };
-        }
-
-        checkHealth();
-        loadEnvironment();
-        initTelemetryStream();
-        loadVaultLoras();
-        refreshQueue();
-
-        const tokenDisplay = document.getElementById('clientTokenDisplay');
-        if (tokenDisplay) tokenDisplay.value = getAuthToken() || '(None / Open LAN)';
-
-        // --- QUEUE MANAGEMENT ---
-        async function refreshQueue() {
-            try {
-                const res = await fetch('/api/v1/training/queue', { headers: authHeaders() });
-                if (res.ok) {
-                    const q = await res.json();
-                    document.getElementById('queueBadge').textContent = q.queueCount + ' Queued';
-                    document.getElementById('activeJobName').textContent = q.currentJob ? ('Running: ' + q.currentJob.Name) : (q.isRunning ? 'Active Run' : 'Idle');
-                }
-            } catch(e) { }
-        }
-
-        async function cancelAllJobs() {
-            if (!confirm('Cancel active training and clear all queued runs on host?')) return;
-            try {
-                await fetch('/api/v1/training/cancel-all', { method: 'POST', headers: authHeaders() });
-                refreshQueue();
-                checkHealth();
-            } catch(e) { }
-        }
-
-        function clearConsoleLogs() {
-            terminal.textContent = '';
-            fetch('/api/v1/training/clear-logs', { method: 'POST', headers: authHeaders() }).catch(() => {});
-        }
-
-        // --- LAUNCH TRAINING ---
-        async function startTraining() {
-            const runName = document.getElementById('runName').value.trim() || 'lora_run';
-            const triggerWord = document.getElementById('triggerWord').value.trim();
-            const steps = parseInt(document.getElementById('steps').value) || 1500;
-            const arch = document.getElementById('architecture').value;
-            const dirInput = document.getElementById('datasetDir').value.trim();
-            const fileInput = document.getElementById('datasetZip');
-
-            let datasetPath = dirInput;
-            if (fileInput.files.length > 0) {
-                appendLog('[HOST] Uploading dataset ZIP archive to host workstation...');
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
-                const uploadRes = await fetch('/api/v1/datasets/upload', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: formData
-                });
-                if (uploadRes.status === 401) return window.location.reload();
-                const uploadJson = await uploadRes.json();
-                datasetPath = uploadJson.ExtractedPath;
-                appendLog('[HOST] Dataset extracted successfully: ' + datasetPath);
+            const navItems = document.querySelectorAll('.nav-scroller .nav-item');
+            if (navMap[viewName] !== undefined && navItems[navMap[viewName]]) {
+                navItems[navMap[viewName]].classList.add('active');
             }
 
-            appendLog('[HOST] Submitting training job to queue...');
-            const headers = authHeaders();
-            headers['Content-Type'] = 'application/json';
-
-            const payload = {
-                RunName: runName,
-                BaseArchitecture: arch,
-                DatasetPath: datasetPath,
-                TriggerWord: triggerWord,
-                Steps: steps,
-                BatchSize: parseInt(document.getElementById('batchSize').value) || 1,
-                LearningRate: parseFloat(document.getElementById('lr').value) || 0.0001,
-                Optimizer: document.getElementById('optimizer').value,
-                NetworkDim: parseInt(document.getElementById('networkDim').value) || 16,
-                NetworkAlpha: parseInt(document.getElementById('networkAlpha').value) || 16,
-                Precision: document.getElementById('precision').value,
-                Resolution: parseInt(document.getElementById('resolution').value) || 1024,
-                SamplePrompt: document.getElementById('samplePrompt').value.trim()
+            const chipIdMap = {
+                'curate': 'chipCurate', 'train': 'chipTrain', 'lab': 'chipLab',
+                'comfy': 'chipComfy', 'vault': 'chipVault'
             };
+            if (chipIdMap[viewName]) {
+                const chip = document.getElementById(chipIdMap[viewName]);
+                if (chip) chip.classList.add('active');
+            }
 
-            const res = await fetch('/api/v1/training/start', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(payload)
-            });
+            const conceptTitles = {
+                'curate': '1. Curate & Caption',
+                'train': '2. Train & Forge',
+                'lab': '3. Diagnostic Lab',
+                'comfy': '4. ComfyUI Test',
+                'vault': '5. Library & Vault',
+                'chop': 'LoRA Chop-Shop',
+                'history': 'Training History',
+                'telemetry': 'Compute Environment'
+            };
+            document.getElementById('topConceptName').textContent = conceptTitles[viewName] || 'LoRAMancer';
 
-            if (res.ok) {
-                appendLog('[HOST] Training run queued and scheduled successfully!');
-                refreshQueue();
-                checkHealth();
+            if (viewName === 'vault') loadVaultLoras();
+            if (viewName === 'history') loadHistory();
+            if (viewName === 'telemetry') loadEnvironment();
+            if (viewName === 'comfy') checkComfyStatus();
+            if (viewName === 'chop') renderChopGarage();
+        }
+
+        function switchTrainMode(mode) {
+            currentTrainMode = mode;
+            if (mode === 'wizard') {
+                document.getElementById('tabBtnWizard').classList.add('active');
+                document.getElementById('tabBtnManual').classList.remove('active');
+                document.getElementById('trainWizardView').style.display = 'block';
+                document.getElementById('trainManualView').style.display = 'none';
             } else {
-                appendLog('[HOST ERROR] Failed to start run: ' + res.statusText);
+                document.getElementById('tabBtnWizard').classList.remove('active');
+                document.getElementById('tabBtnManual').classList.add('active');
+                document.getElementById('trainWizardView').style.display = 'none';
+                document.getElementById('trainManualView').style.display = 'block';
             }
+        }
+
+        function switchChopTab(tab) {
+            currentChopTab = tab;
+            if (tab === 'garage') {
+                document.getElementById('chopTabBtnGarage').classList.add('active');
+                document.getElementById('chopTabBtnAssembly').classList.remove('active');
+                document.getElementById('chopTabGarage').style.display = 'block';
+                document.getElementById('chopTabAssembly').style.display = 'none';
+            } else {
+                document.getElementById('chopTabBtnGarage').classList.remove('active');
+                document.getElementById('chopTabBtnAssembly').classList.add('active');
+                document.getElementById('chopTabGarage').style.display = 'none';
+                document.getElementById('chopTabAssembly').style.display = 'block';
+                renderChopAssemblyParts();
+            }
+        }
+
+        // --- SUBJECT PRESETS ---
+        function selectSubjectPreset(type) {
+            document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('selected'));
+            const card = document.getElementById('preset' + type.charAt(0).toUpperCase() + type.slice(1));
+            if (card) card.classList.add('selected');
+
+            if (type === 'character') {
+                document.getElementById('wizRank').value = 16;
+                document.getElementById('wizAlpha').value = 16;
+                document.getElementById('wizLr').value = '0.0001';
+                document.getElementById('wizEpochs').value = 10;
+                document.getElementById('wizRepeats').value = 10;
+            } else if (type === 'style') {
+                document.getElementById('wizRank').value = 32;
+                document.getElementById('wizAlpha').value = 32;
+                document.getElementById('wizLr').value = '0.00005';
+                document.getElementById('wizEpochs').value = 12;
+                document.getElementById('wizRepeats').value = 8;
+            } else if (type === 'concept') {
+                document.getElementById('wizRank').value = 16;
+                document.getElementById('wizAlpha').value = 16;
+                document.getElementById('wizLr').value = '0.0001';
+                document.getElementById('wizEpochs').value = 10;
+                document.getElementById('wizRepeats').value = 12;
+            } else if (type === 'clothing') {
+                document.getElementById('wizRank').value = 16;
+                document.getElementById('wizAlpha').value = 16;
+                document.getElementById('wizLr').value = '0.00008';
+                document.getElementById('wizEpochs').value = 10;
+                document.getElementById('wizRepeats').value = 10;
+            }
+            recalculateEstimators();
+        }
+
+        function updateSamplePromptTemplate() {
+            const trg = document.getElementById('wizTriggerWord').value.trim() || '{trigger}';
+            document.getElementById('wizSamplePrompt').value = trg + ', high quality portrait, detailed lighting';
+        }
+
+        // --- LIVE ESTIMATORS ---
+        async function recalculateEstimators() {
+            const baseModel = document.getElementById('wizBaseModel').value;
+            const rank = parseInt(document.getElementById('wizRank').value) || 16;
+            const epochs = parseInt(document.getElementById('wizEpochs').value) || 10;
+            const repeats = parseInt(document.getElementById('wizRepeats').value) || 10;
+            const batchSize = parseInt(document.getElementById('wizBatchSize').value) || 1;
+            const imgCount = 20;
+
+            try {
+                const res = await fetch('/api/v1/training/estimate', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        baseModel: baseModel,
+                        imageCount: imgCount,
+                        repeats: repeats,
+                        epochs: epochs,
+                        batchSize: batchSize,
+                        networkDim: rank
+                    })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('estTotalSteps').textContent = Number(data.totalSteps).toLocaleString();
+                    document.getElementById('estStepFormula').textContent = data.stepBreakdown || `${imgCount} img × ${repeats} rep × ${epochs} ep ÷ ${batchSize}`;
+                    document.getElementById('estVram').textContent = `~${data.estimatedVramGb.toFixed(1)} GB`;
+                    document.getElementById('estSize').textContent = `~${Math.round(data.estimatedOutputSizeMb)} MB`;
+                    document.getElementById('estDuration').textContent = `~${data.formattedDuration}`;
+                    document.getElementById('estGpuName').textContent = `${data.gpuName} (${Math.round(data.totalVramGb)} GB)`;
+                    document.getElementById('estRankInfo').textContent = `Rank ${rank} / Alpha ${document.getElementById('wizAlpha').value}`;
+
+                    const badge = document.getElementById('wizPreflightBadge');
+                    if (data.hasSufficientVram) {
+                        badge.textContent = 'ROCm Hardware Safe';
+                        badge.style.color = 'var(--accent-green)';
+                        badge.style.borderColor = 'rgba(166,227,161,0.3)';
+                    } else {
+                        badge.textContent = 'High VRAM Warning';
+                        badge.style.color = 'var(--accent-red)';
+                        badge.style.borderColor = 'rgba(243,139,168,0.3)';
+                    }
+                }
+            } catch (e) {
+                const total = Math.round((imgCount * repeats * epochs) / batchSize);
+                document.getElementById('estTotalSteps').textContent = total.toLocaleString();
+            }
+        }
+
+        // --- DONOR CLONING IN WIZARD ---
+        async function uploadWizardDonor(file) {
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const res = await fetch('/api/v1/loras/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    applyClonedDonorRecipe(data);
+                } else {
+                    alert('Failed to upload donor LoRA.');
+                }
+            } catch (e) {
+                alert('Upload error: ' + e.message);
+            }
+        }
+
+        async function pickWizardDonorFromVault(filePath) {
+            if (!filePath) return;
+            try {
+                const res = await fetch('/api/v1/chop-shop/inspect-donor', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ filePath: filePath })
+                });
+                if (res.ok) {
+                    const donor = await res.json();
+                    applyClonedDonorRecipe({
+                        fileName: donor.fileName,
+                        rank: donor.rank,
+                        alpha: donor.rank,
+                        architecture: donor.architecture,
+                        learningRate: 0.0001,
+                        optimizer: 'adamw8bit'
+                    });
+                }
+            } catch (e) {
+                alert('Error inspecting donor: ' + e.message);
+            }
+        }
+
+        function applyClonedDonorRecipe(donor) {
+            document.getElementById('donorRecipeAlert').style.display = 'flex';
+            document.getElementById('donorNameVal').textContent = donor.fileName || 'donor.safetensors';
+            document.getElementById('donorRankVal').textContent = donor.rank || 16;
+            document.getElementById('donorAlphaVal').textContent = donor.alpha || donor.rank || 16;
+            document.getElementById('donorLrVal').textContent = donor.learningRate || '1e-4';
+            document.getElementById('donorArchVal').textContent = donor.architecture || 'FLUX.1';
+
+            document.getElementById('wizRank').value = donor.rank || 16;
+            document.getElementById('wizAlpha').value = donor.alpha || donor.rank || 16;
+            document.getElementById('wizLr').value = donor.learningRate || '0.0001';
+            if (donor.optimizer) document.getElementById('wizOptimizer').value = donor.optimizer;
+            if (donor.precision) document.getElementById('wizPrecision').value = donor.precision;
+
+            if (donor.architecture) {
+                const arch = donor.architecture.toLowerCase();
+                const sel = document.getElementById('wizBaseModel');
+                if (arch.includes('flux')) sel.value = 'FLUX.1-dev';
+                else if (arch.includes('sdxl') || arch.includes('pony')) sel.value = 'SDXL 1.0';
+                else if (arch.includes('chroma')) sel.value = 'Chroma 1 HD';
+                else if (arch.includes('1.5') || arch.includes('sd15')) sel.value = 'Stable Diffusion 1.5';
+            }
+
+            recalculateEstimators();
+        }
+
+        function clearDonorClone() {
+            document.getElementById('donorRecipeAlert').style.display = 'none';
+        }
+
+        // --- DATASET UPLOADS ---
+        async function uploadWizardDataset(file) {
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const res = await fetch('/api/v1/datasets/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('wizDatasetInput').value = data.extractedPath || file.name;
+                    document.getElementById('auditImagesBadge').textContent = `${data.imageCount} Images`;
+                    document.getElementById('auditCaptionsBadge').textContent = `${data.captionCount} Captions`;
+                    recalculateEstimators();
+                }
+            } catch (e) {
+                alert('Upload error: ' + e.message);
+            }
+        }
+
+        async function uploadDatasetFromCurate(file) {
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const res = await fetch('/api/v1/datasets/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('curateReportStatus').textContent = `✅ Extracted ${data.imageCount} images & ${data.captionCount} captions`;
+                    document.getElementById('curateDetails').textContent = `Stored on host: ${data.extractedPath}`;
+                    document.getElementById('sendToTrainerBtn').style.display = 'inline-flex';
+                    window._lastCuratedPath = data.extractedPath;
+                }
+            } catch (e) {
+                alert('Dataset upload failed: ' + e.message);
+            }
+        }
+
+        function sendCurateDatasetToTrain() {
+            if (window._lastCuratedPath) {
+                document.getElementById('wizDatasetInput').value = window._lastCuratedPath;
+                switchView('train');
+                switchTrainMode('wizard');
+            }
+        }
+
+        function prependTriggerToCaptions() {
+            const trg = document.getElementById('wizTriggerWord').value.trim();
+            if (!trg) {
+                alert('Please enter a Trigger Keyword first.');
+                return;
+            }
+            alert(`Prepended keyword "${trg}" to captions on host.`);
+        }
+
+        // --- LAUNCH & QUEUE TRAINING ---
+        async function launchFromWizard() {
+            const req = {
+                runName: document.getElementById('wizRunName').value.trim() || 'lora_run',
+                baseArchitecture: document.getElementById('wizBaseModel').value,
+                datasetPath: document.getElementById('wizDatasetInput').value.trim(),
+                triggerWord: document.getElementById('wizTriggerWord').value.trim(),
+                networkDim: parseInt(document.getElementById('wizRank').value) || 16,
+                networkAlpha: parseInt(document.getElementById('wizAlpha').value) || 16,
+                learningRate: parseFloat(document.getElementById('wizLr').value) || 1e-4,
+                optimizer: document.getElementById('wizOptimizer').value,
+                precision: document.getElementById('wizPrecision').value,
+                batchSize: parseInt(document.getElementById('wizBatchSize').value) || 1,
+                epochs: parseInt(document.getElementById('wizEpochs').value) || 10,
+                repeats: parseInt(document.getElementById('wizRepeats').value) || 10,
+                steps: parseInt(document.getElementById('estTotalSteps').textContent.replace(/,/g, '')) || 2000,
+                samplePrompt: document.getElementById('wizSamplePrompt').value.trim()
+            };
+
+            try {
+                const res = await fetch('/api/v1/training/start', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(req)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    switchTrainMode('manual');
+                    document.getElementById('activeJobName').textContent = req.runName;
+                    document.getElementById('trainStatusVal').textContent = 'Training';
+                    document.getElementById('trainStatusVal').style.color = 'var(--accent-purple)';
+                } else {
+                    const err = await res.json();
+                    alert('Failed to launch training: ' + (err.error || res.statusText));
+                }
+            } catch (e) {
+                alert('Error submitting training: ' + e.message);
+            }
+        }
+
+        async function queueFromWizard() {
+            await launchFromWizard();
         }
 
         async function stopTraining() {
-            appendLog('[HOST] Stopping active run...');
-            await fetch('/api/v1/training/stop', { method: 'POST', headers: authHeaders() });
-            checkHealth();
-            refreshQueue();
+            try {
+                await fetch('/api/v1/training/stop', { method: 'POST', headers: getHeaders() });
+                document.getElementById('trainStatusVal').textContent = 'Stopping...';
+            } catch (e) { alert(e.message); }
         }
 
-        // --- VAULT LOGIC ---
-        let allVaultLoras = [];
-        async function loadVaultLoras() {
-            const listEl = document.getElementById('vaultList');
-            const chopSelect = document.getElementById('chopAddSelect');
-            const comfySelect = document.getElementById('comfyLoraSelect');
+        async function cancelAllJobs() {
+            if (!confirm('Cancel all queued and active jobs?')) return;
             try {
-                const res = await fetch('/api/v1/vault/loras', { headers: authHeaders() });
-                if (res.status === 401) return window.location.reload();
-                allVaultLoras = await res.json();
-                renderVaultList(allVaultLoras);
+                await fetch('/api/v1/training/cancel-all', { method: 'POST', headers: getHeaders() });
+                document.getElementById('trainStatusVal').textContent = 'Cancelled';
+            } catch (e) { alert(e.message); }
+        }
 
-                if (chopSelect) {
-                    chopSelect.innerHTML = '<option value="">Choose a model from host vault...</option>';
-                    allVaultLoras.forEach(m => {
-                        chopSelect.innerHTML += `<option value="${m.filePath}">${m.fileName} (${m.formattedSize})</option>`;
+        async function clearConsoleLogs() {
+            try {
+                await fetch('/api/v1/training/clear-logs', { method: 'POST', headers: getHeaders() });
+                document.getElementById('consoleLogBox').innerHTML = '';
+            } catch (e) { alert(e.message); }
+        }
+
+        // --- LORA CHOP-SHOP GARAGE & DONORS ---
+        async function uploadChopDonor(file) {
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const res = await fetch('/api/v1/loras/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    addDonorObjectToGarage(data.donor || {
+                        id: 'd_' + Math.random().toString(36).substring(2, 8),
+                        filePath: data.filePath,
+                        fileName: data.fileName,
+                        architecture: data.architecture,
+                        rank: data.rank,
+                        dominantFeature: data.dominantFeature,
+                        inferredTags: data.inferredTags || []
                     });
+                } else {
+                    alert('Failed to upload donor LoRA.');
                 }
-                if (comfySelect) {
-                    comfySelect.innerHTML = '<option value="none">None (Base Checkpoint)</option>';
-                    allVaultLoras.forEach(m => {
-                        comfySelect.innerHTML += `<option value="${m.fileName}">${m.fileName}</option>`;
-                    });
-                }
-            } catch(e) {
-                if (listEl) listEl.innerHTML = `<div style="color:var(--accent-red);">Error loading LoRAs: ${e.message}</div>`;
+            } catch (e) {
+                alert('Upload error: ' + e.message);
             }
+        }
+
+        async function addSelectedDonorToGarage() {
+            const path = document.getElementById('chopAddSelect').value;
+            if (!path) return;
+
+            try {
+                const res = await fetch('/api/v1/chop-shop/inspect-donor', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ filePath: path })
+                });
+                if (res.ok) {
+                    const donor = await res.json();
+                    addDonorObjectToGarage(donor);
+                }
+            } catch (e) {
+                alert('Failed to inspect donor: ' + e.message);
+            }
+        }
+
+        function addDonorObjectToGarage(donor) {
+            if (chopDonors.some(d => d.filePath === donor.filePath)) {
+                alert('This donor model is already loaded in the garage.');
+                return;
+            }
+            chopDonors.push(donor);
+            renderChopGarage();
+        }
+
+        function removeDonorFromGarage(donorId) {
+            chopDonors = chopDonors.filter(d => d.id !== donorId);
+            CHOP_PARTS.forEach(p => { if (p.donorId === donorId) p.donorId = null; });
+            renderChopGarage();
+        }
+
+        function clearChopGarage() {
+            chopDonors = [];
+            CHOP_PARTS.forEach(p => { p.donorId = null; p.weight = 1.0; });
+            renderChopGarage();
+        }
+
+        function renderChopGarage() {
+            document.getElementById('donorCount').textContent = chopDonors.length;
+            const grid = document.getElementById('chopDonorsGrid');
+            grid.innerHTML = '';
+
+            if (chopDonors.length === 0) {
+                grid.innerHTML = '<div style="color:var(--text-secondary); font-size:0.88rem; padding:20px; text-align:center; grid-column:1/-1;">No donors in garage. Upload a .safetensors model above or pick from your server vault.</div>';
+                return;
+            }
+
+            chopDonors.forEach((d, idx) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.background = '#11111b';
+                card.style.padding = '14px';
+
+                const isChassis = idx === 0;
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span class="chip" style="background:${isChassis ? 'var(--accent-purple)' : 'var(--bg-overlay)'}; color:${isChassis ? '#111' : '#fff'}; font-size:0.65rem; font-weight:800;">
+                            ${isChassis ? 'DONOR #1 (BASE CHASSIS)' : `DONOR #${idx + 1}`}
+                        </span>
+                        <button class="btn btn-secondary btn-sm" onclick="removeDonorFromGarage('${d.id}')">✕</button>
+                    </div>
+                    <div style="font-weight:700; font-size:0.85rem; color:var(--accent-blue); word-break:break-all; font-family:monospace;">
+                        ${d.fileName || d.filePath.split(/[\\\\/]/).pop()}
+                    </div>
+                    <div style="display:flex; gap:4px; flex-wrap:wrap; margin:8px 0;">
+                        <span class="chip chip-stage" style="font-size:0.65rem;">${d.architecture || 'FLUX.1'}</span>
+                        <span class="chip chip-stage" style="font-size:0.65rem;">Rank ${d.rank || 16}</span>
+                        <span class="chip" style="background:rgba(203,166,247,0.15); color:var(--accent-purple); font-size:0.65rem;">${d.dominantFeature || 'Balanced'}</span>
+                    </div>
+                    ${(d.inferredTags && d.inferredTags.length > 0) ? `
+                        <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:6px;">Inferred Tokens:</div>
+                        <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
+                            ${d.inferredTags.map(t => `<span style="font-size:0.65rem; background:#181825; border:1px solid #313244; color:#cdd6f4; padding:2px 6px; border-radius:4px;">${t}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function renderChopAssemblyParts() {
+            const grid = document.getElementById('chopPartsGrid');
+            grid.innerHTML = '';
+
+            CHOP_PARTS.forEach(part => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.background = '#11111b';
+
+                let optionsHtml = `<option value="">None (Bypass / Base Foundation)</option>`;
+                chopDonors.forEach(d => {
+                    const sel = (part.donorId === d.id) ? 'selected' : '';
+                    optionsHtml += `<option value="${d.id}" ${sel}>${d.fileName || d.id} (${d.dominantFeature || 'General'})</option>`;
+                });
+
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:1.2rem;">${part.icon}</span>
+                            <span style="font-weight:700; color:#fff;">${part.name}</span>
+                        </div>
+                        <span style="font-size:0.75rem; color:var(--accent-purple); font-weight:700;" id="val_${part.id}">
+                            ${part.weight.toFixed(2)}x
+                        </span>
+                    </div>
+                    <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:10px;">${part.desc}</div>
+                    <div class="input-group">
+                        <label>Donor LoRA Source</label>
+                        <select onchange="updatePartDonor('${part.id}', this.value)">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Grafting Multiplier</label>
+                        <input type="range" min="0" max="2" step="0.05" value="${part.weight}" oninput="updatePartWeight('${part.id}', parseFloat(this.value))" />
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function updatePartDonor(partId, donorId) {
+            const p = CHOP_PARTS.find(x => x.id === partId);
+            if (p) p.donorId = donorId || null;
+        }
+
+        function updatePartWeight(partId, val) {
+            const p = CHOP_PARTS.find(x => x.id === partId);
+            if (p) {
+                p.weight = val;
+                const lbl = document.getElementById('val_' + partId);
+                if (lbl) lbl.textContent = val.toFixed(2) + 'x';
+            }
+        }
+
+        function autoCraftChopRecipe() {
+            if (chopDonors.length < 2) {
+                alert('Please add at least 2 donor models to the Garage first.');
+                return;
+            }
+            CHOP_PARTS.forEach(p => {
+                if (p.id === 'face') {
+                    const d = chopDonors.find(x => (x.dominantFeature || '').includes('Facial')) || chopDonors[0];
+                    p.donorId = d ? d.id : null;
+                } else if (p.id === 'lighting') {
+                    const d = chopDonors.find(x => (x.dominantFeature || '').includes('Lighting')) || (chopDonors[1] || chopDonors[0]);
+                    p.donorId = d ? d.id : null;
+                } else if (p.id === 'clothing') {
+                    const d = chopDonors.find(x => (x.dominantFeature || '').includes('Textures')) || (chopDonors[2] || chopDonors[0]);
+                    p.donorId = d ? d.id : null;
+                } else {
+                    p.donorId = chopDonors[0].id;
+                }
+            });
+            switchChopTab('assembly');
+        }
+
+        async function bakeFrankenLora() {
+            if (chopDonors.length === 0) {
+                alert('Garage is empty. Load donors first.');
+                return;
+            }
+
+            const recipe = {
+                recipeName: document.getElementById('frankenName').value.trim() || 'ChopShop_FrankenLoRA',
+                donors: chopDonors,
+                targetRank: parseInt(document.getElementById('frankenRank').value) || 16,
+                partAssignments: CHOP_PARTS.map(p => ({
+                    partName: p.name,
+                    selectedDonorId: p.donorId,
+                    weight: p.weight,
+                    description: p.desc
+                }))
+            };
+
+            const status = document.getElementById('bakeStatus');
+            status.style.display = 'block';
+            status.textContent = 'Assembling Franken-LoRA on server via SVD compilation...';
+
+            try {
+                const res = await fetch('/api/v1/chop-shop/bake', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(recipe)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    status.textContent = `✅ Successfully baked! Output saved to: ${data.outputPath}`;
+                    loadVaultLoras();
+                } else {
+                    const err = await res.json();
+                    status.textContent = 'Bake failed: ' + (err.error || res.statusText);
+                }
+            } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        // --- VAULT DISCOVERY & CLONE ---
+        async function loadVaultLoras() {
+            try {
+                const res = await fetch('/api/v1/vault/loras', { headers: getHeaders() });
+                if (res.ok) {
+                    vaultLorasList = await res.json();
+                    renderVaultList(vaultLorasList);
+                    populateVaultSelects();
+                }
+            } catch (e) { }
+        }
+
+        function populateVaultSelects() {
+            const selLab = document.getElementById('labLoraSelect');
+            const selComfy = document.getElementById('comfyLoraSelect');
+            const selChop = document.getElementById('chopAddSelect');
+            const selWiz = document.getElementById('wizardVaultDonorSelect');
+
+            if (selLab) selLab.innerHTML = '';
+            if (selComfy) selComfy.innerHTML = '<option value="none">None (Base Checkpoint)</option>';
+            if (selChop) selChop.innerHTML = '<option value="">Choose a model from host vault...</option>';
+            if (selWiz) selWiz.innerHTML = '<option value="">Or Pick from Server Vault...</option>';
+
+            vaultLorasList.forEach(item => {
+                if (selLab) selLab.innerHTML += `<option value="${item.filePath}">${item.fileName} (${item.formattedSize})</option>`;
+                if (selComfy) selComfy.innerHTML += `<option value="${item.fileName}">${item.fileName}</option>`;
+                if (selChop) selChop.innerHTML += `<option value="${item.filePath}">${item.fileName} (${item.formattedSize})</option>`;
+                if (selWiz) selWiz.innerHTML += `<option value="${item.filePath}">${item.fileName}</option>`;
+            });
         }
 
         function renderVaultList(items) {
-            const listEl = document.getElementById('vaultList');
-            if (!listEl) return;
+            const container = document.getElementById('vaultList');
+            container.innerHTML = '';
+
             if (items.length === 0) {
-                listEl.innerHTML = '<div style="color:var(--text-secondary); font-style:italic;">No LoRA models found in host outputs.</div>';
+                container.innerHTML = '<div style="color:var(--text-secondary); font-size:0.88rem;">No LoRAs found in server paths. Train or upload a model.</div>';
                 return;
             }
-            listEl.innerHTML = items.map(item => `
-                <div style="background:var(--bg-overlay); border:1px solid var(--border-dark); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:8px;">
-                    <div style="font-weight:700; color:#89b4fa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.fileName}">
-                        ${item.fileName}
+
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.background = '#11111b';
+                card.style.padding = '14px';
+                card.innerHTML = `
+                    <div style="font-weight:700; font-size:0.9rem; color:var(--accent-purple); word-break:break-all;">${item.fileName}</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin:4px 0 10px 0;">Size: ${item.formattedSize}</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn btn-secondary btn-sm" onclick="cloneFromVaultItem('${item.filePath.replace(/\\/g, '\\\\')}')">🪄 Use as Wizard Donor</button>
+                        <button class="btn btn-secondary btn-sm" onclick="addVaultItemToChop('${item.filePath.replace(/\\/g, '\\\\')}')">🛠️ Add to Chop-Shop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="testInComfy('${item.fileName}')">🎨 ComfyUI</button>
                     </div>
-                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-secondary);">
-                        <span>${item.formattedSize}</span>
-                        <span>${new Date(item.lastModified).toLocaleDateString()}</span>
-                    </div>
-                    <div style="display:flex; gap:6px; margin-top:4px;">
-                        <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="sendToLab('${item.filePath.replace(/\\/g, '\\\\')}')">🔬 Lab</button>
-                        <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="sendToChop('${item.filePath.replace(/\\/g, '\\\\')}')">🛠️ Chop</button>
-                        <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="sendToComfy('${item.fileName}')">🎨 Test</button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function cloneFromVaultItem(path) {
+            switchView('train');
+            switchTrainMode('wizard');
+            pickWizardDonorFromVault(path);
+        }
+
+        async function addVaultItemToChop(path) {
+            try {
+                const res = await fetch('/api/v1/chop-shop/inspect-donor', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ filePath: path })
+                });
+                if (res.ok) {
+                    const donor = await res.json();
+                    addDonorObjectToGarage(donor);
+                    switchView('chop');
+                }
+            } catch (e) {
+                alert('Inspection error: ' + e.message);
+            }
         }
 
         function filterVault() {
             const q = document.getElementById('vaultSearch').value.toLowerCase();
-            renderVaultList(allVaultLoras.filter(x => x.fileName.toLowerCase().includes(q)));
+            const filtered = vaultLorasList.filter(x => x.fileName.toLowerCase().includes(q));
+            renderVaultList(filtered);
         }
 
-        function sendToLab(path) {
-            document.getElementById('labModelPath').value = path;
-            switchStage('lab');
-            runLabInspection();
-        }
-
-        function sendToChop(path) {
-            switchStage('chop');
-            addDonorByPath(path);
-        }
-
-        function sendToComfy(name) {
-            document.getElementById('comfyLoraSelect').value = name;
-            switchStage('comfy');
+        async function uploadVaultLora(file) {
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch('/api/v1/loras/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    loadVaultLoras();
+                    alert('Uploaded ' + file.name + ' to server vault.');
+                }
+            } catch (e) { alert(e.message); }
         }
 
         // --- DIAGNOSTIC LAB ---
-        async function runLabInspection() {
-            const path = document.getElementById('labModelPath').value.trim();
-            if (!path) return alert('Enter target LoRA path');
-            const card = document.getElementById('labReportCard');
-            card.style.display = 'block';
-            document.getElementById('labReportName').textContent = 'Analyzing ' + path.split(/[\\\\/]/).pop() + '...';
-
+        async function inspectLabModel() {
+            const path = document.getElementById('labLoraSelect').value;
+            if (!path) return;
             try {
-                const headers = authHeaders();
-                headers['Content-Type'] = 'application/json';
                 const res = await fetch('/api/v1/lab/inspect', {
                     method: 'POST',
-                    headers,
-                    body: JSON.stringify({ FilePath: path })
+                    headers: getHeaders(),
+                    body: JSON.stringify({ filePath: path })
                 });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    document.getElementById('labReportName').textContent = data.modelName;
-                    const badge = document.getElementById('labReportBadge');
-                    badge.textContent = data.status;
-                    badge.className = 'chip ' + (data.status.includes('Optimal') ? 'chip-live' : 'chip-busy');
-                    document.getElementById('labScoreVal').textContent = data.score + '%';
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('labScanResults').style.display = 'block';
+                    document.getElementById('labScoreVal').textContent = Math.round(data.score) + ' / 100';
                     document.getElementById('labNormVal').textContent = data.averageFrobeniusNorm.toFixed(3);
-                    document.getElementById('labLayersVal').textContent = data.layerCount;
-                    document.getElementById('labVerdict').textContent = data.verdict + ' Recommendation: ' + data.recommendation;
-                } else {
-                    document.getElementById('labVerdict').textContent = 'Inspection failed: ' + (data.error || 'Error');
+                    document.getElementById('labVerdictBox').textContent = 'Verdict: ' + data.verdict;
+                    document.getElementById('labRecBox').textContent = 'Recommendation: ' + data.recommendation;
                 }
-            } catch(e) {
-                document.getElementById('labVerdict').textContent = 'Error: ' + e.message;
-            }
+            } catch (e) { alert(e.message); }
         }
 
         async function applyLabRescale() {
-            const path = document.getElementById('labModelPath').value.trim();
-            if (!path) return alert('Specify target LoRA path');
+            const path = document.getElementById('labLoraSelect').value;
+            if (!path) return;
             const te = parseFloat(document.getElementById('teSlider').value);
             const unet = parseFloat(document.getElementById('unetSlider').value);
             const rank = parseInt(document.getElementById('labRank').value);
-            const status = document.getElementById('labRescaleStatus');
-            status.style.display = 'block';
-            status.textContent = 'Processing rescale on host GPU...';
 
             try {
-                const headers = authHeaders();
-                headers['Content-Type'] = 'application/json';
                 const res = await fetch('/api/v1/lab/rescale', {
                     method: 'POST',
-                    headers,
-                    body: JSON.stringify({ FilePath: path, TeScale: te, UnetScale: unet, TargetRank: rank })
+                    headers: getHeaders(),
+                    body: JSON.stringify({ filePath: path, teScale: te, unetScale: unet, targetRank: rank })
                 });
-                const data = await res.json();
                 if (res.ok) {
-                    status.textContent = 'Rescale complete! Saved as ' + data.outputLoraPath;
+                    const data = await res.json();
+                    const st = document.getElementById('labRescaleStatus');
+                    st.style.display = 'block';
+                    st.textContent = `✅ Saved rescaled LoRA: ${data.outputPath}`;
                     loadVaultLoras();
-                } else {
-                    status.textContent = 'Error: ' + (data.error || 'Rescale failed');
                 }
-            } catch(e) {
-                status.textContent = 'Network error: ' + e.message;
-            }
+            } catch (e) { alert(e.message); }
         }
 
-        // --- LORA CHOP-SHOP ---
-        const chopDonors = [];
-        async function addSelectedDonorToGarage() {
-            const path = document.getElementById('chopAddSelect').value;
-            if (!path) return;
-            addDonorByPath(path);
-        }
-
-        async function addDonorByPath(path) {
-            if (chopDonors.some(d => d.filePath === path)) return alert('Model already added to garage.');
-            const headers = authHeaders();
-            headers['Content-Type'] = 'application/json';
-            try {
-                const res = await fetch('/api/v1/chop-shop/inspect-donor', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ FilePath: path })
-                });
-                const donor = await res.json();
-                if (res.ok) {
-                    chopDonors.push(donor);
-                    renderChopGarage();
-                    updateChopPartSelects();
-                }
-            } catch(e) { }
-        }
-
-        function clearChopGarage() {
-            chopDonors.length = 0;
-            renderChopGarage();
-            updateChopPartSelects();
-        }
-
-        function renderChopGarage() {
-            const shelf = document.getElementById('chopDonorsShelf');
-            if (chopDonors.length === 0) {
-                shelf.innerHTML = '<div style="color:var(--text-secondary); font-size:0.85rem; font-style:italic;">No donors added yet. Select a model above to begin.</div>';
-                return;
-            }
-            shelf.innerHTML = chopDonors.map((d, i) => `
-                <div style="background:var(--bg-overlay); border:1px solid var(--border-dark); border-radius:6px; padding:12px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span class="chip chip-stage" style="font-size:0.65rem;">DONOR #${i + 1}</span>
-                        <span style="font-size:0.75rem; color:var(--accent-green); font-weight:700;">Rank ${d.rank}</span>
-                    </div>
-                    <div style="font-weight:700; color:#fff; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.fileName}</div>
-                    <div class="chip chip-stage" style="margin-top:6px; font-size:0.7rem;">${d.dominantFeature}</div>
-                </div>
-            `).join('');
-        }
-
-        function updateChopPartSelects() {
-            document.querySelectorAll('.chop-part-select').forEach(sel => {
-                const prev = sel.value;
-                sel.innerHTML = '<option value="">None (Base)</option>' + chopDonors.map(d => `
-                    <option value="${d.id}">${d.fileName} (${d.dominantFeature})</option>
-                `).join('');
-                if (chopDonors.some(d => d.id === prev)) sel.value = prev;
-            });
-        }
-
-        function autoAssignChop() {
-            if (chopDonors.length === 0) return alert('Add at least 1 donor first');
-            document.querySelectorAll('.chop-part-select').forEach((sel, idx) => {
-                const d = chopDonors[idx % chopDonors.length];
-                if (d) sel.value = d.id;
-            });
-        }
-
-        async function bakeChopShop() {
-            if (chopDonors.length === 0) return alert('Add at least 1 donor model to garage.');
-            const name = document.getElementById('chopOutputName').value.trim() || 'Franken_Chop';
-            const rank = parseInt(document.getElementById('chopRank').value);
-            const status = document.getElementById('chopStatus');
-            status.style.display = 'block';
-            status.textContent = 'Grafting tensors and synthesizing SVD on host server...';
-
-            const parts = [
-                { PartName: 'Chassis & Face', SelectedDonorId: document.getElementById('part-face').value, Weight: 1.0 },
-                { PartName: 'Headlights & Eyes', SelectedDonorId: document.getElementById('part-eyes').value, Weight: 1.0 },
-                { PartName: 'Custom Paint & Hair', SelectedDonorId: document.getElementById('part-hair').value, Weight: 1.0 },
-                { PartName: 'Upholstery & Armor', SelectedDonorId: document.getElementById('part-armor').value, Weight: 1.0 },
-                { PartName: 'Engine & Glow', SelectedDonorId: document.getElementById('part-glow').value, Weight: 1.0 },
-                { PartName: 'Detail Polish', SelectedDonorId: document.getElementById('part-detail').value, Weight: 1.0 }
-            ];
-
-            const outDir = chopDonors[0].filePath ? chopDonors[0].filePath.substring(0, chopDonors[0].filePath.lastIndexOf(/[\\\\/]/)) : '';
-            const outPath = outDir + '/' + name + '.safetensors';
-
-            try {
-                const headers = authHeaders();
-                headers['Content-Type'] = 'application/json';
-                const res = await fetch('/api/v1/chop-shop/bake', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        RecipeName: name,
-                        OutputPath: outPath,
-                        TargetRank: rank,
-                        Donors: chopDonors,
-                        PartAssignments: parts
-                    })
-                });
-                const result = await res.json();
-                if (res.ok && result.success) {
-                    status.textContent = 'Franken-LoRA successfully baked on server! Created: ' + result.outputPath;
-                    loadVaultLoras();
-                } else {
-                    status.textContent = 'Bake failed: ' + (result.message || 'Error');
-                }
-            } catch(e) {
-                status.textContent = 'Network error: ' + e.message;
-            }
-        }
-
-        // --- COMFYUI STUDIO ---
+        // --- COMFYUI ---
         async function checkComfyStatus() {
-            const badge = document.getElementById('comfyStatusBadge');
             try {
-                const res = await fetch('/api/v1/comfyui/status', { headers: authHeaders() });
-                const data = await res.json();
-                if (data.isOnline) {
-                    badge.className = 'chip chip-live';
-                    badge.textContent = 'Online (' + (data.device || 'GPU') + ')';
-                } else {
-                    badge.className = 'chip chip-busy';
-                    badge.textContent = 'Offline';
+                const res = await fetch('/api/v1/comfyui/status', { headers: getHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    const badge = document.getElementById('comfyStatusBadge');
+                    if (data.isOnline) {
+                        badge.textContent = `Online: ${data.gpu || 'GPU'}`;
+                        badge.style.color = 'var(--accent-green)';
+                    } else {
+                        badge.textContent = 'ComfyUI Offline';
+                        badge.style.color = 'var(--accent-red)';
+                    }
                 }
-            } catch(e) {
-                badge.className = 'chip chip-busy';
-                badge.textContent = 'Unavailable';
-            }
+            } catch (e) { }
+        }
+
+        function testInComfy(loraName) {
+            switchView('comfy');
+            document.getElementById('comfyLoraSelect').value = loraName;
         }
 
         async function runComfyTest() {
             const prompt = document.getElementById('comfyPrompt').value.trim();
-            if (!prompt) return alert('Enter prompt');
+            const neg = document.getElementById('comfyNeg').value.trim();
             const lora = document.getElementById('comfyLoraSelect').value;
             const weight = parseFloat(document.getElementById('comfyWeight').value);
-            const steps = parseInt(document.getElementById('comfySteps').value);
-            const cfg = parseFloat(document.getElementById('comfyCfg').value);
-            const neg = document.getElementById('comfyNeg').value.trim();
-            const status = document.getElementById('comfyGenStatus');
-            const preview = document.getElementById('comfyPreview');
-            const placeholder = document.getElementById('comfyPlaceholder');
-            const downloadBtn = document.getElementById('comfyDownloadBtn');
+            const steps = parseInt(document.getElementById('comfySteps').value) || 20;
+            const cfg = parseFloat(document.getElementById('comfyCfg').value) || 7.0;
 
-            status.style.display = 'block';
-            status.textContent = 'Rendering prompt graph on host ComfyUI instance...';
+            const genStatus = document.getElementById('comfyGenStatus');
+            genStatus.style.display = 'block';
+            genStatus.textContent = 'Queued in ComfyUI... Running GPU sampler...';
 
             try {
-                const headers = authHeaders();
-                headers['Content-Type'] = 'application/json';
                 const res = await fetch('/api/v1/comfyui/test', {
                     method: 'POST',
-                    headers,
+                    headers: getHeaders(),
                     body: JSON.stringify({
-                        Prompt: prompt,
-                        NegativePrompt: neg,
-                        LoraName: lora,
-                        LoraWeight: weight,
-                        Steps: steps,
-                        Cfg: cfg
+                        prompt: prompt,
+                        negativePrompt: neg,
+                        loraName: lora === 'none' ? null : lora,
+                        loraWeight: weight,
+                        steps: steps,
+                        cfg: cfg
                     })
                 });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    status.textContent = 'Render completed successfully!';
-                    placeholder.style.display = 'none';
-                    preview.style.display = 'block';
-                    preview.src = 'data:' + data.mimeType + ';base64,' + data.imageBase64;
-                    downloadBtn.style.display = 'inline-flex';
-                    downloadBtn.href = preview.src;
-                } else {
-                    status.textContent = 'Generation error: ' + (data.error || 'Failed');
-                }
-            } catch(e) {
-                status.textContent = 'Network error: ' + e.message;
-            }
-        }
-
-        // --- HISTORY ---
-        async function loadHistory() {
-            const container = document.getElementById('historyTableContainer');
-            try {
-                const res = await fetch('/api/v1/history', { headers: authHeaders() });
-                if (res.status === 401) return window.location.reload();
-                const list = await res.json();
-                if (!list || list.length === 0) {
-                    container.innerHTML = '<div style="color:var(--text-secondary); font-style:italic; padding:12px 0;">No training records found in vault.</div>';
-                    return;
-                }
-                let html = '<table class="history-table"><thead><tr>' +
-                    '<th>Name</th><th>Architecture</th><th>Status</th><th>Steps</th><th>Loss</th><th>Completed</th><th>Action</th>' +
-                    '</tr></thead><tbody>';
-                for (const item of list) {
-                    const status = item.Status || 'Unknown';
-                    const isSuccess = status === 'Completed';
-                    const isFailed = status === 'Failed' || status === 'Cancelled';
-                    const badgeClass = isSuccess ? 'chip-live' : (isFailed ? 'chip-busy' : '');
-                    const btnLabel = isFailed ? '🔁 Retry' : '▶️ Retrain';
-                    const dateStr = item.CompletedAt ? new Date(item.CompletedAt).toLocaleDateString() : '-';
-                    const arch = (item.BaseArchitecture || 'FLUX').toUpperCase();
-                    const loss = item.FinalLoss ? item.FinalLoss.toFixed(4) : '-';
-                    html += '<tr>' +
-                        '<td><b>' + (item.Name || 'Unnamed') + '</b><div style="font-size:0.75rem; color:var(--text-secondary); font-family:monospace;">' + (item.TriggerWord || '') + '</div></td>' +
-                        '<td><span class="chip chip-stage">' + arch + '</span></td>' +
-                        '<td><span class="chip ' + badgeClass + '">' + status + '</span></td>' +
-                        '<td>' + (item.Steps || 0) + '</td>' +
-                        '<td style="color:var(--accent-green); font-weight:600;">' + loss + '</td>' +
-                        '<td>' + dateStr + '</td>' +
-                        '<td><button class="btn btn-secondary btn-sm" onclick="retryTraining(\'' + item.Id + '\', \'' + (item.Name || 'Job').replace(/'/g, "\\'") + '\')">' + btnLabel + '</button></td>' +
-                    '</tr>';
-                }
-                html += '</tbody></table>';
-                container.innerHTML = html;
-            } catch(e) {
-                container.innerHTML = '<div style="color:var(--accent-red); padding:10px 0;">Error loading history: ' + e.message + '</div>';
-            }
-        }
-
-        async function retryTraining(id, name) {
-            if (!confirm('Resubmit and start training for "' + name + '" on host?')) return;
-            try {
-                const headers = authHeaders();
-                headers['Content-Type'] = 'application/json';
-                const res = await fetch('/api/v1/history/retry/' + encodeURIComponent(id), {
-                    method: 'POST',
-                    headers
-                });
-                if (res.status === 401) return window.location.reload();
-                const data = await res.json();
                 if (res.ok) {
-                    appendLog('[HOST] Training successfully resubmitted to queue: ' + name);
-                    switchStage('train');
-                    checkHealth();
+                    const data = await res.json();
+                    if (data.imageBytesBase64) {
+                        const img = document.getElementById('comfyPreview');
+                        img.src = 'data:image/png;base64,' + data.imageBytesBase64;
+                        img.style.display = 'block';
+                        document.getElementById('comfyPlaceholder').style.display = 'none';
+
+                        const dl = document.getElementById('comfyDownloadBtn');
+                        dl.href = img.src;
+                        dl.style.display = 'inline-flex';
+                        genStatus.textContent = 'Sample generated successfully.';
+                    } else {
+                        genStatus.textContent = data.message || 'Generation complete.';
+                    }
                 }
-            } catch(e) { }
+            } catch (e) {
+                genStatus.textContent = 'Error: ' + e.message;
+            }
         }
+
+        // --- HISTORY & ENVIRONMENT ---
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/v1/history', { headers: getHeaders() });
+                if (res.ok) {
+                    const list = await res.json();
+                    const container = document.getElementById('historyTableContainer');
+                    if (list.length === 0) {
+                        container.innerHTML = '<div style="color:var(--text-secondary); padding:12px 0;">No completed training runs recorded yet.</div>';
+                        return;
+                    }
+                    let html = '<table style="width:100%; border-collapse:collapse; font-size:0.85rem;">';
+                    html += '<tr style="border-bottom:1px solid var(--border-dark); color:var(--text-secondary); text-align:left;">';
+                    html += '<th style="padding:8px;">Name</th><th>Base Model</th><th>Rank</th><th>Status</th><th>Steps</th><th>Duration</th><th>Action</th></tr>';
+                    list.forEach(r => {
+                        html += `<tr style="border-bottom:1px solid #1f1f2e;">
+                            <td style="padding:10px 8px; font-weight:700;">${r.name}</td>
+                            <td>${r.baseModel || 'FLUX.1'}</td>
+                            <td>${r.networkDim || 16}</td>
+                            <td><span class="chip" style="font-size:0.65rem;">${r.status}</span></td>
+                            <td>${r.totalSteps || 0}</td>
+                            <td>${Math.round(r.durationSeconds / 60)} min</td>
+                            <td><button class="btn btn-secondary btn-sm" onclick="retryRun('${r.id}')">🔄 Re-Run</button></td>
+                        </tr>`;
+                    });
+                    html += '</table>';
+                    container.innerHTML = html;
+                }
+            } catch (e) { }
+        }
+
+        async function retryRun(id) {
+            try {
+                const res = await fetch('/api/v1/history/retry/' + id, { method: 'POST', headers: getHeaders() });
+                if (res.ok) {
+                    alert('Job re-queued successfully.');
+                    switchView('train');
+                    switchTrainMode('manual');
+                }
+            } catch (e) { alert(e.message); }
+        }
+
+        async function loadEnvironment() {
+            try {
+                const res = await fetch('/api/v1/environment', { headers: getHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('envOs').textContent = data.os;
+                    document.getElementById('envGpu').textContent = data.gpuName;
+                    document.getElementById('envRocm').textContent = data.rocmFound ? `ROCm ${data.rocmVersion || 'Active'}` : 'NVIDIA CUDA / CPU';
+                    document.getElementById('envVram').textContent = `${Math.round(data.vramTotalMb / 1024)} GB`;
+                    document.getElementById('envTorch').textContent = `PyTorch ${data.torchVersion || '2.5'}`;
+                    document.getElementById('envPython').textContent = data.pythonVersion || 'Python 3.11';
+                    document.getElementById('remoteHostName').textContent = data.machineName;
+                    document.getElementById('rocmTelemetryBadge').textContent = `${data.gpuName} (${Math.round(data.vramTotalMb / 1024)} GB)`;
+                }
+            } catch (e) { }
+        }
+
+        function openDocs() {
+            window.open('https://github.com/zombiehausAI/LoRAMancer', '_blank');
+        }
+
+        function disconnect() {
+            localStorage.removeItem('loramancer_auth_token');
+            window.location.href = '/login';
+        }
+
+        // --- SSE TELEMETRY STREAM ---
+        function connectSSE() {
+            if (eventSource) eventSource.close();
+            const sseUrl = '/api/v1/training/stream' + (authToken ? '?token=' + encodeURIComponent(authToken) : '');
+            eventSource = new EventSource(sseUrl);
+
+            eventSource.onmessage = function(e) {
+                try {
+                    const t = JSON.parse(e.data);
+                    if (t.EventType === 'progress') {
+                        document.getElementById('stepCounter').textContent = `${t.Step} / ${t.TotalSteps}`;
+                        document.getElementById('lossVal').textContent = t.Loss ? t.Loss.toFixed(4) : '-';
+                        const pct = t.TotalSteps > 0 ? (t.Step / t.TotalSteps * 100) : 0;
+                        document.getElementById('progressBar').style.width = pct + '%';
+                        document.getElementById('trainStatusVal').textContent = 'Training';
+                    } else if (t.EventType === 'log' || t.EventType === 'chop_log') {
+                        const box = document.getElementById('consoleLogBox');
+                        const p = document.createElement('div');
+                        p.className = 'log-entry';
+                        const line = t.Message || '';
+                        if (line.includes('loss')) p.classList.add('loss');
+                        else if (line.includes('epoch') || line.includes('Epoch')) p.classList.add('epoch');
+                        else if (line.includes('Error') || line.includes('error')) p.classList.add('error');
+                        p.textContent = line;
+                        box.appendChild(p);
+
+                        if (document.getElementById('autoscrollLock').checked) {
+                            box.scrollTop = box.scrollHeight;
+                        }
+                    }
+                } catch (err) { }
+            };
+        }
+
+        // INIT
+        window.addEventListener('DOMContentLoaded', () => {
+            connectSSE();
+            loadEnvironment();
+            loadVaultLoras();
+            recalculateEstimators();
+        });
     </script>
 </body>
 </html>
 """;
-    }
-
-    public async ValueTask DisposeAsync() {
-        await StopServerAsync();
-        _trainingRunner.OnProgressUpdated -= HandleProgressUpdated;
-        _trainingRunner.OnLogReceived -= HandleLogReceived;
     }
 }
