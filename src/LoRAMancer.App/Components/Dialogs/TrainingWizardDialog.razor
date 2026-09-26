@@ -6,116 +6,150 @@
 @inject IDialogService DialogService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
+@inject ThemeService ThemeManager
 
-<MudDialog Style="background-color: #181825; border: 1px solid #313244; max-width: 960px; width: 100%;">
+<MudDialog Style="background: linear-gradient(180deg, #181825 0%, #11111b 100%); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6); max-width: 1020px; width: 100%; overflow: hidden;">
     <TitleContent>
-        <div class="d-flex align-center justify-space-between">
-            <div class="d-flex align-center">
-                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" Class="mr-2" />
+        <div class="d-flex align-center justify-space-between pa-1">
+            <div class="d-flex align-center gap-3">
+                <div style="@($"width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}33, {ThemeManager.EffectivePrimaryColor}11); border: 1px solid {ThemeManager.EffectivePrimaryColor}55; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 16px {ThemeManager.EffectivePrimaryColor}33;")">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.5rem;")" />
+                </div>
                 <div>
-                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">New Training Wizard</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Civitai-style streamlined setup with AMD ROCm hardware safety checks and live estimators</MudText>
+                    <MudText Typo="Typo.h6" Style="font-weight: 800; color: #ffffff; letter-spacing: -0.3px;">New Training Wizard</MudText>
+                    <MudText Typo="Typo.caption" Style="color: #a6adc8;">Civitai-style streamlined setup with AMD ROCm hardware safety checks &amp; live estimators</MudText>
                 </div>
             </div>
             <div class="d-flex align-center gap-3">
-                <MudButton Variant="Variant.Text" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.HelpOutline" OnClick="OpenHyperparameterGuide">
-                    Docs & Options Guide
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.HelpOutline" OnClick="OpenHyperparameterGuide" Style="border-radius: 8px;">
+                    Docs &amp; Options Guide
                 </MudButton>
-                <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
+                <div class="d-flex align-center gap-2 pa-1 px-3" style="background-color: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Style="@($"color: {(_isProMode ? ThemeManager.EffectivePrimaryColor : "#6c7086")};")" />
+                    <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" Dense="true" />
+                </div>
             </div>
         </div>
     </TitleContent>
     <DialogContent>
         @if (DonorLora != null) {
-            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7;">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(203, 166, 247, 0.15); color: #cba6f7; border: 1px solid rgba(203, 166, 247, 0.3); border-radius: 10px;">
                 <b>Cloned Recipe:</b> Using hyperparameters from donor <code>@(DonorLora.FileName ?? "donor")</code> (Rank: @_networkDim, Alpha: @_networkAlpha, LR: @_learningRate.ToString("0.#####e+00")). Please provide your unique run name, dataset, and trigger word below.
             </MudAlert>
         } else if (HistoryRecord != null) {
-            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(249, 226, 175, 0.15); color: #f9e2af;">
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Style="background-color: rgba(249, 226, 175, 0.15); color: #f9e2af; border: 1px solid rgba(249, 226, 175, 0.3); border-radius: 10px;">
                 <b>Editing Training Run:</b> Populated from history record <code>@HistoryRecord.Name</code> (Status: @HistoryRecord.Status). You can adjust any parameters, local model paths, or dataset options and re-run.
             </MudAlert>
         }
 
         <!-- Step 1: Subject Type & Architecture Selection -->
-        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2" Style="font-weight: 600;">1. What are you training?</MudText>
+        <div class="d-flex align-center gap-2 mb-3">
+            <div style="@($"width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}, {ThemeManager.EffectivePrimaryColor}bb); color: #fff; font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px {ThemeManager.EffectivePrimaryColor}55;")">
+                1
+            </div>
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px;">
+                What are you training?
+            </MudText>
+        </div>
+
         <MudGrid Class="mb-4">
             @foreach (var preset in _presets) {
+                bool isSelected = _selectedSubject == preset.SubjectType;
                 <MudItem xs="6" sm="4" md="2">
-                    <MudCard Elevation="0"
-                             Class="cursor-pointer p-3 text-center"
-                             Style="@GetCardStyle(_selectedSubject == preset.SubjectType)"
-                             @onclick="@(() => SelectSubject(preset))">
-                        <MudIcon Icon="@GetSubjectIcon(preset.SubjectType)" Color="@(_selectedSubject == preset.SubjectType ? Color.Primary : Color.Secondary)" Size="Size.Medium" Class="mb-1" />
-                        <MudText Typo="Typo.body2" Style="font-weight: 700;">@preset.DisplayName</MudText>
-                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-size: 0.7rem; display: block; line-height: 1.1; margin-top: 4px;">
+                    <div class="cursor-pointer pa-3 text-center h-100 d-flex flex-column align-center justify-center position-relative"
+                         style="@GetCardStyle(isSelected)"
+                         @onclick="@(() => SelectSubject(preset))">
+                        @if (isSelected) {
+                            <div style="@($"position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; background-color: {ThemeManager.EffectivePrimaryColor}; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px {ThemeManager.EffectivePrimaryColor}88;")">
+                                <MudIcon Icon="@Icons.Material.Filled.Check" Style="color: #fff; font-size: 0.75rem;" />
+                            </div>
+                        }
+                        <div class="mb-2 d-flex align-center justify-center" style="@($"width: 44px; height: 44px; border-radius: 10px; background-color: {(isSelected ? ThemeManager.EffectivePrimaryColor + "25" : "rgba(255,255,255,0.05)")}; border: 1px solid {(isSelected ? ThemeManager.EffectivePrimaryColor + "66" : "rgba(255,255,255,0.1)")};")">
+                            <MudIcon Icon="@GetSubjectIcon(preset.SubjectType)" 
+                                     Style="@($"color: {(isSelected ? ThemeManager.EffectivePrimaryColor : "#a6adc8")}; font-size: 1.5rem;")" />
+                        </div>
+                        <MudText Typo="Typo.body2" Style="@($"font-weight: 700; color: {(isSelected ? "#ffffff" : "#cdd6f4")};")">@preset.DisplayName</MudText>
+                        <MudText Typo="Typo.caption" Style="color: #9399b2; font-size: 0.7rem; display: block; line-height: 1.2; margin-top: 4px;">
                             @preset.Description
                         </MudText>
-                    </MudCard>
+                    </div>
                 </MudItem>
             }
         </MudGrid>
 
         <!-- Base Model & Run Identifiers -->
-        <MudGrid Class="mb-3">
-            <MudItem xs="12" md="6">
-                <MudTooltip Text="The foundation diffusion or flow-matching checkpoint family (FLUX.1, SDXL, Pony, etc.).">
-                    <MudSelect T="string" Value="_targetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model" Variant="Variant.Outlined" Dense="true" HelperText="Architecture family for this LoRA">
-                        @foreach (var arch in ArchitectureRegistry.GetAll()) {
-                            <MudSelectItem Value="@arch.DisplayName">
-                                @arch.DisplayName (@arch.Family)
-                            </MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudTooltip>
-            </MudItem>
-            <MudItem xs="12" md="3">
-                <MudTooltip Text="Unique project identifier for saved checkpoints and config files.">
-                    <MudTextField @bind-Value="_runName" Label="Run Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" HelperText="Unique checkpoint name" />
-                </MudTooltip>
-            </MudItem>
-            <MudItem xs="12" md="3">
-                <MudTooltip Text="The activation keyword prompt to recall your trained subject (e.g. 'ohwx woman', 'sk_artstyle').">
-                    <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" HelperText="Keyword to activate subject" />
-                </MudTooltip>
-            </MudItem>
-            <MudItem xs="12">
-                <div class="d-flex align-center gap-2">
-                    <MudTextField @bind-Value="_customBaseModelPath" Label="Custom Base Checkpoint File (Optional - required for standalone models like Chroma)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. C:\AI\Models\Chroma1-HD.safetensors or leave blank for default HuggingFace hub" FullWidth="true" HelperText="Direct path to .safetensors base model" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickCustomBaseModelAsync">Browse</MudButton>
-                </div>
-            </MudItem>
-        </MudGrid>
+        <div class="pa-4 mb-4" style="background: rgba(24, 24, 37, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; backdrop-filter: blur(6px);">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTooltip Text="The foundation diffusion or flow-matching checkpoint family (FLUX.1, SDXL, Pony, etc.).">
+                        <MudSelect T="string" Value="_targetBaseModel" ValueChanged="OnArchitectureChanged" Label="Target Base Model" Variant="Variant.Outlined" Dense="true" HelperText="Architecture family for this LoRA">
+                            @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                                <MudSelectItem Value="@arch.DisplayName">
+                                    @arch.DisplayName (@arch.Family)
+                                </MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudTooltip>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudTooltip Text="Unique project identifier for saved checkpoints and config files.">
+                        <MudTextField @bind-Value="_runName" Label="Run Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" HelperText="Unique checkpoint name" />
+                    </MudTooltip>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudTooltip Text="The activation keyword prompt to recall your trained subject (e.g. 'ohwx woman', 'sk_artstyle').">
+                        <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx character" TextChanged="OnTriggerWordChanged" HelperText="Keyword to activate subject" />
+                    </MudTooltip>
+                </MudItem>
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_customBaseModelPath" Label="Custom Base Checkpoint File (Optional - required for standalone models like Chroma)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. C:\AI\Models\Chroma1-HD.safetensors or leave blank for default HuggingFace hub" FullWidth="true" HelperText="Direct path to .safetensors base model" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Storage" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickCustomBaseModelAsync" Style="border-radius: 8px;">Browse</MudButton>
+                    </div>
+                </MudItem>
+            </MudGrid>
+        </div>
 
         <!-- Step 2: Dataset & Folder Inspection -->
-        <div class="d-flex align-center justify-space-between mb-2 mt-4">
-            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Style="font-weight: 600;">2. Dataset & Output Folders</MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
+        <div class="d-flex align-center justify-space-between mb-3 mt-2">
+            <div class="d-flex align-center gap-2">
+                <div style="@($"width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}, {ThemeManager.EffectivePrimaryColor}bb); color: #fff; font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px {ThemeManager.EffectivePrimaryColor}55;")">
+                    2
+                </div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px;">
+                    Dataset &amp; Output Folders
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync" Style="border-radius: 8px;">
                 Auto-Tag with Ollama
             </MudButton>
         </div>
-        <MudGrid Class="mb-3">
-            <MudItem xs="12" md="6">
-                <div class="d-flex align-center gap-2">
-                    <MudTextField @bind-Value="_datasetDirectory" Label="Dataset Folder or ZIP Archive" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select folder or .zip file..." FullWidth="true" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetDirectoryAsync">Folder</MudButton>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetZipAsync">ZIP</MudButton>
-                </div>
-            </MudItem>
-            <MudItem xs="12" md="6">
-                <div class="d-flex align-center gap-2">
-                    <MudTextField @bind-Value="_outputDirectory" Label="Output Checkpoints" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select output folder..." FullWidth="true" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickOutputDirectoryAsync">Browse</MudButton>
-                </div>
-            </MudItem>
-        </MudGrid>
+
+        <div class="pa-4 mb-4" style="background: rgba(24, 24, 37, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; backdrop-filter: blur(6px);">
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_datasetDirectory" Label="Dataset Folder or ZIP Archive" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select folder or .zip file..." FullWidth="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Folder" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetDirectoryAsync" Style="border-radius: 8px;">Folder</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="PickDatasetZipAsync" Style="border-radius: 8px;">ZIP</MudButton>
+                    </div>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_outputDirectory" Label="Output Checkpoints" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Select output folder..." FullWidth="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Output" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" OnClick="PickOutputDirectoryAsync" Style="border-radius: 8px;">Browse</MudButton>
+                    </div>
+                </MudItem>
+            </MudGrid>
+        </div>
 
         <!-- Dataset Health Audit Banner -->
         @if (_datasetReport != null) {
-            <MudCard Elevation="0" Class="p-3 mb-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
-                <div class="d-flex align-center justify-space-between mb-2">
-                    <div class="d-flex align-center gap-2">
+            <div class="pa-3 mb-4" style="background: rgba(17, 17, 27, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                    <div class="d-flex align-center gap-2 flex-wrap">
                         <MudIcon Icon="@Icons.Material.Filled.FolderZip" Color="Color.Primary" Size="Size.Small" />
-                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Dataset Health Audit:</MudText>
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">Dataset Health Audit:</MudText>
                         <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">@_datasetReport.TotalImages Images</MudChip>
                         <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined">@_datasetReport.TotalCaptions Captions</MudChip>
                         @if (_datasetReport.ExtractedFromZip) {
@@ -126,7 +160,7 @@
                         }
                     </div>
                     @if (!string.IsNullOrWhiteSpace(_triggerWord) && _datasetReport.TotalImages > 0) {
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="PrependTriggerWordAsync">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="PrependTriggerWordAsync" Style="border-radius: 8px;">
                             Prepend Trigger to All Captions
                         </MudButton>
                     }
@@ -134,47 +168,74 @@
                 @foreach (string warn in _datasetReport.Warnings) {
                     <div style="font-size: 0.78rem; color: #fab387; margin-top: 2px;">• @warn</div>
                 }
-            </MudCard>
+            </div>
         }
 
         <!-- Step 3: Live Resource & Training Estimators -->
-        <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2 mt-4" Style="font-weight: 600;">3. Live Training Estimators</MudText>
+        <div class="d-flex align-center gap-2 mb-3 mt-2">
+            <div style="@($"width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}, {ThemeManager.EffectivePrimaryColor}bb); color: #fff; font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px {ThemeManager.EffectivePrimaryColor}55;")">
+                3
+            </div>
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px;">
+                Live Training Estimators
+            </MudText>
+        </div>
+
         <MudGrid Class="mb-4">
+            <!-- Total Steps Card -->
             <MudItem xs="6" sm="3">
-                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Total Steps</MudText>
-                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">@_estimates.TotalSteps.ToString("N0")</MudText>
-                    <div style="font-size: 0.7rem; color: #6c7086;">@_repeats reps × @_epochs ep</div>
-                </MudCard>
+                <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="background: linear-gradient(145deg, rgba(30, 30, 46, 0.7), rgba(17, 17, 27, 0.9)); border: 1px solid rgba(137, 180, 250, 0.25); border-top: 3px solid #89b4fa; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-weight: 600; text-transform: uppercase; font-size: 0.7rem;">Total Steps</MudText>
+                        <MudIcon Icon="@Icons.Material.Filled.ElectricBolt" Style="color: #89b4fa; font-size: 1.1rem;" />
+                    </div>
+                    <MudText Typo="Typo.h5" Style="font-weight: 800; color: #89b4fa; letter-spacing: -0.5px;">@_estimates.TotalSteps.ToString("N0")</MudText>
+                    <div style="font-size: 0.72rem; color: #9399b2; margin-top: 4px;">@_repeats reps × @_epochs ep</div>
+                </div>
             </MudItem>
+
+            <!-- VRAM Card -->
             <MudItem xs="6" sm="3">
-                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. VRAM Needed</MudText>
-                    <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(_preFlight.HasSufficientVram ? "#a6e3a1" : "#f38ba8")};")">
+                <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="@($"background: linear-gradient(145deg, rgba(30, 30, 46, 0.7), rgba(17, 17, 27, 0.9)); border: 1px solid {(_preFlight.HasSufficientVram ? "rgba(166, 227, 161, 0.25)" : "rgba(243, 139, 168, 0.25)")}; border-top: 3px solid {(_preFlight.HasSufficientVram ? "#a6e3a1" : "#f38ba8")}; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);")">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-weight: 600; text-transform: uppercase; font-size: 0.7rem;">Est. VRAM Needed</MudText>
+                        <MudIcon Icon="@Icons.Material.Filled.Memory" Style="@($"color: {(_preFlight.HasSufficientVram ? "#a6e3a1" : "#f38ba8")}; font-size: 1.1rem;")" />
+                    </div>
+                    <MudText Typo="Typo.h5" Style="@($"font-weight: 800; color: {(_preFlight.HasSufficientVram ? "#a6e3a1" : "#f38ba8")}; letter-spacing: -0.5px;")">
                         ~@_estimates.EstimatedVramGb.ToString("0.0") GB
                     </MudText>
-                    <div style="font-size: 0.7rem; color: #6c7086;">@_preFlight.GpuName (@_preFlight.TotalVramGb.ToString("0") GB)</div>
-                </MudCard>
+                    <div style="font-size: 0.72rem; color: #9399b2; margin-top: 4px;">@_preFlight.GpuName (@_preFlight.TotalVramGb.ToString("0") GB)</div>
+                </div>
             </MudItem>
+
+            <!-- Output Size Card -->
             <MudItem xs="6" sm="3">
-                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. Output Size</MudText>
-                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cba6f7;">~@_estimates.EstimatedOutputSizeMb.ToString("0") MB</MudText>
-                    <div style="font-size: 0.7rem; color: #6c7086;">Rank @_networkDim / Alpha @_networkAlpha</div>
-                </MudCard>
+                <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="background: linear-gradient(145deg, rgba(30, 30, 46, 0.7), rgba(17, 17, 27, 0.9)); border: 1px solid rgba(203, 166, 247, 0.25); border-top: 3px solid #cba6f7; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-weight: 600; text-transform: uppercase; font-size: 0.7rem;">Est. Output Size</MudText>
+                        <MudIcon Icon="@Icons.Material.Filled.Save" Style="color: #cba6f7; font-size: 1.1rem;" />
+                    </div>
+                    <MudText Typo="Typo.h5" Style="font-weight: 800; color: #cba6f7; letter-spacing: -0.5px;">~@_estimates.EstimatedOutputSizeMb.ToString("0") MB</MudText>
+                    <div style="font-size: 0.72rem; color: #9399b2; margin-top: 4px;">Rank @_networkDim / Alpha @_networkAlpha</div>
+                </div>
             </MudItem>
+
+            <!-- Training Time Card -->
             <MudItem xs="6" sm="3">
-                <MudCard Elevation="0" Style="background-color: #181825; border: 1px solid #313244; padding: 10px; border-radius: 8px;">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Est. Training Time</MudText>
-                    <MudText Typo="Typo.h6" Style="font-weight: 700; color: #f9e2af;">~@FormatDuration(_estimates.EstimatedDuration)</MudText>
-                    <div style="font-size: 0.7rem; color: #6c7086;">Estimated on AMD ROCm</div>
-                </MudCard>
+                <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="background: linear-gradient(145deg, rgba(30, 30, 46, 0.7), rgba(17, 17, 27, 0.9)); border: 1px solid rgba(249, 226, 175, 0.25); border-top: 3px solid #f9e2af; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <MudText Typo="Typo.caption" Style="color: #a6adc8; font-weight: 600; text-transform: uppercase; font-size: 0.7rem;">Est. Time</MudText>
+                        <MudIcon Icon="@Icons.Material.Filled.Timer" Style="color: #f9e2af; font-size: 1.1rem;" />
+                    </div>
+                    <MudText Typo="Typo.h5" Style="font-weight: 800; color: #f9e2af; letter-spacing: -0.5px;">~@FormatDuration(_estimates.EstimatedDuration)</MudText>
+                    <div style="font-size: 0.72rem; color: #9399b2; margin-top: 4px;">Estimated on AMD ROCm</div>
+                </div>
             </MudItem>
         </MudGrid>
 
         <!-- Pre-Flight Warnings -->
         @if (_preFlight.Warnings.Count > 0) {
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3" Style="border-radius: 10px;">
                 @foreach (string w in _preFlight.Warnings) {
                     <div>• @w</div>
                 }
@@ -182,8 +243,8 @@
         }
 
         <!-- Pro Mode Hyperparameter Accordion with Clean Tabbed Layout -->
-        <MudExpansionPanels Class="mb-3">
-            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters, Augmentation & Prompts" @bind-Expanded="_isProMode">
+        <MudExpansionPanels Class="mb-3" Style="border-radius: 12px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08);">
+            <MudExpansionPanel Text="Pro Mode: Fine-tune Hyperparameters, Augmentation & Prompts" @bind-Expanded="_isProMode" Style="background-color: rgba(24, 24, 37, 0.85);">
                 <div class="d-flex align-center justify-space-between mb-3">
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         Customize or adjust mathematical settings imported from donor LoRA or preset. Hover fields for explanations.
@@ -289,7 +350,7 @@
                     <MudTabPanel Text="Augmentation & Conditioning" Icon="@Icons.Material.Filled.Shuffle">
                         <MudGrid>
                             <MudItem xs="12" sm="6">
-                                <MudCard Elevation="0" Style="background-color: #1e1e2e; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                                <div class="pa-3" style="background-color: rgba(30, 30, 46, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;">
                                     <div class="d-flex align-center justify-space-between">
                                         <div>
                                             <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Horizontal Flip Augmentation</MudText>
@@ -299,10 +360,10 @@
                                         </div>
                                         <MudSwitch @bind-Value="_flipAug" Color="Color.Tertiary" />
                                     </div>
-                                </MudCard>
+                                </div>
                             </MudItem>
                             <MudItem xs="12" sm="6">
-                                <MudCard Elevation="0" Style="background-color: #1e1e2e; border: 1px solid #313244; padding: 12px; border-radius: 8px;">
+                                <div class="pa-3" style="background-color: rgba(30, 30, 46, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;">
                                     <div class="d-flex align-center justify-space-between">
                                         <div>
                                             <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Shuffle Caption Tags</MudText>
@@ -312,7 +373,7 @@
                                         </div>
                                         <MudSwitch @bind-Value="_shuffleTokens" Color="Color.Tertiary" />
                                     </div>
-                                </MudCard>
+                                </div>
                             </MudItem>
                             <MudItem xs="6" sm="6">
                                 <MudTooltip Text="Keep Tokens at Start: Number of initial tags/words preserved at the beginning of the prompt without shuffling. 1 keeps the trigger word at the front. Set higher if using score tags (e.g. 3 for 'trigger, score_9, score_8_up').">
@@ -360,13 +421,23 @@
         </MudExpansionPanels>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="ExportConfigAsync">
-            Export Config
-        </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="SaveAndLaunchAsync">
-            Save & Launch Training
-        </MudButton>
+        <div class="d-flex align-center justify-space-between w-100 px-4 py-2" style="border-top: 1px solid rgba(255,255,255,0.08); background-color: rgba(17, 17, 27, 0.6);">
+            <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel" Style="border-radius: 8px;">
+                Cancel
+            </MudButton>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="ExportConfigAsync" Style="border-radius: 8px;">
+                    Export Config
+                </MudButton>
+                <MudButton Variant="Variant.Filled" 
+                           Color="Color.Success" 
+                           StartIcon="@Icons.Material.Filled.PlayArrow" 
+                           OnClick="SaveAndLaunchAsync" 
+                           Style="border-radius: 8px; font-weight: 700; box-shadow: 0 4px 14px rgba(74, 222, 128, 0.35);">
+                    Save &amp; Launch Training
+                </MudButton>
+            </div>
+        </div>
     </DialogActions>
 </MudDialog>
 
@@ -770,9 +841,9 @@
 
     private void Cancel() => MudDialog.Cancel();
 
-    private static string GetCardStyle(bool isSelected) => isSelected
-        ? "background-color: #1e1e2e; border: 2px solid #89b4fa; border-radius: 8px;"
-        : "background-color: #11111b; border: 1px solid #313244; border-radius: 8px;";
+    private string GetCardStyle(bool isSelected) => isSelected
+        ? $"background: linear-gradient(145deg, {ThemeManager.EffectivePrimaryColor}18, rgba(30, 30, 46, 0.9)); border: 2px solid {ThemeManager.EffectivePrimaryColor}; border-radius: 12px; box-shadow: 0 4px 16px {ThemeManager.EffectivePrimaryColor}33; transform: translateY(-2px); transition: all 0.2s ease;"
+        : "background-color: rgba(24, 24, 37, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; transition: all 0.2s ease;";
 
     private static string GetSubjectIcon(TrainingSubjectType type) => type switch {
         TrainingSubjectType.Character => Icons.Material.Filled.Person,
