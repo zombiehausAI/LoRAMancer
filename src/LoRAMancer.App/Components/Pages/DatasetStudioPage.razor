@@ -32,6 +32,13 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isLoading || string.IsNullOrWhiteSpace(_datasetFolder)">
             @(_isLoading ? "Scanning..." : "Rescan")
         </MudButton>
+        @if (!string.IsNullOrWhiteSpace(_datasetFolder)) {
+            <MudTooltip Text="Unload and clear active dataset">
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearDataset" Disabled="_isLoading">
+                    Clear Dataset
+                </MudButton>
+            </MudTooltip>
+        }
     </div>
 </div>
 
@@ -856,6 +863,16 @@
             StudioSession.SetDatasetFolder(folder);
             await ScanFolderAsync();
         }
+    }
+
+    private void ClearDataset() {
+        _datasetFolder = "";
+        _report = null;
+        _datasetAudit = null;
+        _singleTokenReport = null;
+        _thumbnailCache.Clear();
+        StudioSession.SetDatasetFolder("");
+        Snackbar.Add("Dataset cleared.", Severity.Info);
     }
 
     private async Task ScanFolderAsync() {
