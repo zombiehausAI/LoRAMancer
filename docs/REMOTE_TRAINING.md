@@ -157,21 +157,30 @@ LoRAMancer includes a built-in Core Auth Token Manager (`AuthTokenManagerService
 
 ---
 
-## 8. Web UI Studio Modal Tools & In-App Document Viewer
+## 8. Web UI Studio Workshop, Modal Tools & In-App Document Viewer
 
 The remote web interface provides full 1:1 parity with the desktop application's specialized studio tools and documentation:
 
-1. **In-App Technical Document Viewer (`/docs` or Sidebar → Documentation)**:
-   - Full two-column reader mirroring desktop `DocsPage.razor`.
-   - Real-time search filter across all guides in `docs/`.
-   - Native Markdown rendering supporting GitHub alerts (`[!NOTE]`, `[!WARNING]`, `[!TIP]`), syntax-highlighted code blocks, and formatted tables with horizontal scrolling.
-   - One-click **Copy Markdown** action button to export guide source.
+1. **Studio Workshop (Sidebar → Studio Workshop)**:
+   - 🛠️ **LoRA Chop-Shop (`/chop`)**: Full anatomical and aesthetic donor grafting garage. Upload donor `.safetensors` models directly or pick from the host vault, assign parts (face, eyes, hair, clothing, lighting, skin, triggers), calibrate blend multipliers, and compile into a single franken-model with zero retraining.
+   - 📜 **Training History (`/history`)**: Complete historical run audit log, epoch loss metrics, configuration retrieval, and 1-click job resubmission directly on the host.
 
-2. **Studio Modal Tools (Sidebar → Studio Modal Tools)**:
+2. **Studio Modal Tools with In-Dialog LoRA Upload & Vault Dropdowns**:
+   - Each modal tool features a dual-mode LoRA picker:
+     - **Vault Dropdown**: Choose from all models discovered on the server (in the Vault or configured uploads directory).
+     - **Direct LoRA Uploader**: Click `📤 Upload LoRA` to transfer `.safetensors` models directly from your client browser/phone into the host's configured upload directory, automatically populating and focusing the path.
+     - **Auto-Suggestions**: SVD rank compression and merging automatically suggest standardized destination file paths.
    - 👁️ **Ollama Vision Tagger**: Automated image description and caption generation using local multimodal vision LLMs (`llava`, `llama3.2-vision`, `minicpm-v`).
    - ✂️ **LoRA Surgery & Merger**: Truncated SVD rank reduction (e.g. compressing rank 64 down to 16/32) and weighted multi-LoRA linear interpolation merging.
    - 🧬 **LoRA Gene Therapy**: Transformer/UNet layer block Frobenius norm calculations ($\| \Delta W \|_F$) with toxic outlier highlighting and surgical layer zeroing/attenuation.
    - 🔍 **LoRA Visual Diff**: Tensor-by-tensor high-dimensional cosine similarity drift inspector with color-coded drift badges and recipe hyperparameter diffing.
    - 📊 **AI Benchmark Matrix**: Automated scanning of multi-epoch checkpoint directories, running 4-part visual test batteries (likeness, style flexibility, bleed stress, composition) to find the sweet spot before overfitting.
+
+3. **In-App Technical Document Viewer (`/docs` or Sidebar → Documentation)**:
+   - Full two-column reader mirroring desktop `DocsPage.razor`.
+   - Real-time search filter across all guides in `docs/`.
+   - Native Markdown rendering supporting GitHub alerts (`[!NOTE]`, `[!WARNING]`, `[!TIP]`), syntax-highlighted code blocks, and formatted tables with horizontal scrolling.
+   - One-click **Copy Markdown** action button to export guide source.
+
 
 

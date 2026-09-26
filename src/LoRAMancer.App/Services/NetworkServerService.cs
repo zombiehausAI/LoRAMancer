@@ -2577,30 +2577,42 @@ self.addEventListener('fetch', (e) => {
 
         <div class="nav-scroller">
             <div class="nav-group-header">Studio Pipeline</div>
-            <div class="nav-item" onclick="switchView('curate')">
+            <div class="nav-item" data-view="curate" onclick="switchView('curate')">
                 <span class="nav-icon">🖼️</span>
                 <span>1. Curate &amp; Caption</span>
                 <span class="nav-badge">Stage 1</span>
             </div>
-            <div class="nav-item active" onclick="switchView('train')">
+            <div class="nav-item active" data-view="train" onclick="switchView('train')">
                 <span class="nav-icon">⚡</span>
                 <span>2. Train &amp; Forge</span>
                 <span class="nav-badge">Stage 2</span>
             </div>
-            <div class="nav-item" onclick="switchView('lab')">
+            <div class="nav-item" data-view="lab" onclick="switchView('lab')">
                 <span class="nav-icon">🔬</span>
                 <span>3. Diagnostic Lab</span>
                 <span class="nav-badge">Stage 3</span>
             </div>
-            <div class="nav-item" onclick="switchView('comfy')">
+            <div class="nav-item" data-view="comfy" onclick="switchView('comfy')">
                 <span class="nav-icon">🎨</span>
                 <span>4. ComfyUI Test</span>
                 <span class="nav-badge">Stage 4</span>
             </div>
-            <div class="nav-item" onclick="switchView('vault')">
+            <div class="nav-item" data-view="vault" onclick="switchView('vault')">
                 <span class="nav-icon">📚</span>
                 <span>5. Library &amp; Vault</span>
                 <span class="nav-badge">Stage 5</span>
+            </div>
+
+            <div class="nav-group-header">Studio Workshop</div>
+            <div class="nav-item" data-view="chop" onclick="switchView('chop')">
+                <span class="nav-icon">🛠️</span>
+                <span>LoRA Chop-Shop</span>
+                <span class="nav-badge" style="color:var(--accent-purple);">Garage</span>
+            </div>
+            <div class="nav-item" data-view="history" onclick="switchView('history')">
+                <span class="nav-icon">📜</span>
+                <span>Training History</span>
+                <span class="nav-badge" style="color:var(--accent-blue);">Records</span>
             </div>
 
             <div class="nav-group-header">Studio Modal Tools</div>
@@ -2629,22 +2641,13 @@ self.addEventListener('fetch', (e) => {
                 <span>AI Benchmark Matrix</span>
                 <span class="nav-badge" style="color:var(--accent-yellow);">Modal</span>
             </div>
-            <div class="nav-item" onclick="switchView('chop')">
-                <span class="nav-icon">🛠️</span>
-                <span>LoRA Chop-Shop</span>
-                <span class="nav-badge" style="color:var(--accent-purple);">Garage</span>
-            </div>
 
             <div class="nav-group-header">Subsystems</div>
-            <div class="nav-item" onclick="switchView('history')">
-                <span class="nav-icon">📜</span>
-                <span>Training History</span>
-            </div>
-            <div class="nav-item" onclick="switchView('telemetry')">
+            <div class="nav-item" data-view="telemetry" onclick="switchView('telemetry')">
                 <span class="nav-icon">💻</span>
                 <span>Compute Environment</span>
             </div>
-            <div class="nav-item" onclick="switchView('docs')">
+            <div class="nav-item" data-view="docs" onclick="switchView('docs')">
                 <span class="nav-icon">📖</span>
                 <span>Documentation</span>
             </div>
@@ -3518,13 +3521,24 @@ self.addEventListener('fetch', (e) => {
                         Compress heavy LoRAs (ranks 64, 128, 256) down to lightweight ranks (16, 32) using truncated Singular Value Decomposition. Retains &gt;95% concept fidelity while reducing file size by up to 80%.
                     </p>
                     <div class="input-group">
-                        <label>Source LoRA (.safetensors)</label>
-                        <input id="surgeryResizeSource" type="text" placeholder="Full path to source LoRA..." />
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label>Source LoRA (.safetensors)</label>
+                            <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                                📤 Upload LoRA
+                                <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'surgeryResizeSource', 'surgeryResizeSelect')" />
+                            </label>
+                        </div>
+                        <div style="display:flex; gap:6px;">
+                            <select id="surgeryResizeSelect" style="flex:1;" onchange="syncLoraSelectToInput(this, 'surgeryResizeSource'); autoSuggestResizeOutput();">
+                                <option value="">-- Choose Host / Uploaded LoRA --</option>
+                            </select>
+                            <input id="surgeryResizeSource" type="text" placeholder="Or enter full path on host..." style="flex:1;" oninput="autoSuggestResizeOutput()" />
+                        </div>
                     </div>
                     <div class="grid-2">
                         <div class="input-group">
                             <label>Target Rank (Dimension)</label>
-                            <select id="surgeryResizeRank">
+                            <select id="surgeryResizeRank" onchange="autoSuggestResizeOutput()">
                                 <option value="8">Rank 8 (Ultra-compact ~10MB)</option>
                                 <option value="16" selected>Rank 16 (Standard / Highly Recommended)</option>
                                 <option value="32">Rank 32 (High Detail)</option>
@@ -3545,12 +3559,30 @@ self.addEventListener('fetch', (e) => {
                     </p>
                     <div class="grid-2">
                         <div class="input-group">
-                            <label>Model A (Primary)</label>
-                            <input id="surgeryMergeA" type="text" placeholder="Path to Model A..." />
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <label>Model A (Primary)</label>
+                                <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                                    📤 Upload
+                                    <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'surgeryMergeA', 'surgeryMergeASelect')" />
+                                </label>
+                            </div>
+                            <select id="surgeryMergeASelect" onchange="syncLoraSelectToInput(this, 'surgeryMergeA'); autoSuggestMergeOutput();" style="margin-bottom:6px;">
+                                <option value="">-- Choose Host / Uploaded Model A --</option>
+                            </select>
+                            <input id="surgeryMergeA" type="text" placeholder="Path to Model A..." oninput="autoSuggestMergeOutput()" />
                         </div>
                         <div class="input-group">
-                            <label>Model B (Secondary)</label>
-                            <input id="surgeryMergeB" type="text" placeholder="Path to Model B..." />
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <label>Model B (Secondary)</label>
+                                <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                                    📤 Upload
+                                    <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'surgeryMergeB', 'surgeryMergeBSelect')" />
+                                </label>
+                            </div>
+                            <select id="surgeryMergeBSelect" onchange="syncLoraSelectToInput(this, 'surgeryMergeB'); autoSuggestMergeOutput();" style="margin-bottom:6px;">
+                                <option value="">-- Choose Host / Uploaded Model B --</option>
+                            </select>
+                            <input id="surgeryMergeB" type="text" placeholder="Path to Model B..." oninput="autoSuggestMergeOutput()" />
                         </div>
                     </div>
                     <div class="input-group" style="margin:12px 0;">
@@ -3585,9 +3617,18 @@ self.addEventListener('fetch', (e) => {
             </div>
             <div class="modal-body">
                 <div class="input-group">
-                    <label>Target LoRA File (.safetensors)</label>
-                    <div style="display:flex; gap:8px;">
-                        <input id="gtLoraPath" type="text" placeholder="Full path to LoRA model..." style="flex:1;" />
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label>Target LoRA File (.safetensors)</label>
+                        <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                            📤 Upload LoRA
+                            <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'gtLoraPath', 'gtLoraSelect')" />
+                        </label>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <select id="gtLoraSelect" style="flex:1;" onchange="syncLoraSelectToInput(this, 'gtLoraPath');">
+                            <option value="">-- Choose Host / Uploaded LoRA --</option>
+                        </select>
+                        <input id="gtLoraPath" type="text" placeholder="Or enter full path on host..." style="flex:1;" />
                         <button class="btn btn-secondary btn-sm" onclick="runGeneTherapyAnalyze()">🔬 Analyze Blocks</button>
                     </div>
                 </div>
@@ -3645,11 +3686,29 @@ self.addEventListener('fetch', (e) => {
             <div class="modal-body">
                 <div class="grid-2">
                     <div class="input-group">
-                        <label>Model A (Baseline / Reference)</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label>Model A (Baseline / Reference)</label>
+                            <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                                📤 Upload
+                                <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'diffModelA', 'diffModelASelect')" />
+                            </label>
+                        </div>
+                        <select id="diffModelASelect" onchange="syncLoraSelectToInput(this, 'diffModelA');" style="margin-bottom:6px;">
+                            <option value="">-- Choose Host / Uploaded Model A --</option>
+                        </select>
                         <input id="diffModelA" type="text" placeholder="Path to Model A..." />
                     </div>
                     <div class="input-group">
-                        <label>Model B (Comparison / Target)</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label>Model B (Comparison / Target)</label>
+                            <label class="btn btn-sm btn-secondary" style="cursor:pointer; padding:3px 8px; font-size:0.75rem;">
+                                📤 Upload
+                                <input type="file" accept=".safetensors" style="display:none;" onchange="handleModalLoraUpload(this, 'diffModelB', 'diffModelBSelect')" />
+                            </label>
+                        </div>
+                        <select id="diffModelBSelect" onchange="syncLoraSelectToInput(this, 'diffModelB');" style="margin-bottom:6px;">
+                            <option value="">-- Choose Host / Uploaded Model B --</option>
+                        </select>
                         <input id="diffModelB" type="text" placeholder="Path to Model B..." />
                     </div>
                 </div>
@@ -3701,7 +3760,10 @@ self.addEventListener('fetch', (e) => {
             <div class="modal-body">
                 <div class="grid-3">
                     <div class="input-group" style="grid-column: span 2;">
-                        <label>Training Checkpoints Directory</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label>Training Checkpoints Directory</label>
+                            <button type="button" class="btn btn-sm btn-secondary" style="padding:2px 8px; font-size:0.72rem;" onclick="fillBenchmarkOutputsFolder()">📂 Use Outputs Folder</button>
+                        </div>
                         <div style="display:flex; gap:8px;">
                             <input id="bmFolder" type="text" placeholder="Folder containing epoch checkpoints..." style="flex:1;" />
                             <button class="btn btn-secondary btn-sm" onclick="scanBenchmarkFolder()">🔍 Scan</button>
@@ -3777,13 +3839,9 @@ self.addEventListener('fetch', (e) => {
             const panel = document.getElementById('view-' + viewName);
             if (panel) panel.classList.add('active');
 
-            const navMap = {
-                'curate': 0, 'train': 1, 'lab': 2, 'comfy': 3, 'vault': 4,
-                'chop': 10, 'history': 11, 'telemetry': 12, 'docs': 13
-            };
-            const navItems = document.querySelectorAll('.nav-scroller .nav-item');
-            if (navMap[viewName] !== undefined && navItems[navMap[viewName]]) {
-                navItems[navMap[viewName]].classList.add('active');
+            const activeNavItem = document.querySelector(`.nav-scroller .nav-item[data-view="${viewName}"]`);
+            if (activeNavItem) {
+                activeNavItem.classList.add('active');
             }
 
             const chipIdMap = {
@@ -4972,7 +5030,7 @@ self.addEventListener('fetch', (e) => {
         // --- MODAL DIALOG CONTROLLER ---
         let activeModalId = null;
 
-        function openModalApp(appId) {
+        async function openModalApp(appId) {
             closeModalApp();
             activeModalId = 'modal-' + appId;
             const overlay = document.getElementById('appModalOverlay');
@@ -4981,6 +5039,7 @@ self.addEventListener('fetch', (e) => {
                 overlay.style.display = 'flex';
                 target.style.display = 'flex';
             }
+            await populateAllModalLoraSelects();
         }
 
         function closeModalApp() {
@@ -5004,6 +5063,128 @@ self.addEventListener('fetch', (e) => {
                 closeModalApp();
             }
         });
+
+        // Universal LoRA Upload & Dropdown Sync for Modal Tools
+        let cachedServerLoras = [];
+        async function populateAllModalLoraSelects(selectedPathToSet = null, selectIdToFocus = null) {
+            try {
+                const res = await fetch('/api/v1/vault/loras', { headers: getHeaders() });
+                if (res.ok) {
+                    cachedServerLoras = await res.json();
+                    const selectIds = [
+                        'surgeryResizeSelect', 
+                        'surgeryMergeASelect', 
+                        'surgeryMergeBSelect', 
+                        'gtLoraSelect', 
+                        'diffModelASelect', 
+                        'diffModelBSelect'
+                    ];
+                    
+                    selectIds.forEach(id => {
+                        const sel = document.getElementById(id);
+                        if (!sel) return;
+                        const prevVal = sel.value;
+                        sel.innerHTML = '<option value="">-- Choose Host / Uploaded LoRA --</option>';
+                        cachedServerLoras.forEach(item => {
+                            const opt = document.createElement('option');
+                            opt.value = item.filePath;
+                            opt.textContent = `${item.fileName} (${item.formattedSize})`;
+                            sel.appendChild(opt);
+                        });
+                        if (id === selectIdToFocus && selectedPathToSet) {
+                            sel.value = selectedPathToSet;
+                        } else if (prevVal && sel.querySelector(`option[value="${prevVal}"]`)) {
+                            sel.value = prevVal;
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('Could not populate modal LoRA dropdowns', e);
+            }
+        }
+
+        function syncLoraSelectToInput(selectElem, targetInputId) {
+            if (!selectElem || !targetInputId) return;
+            const input = document.getElementById(targetInputId);
+            if (input && selectElem.value) {
+                input.value = selectElem.value;
+                input.dispatchEvent(new Event('input'));
+            }
+        }
+
+        async function handleModalLoraUpload(inputElem, targetInputId, targetSelectId) {
+            const file = inputElem.files[0];
+            if (!file) return;
+            const parentLabel = inputElem.parentElement;
+            parentLabel.style.opacity = '0.6';
+            parentLabel.style.pointerEvents = 'none';
+
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch('/api/v1/loras/upload', {
+                    method: 'POST',
+                    headers: authToken ? { 'X-LoRAMancer-Token': authToken } : {},
+                    body: fd
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.filePath) {
+                        const targetInput = document.getElementById(targetInputId);
+                        if (targetInput) {
+                            targetInput.value = data.filePath;
+                            targetInput.dispatchEvent(new Event('input'));
+                        }
+                        await populateAllModalLoraSelects(data.filePath, targetSelectId);
+                        alert(`Uploaded ${data.fileName} to host (${data.formattedSize})!`);
+                    } else {
+                        alert(data.message || 'Upload failed.');
+                    }
+                } else {
+                    alert('Upload failed: ' + res.statusText);
+                }
+            } catch (err) {
+                alert('Upload network error: ' + err.message);
+            } finally {
+                inputElem.value = '';
+                parentLabel.style.opacity = '1';
+                parentLabel.style.pointerEvents = 'auto';
+            }
+        }
+
+        function autoSuggestResizeOutput() {
+            const src = document.getElementById('surgeryResizeSource').value.trim();
+            const rank = document.getElementById('surgeryResizeRank').value;
+            const out = document.getElementById('surgeryResizeOutput');
+            if (src && (!out.value || out.value.includes('_Rank'))) {
+                const clean = src.replace(/\\/g, '/');
+                const lastSlash = clean.lastIndexOf('/');
+                const dir = lastSlash >= 0 ? clean.substring(0, lastSlash) : '';
+                const file = lastSlash >= 0 ? clean.substring(lastSlash + 1) : clean;
+                const base = file.replace(/\.safetensors$/i, '');
+                out.value = (dir ? dir + '/' : '') + base + '_Rank' + rank + '.safetensors';
+            }
+        }
+
+        function autoSuggestMergeOutput() {
+            const a = document.getElementById('surgeryMergeA').value.trim();
+            const b = document.getElementById('surgeryMergeB').value.trim();
+            const out = document.getElementById('surgeryMergeOutput');
+            if (a && b && (!out.value || out.value.includes('_Merged'))) {
+                const cleanA = a.replace(/\\/g, '/');
+                const fileA = cleanA.split('/').pop().replace(/\.safetensors$/i, '');
+                const cleanB = b.replace(/\\/g, '/');
+                const lastSlash = cleanA.lastIndexOf('/');
+                const dir = lastSlash >= 0 ? cleanA.substring(0, lastSlash) : '';
+                const fileB = cleanB.split('/').pop().replace(/\.safetensors$/i, '');
+                out.value = (dir ? dir + '/' : '') + fileA + '_' + fileB + '_Merged.safetensors';
+            }
+        }
+
+        function fillBenchmarkOutputsFolder() {
+            document.getElementById('bmFolder').value = '.loramancer/outputs';
+            scanBenchmarkFolder();
+        }
 
         // Modal: Ollama Vision Tagger logic
         let modalOllamaFocus = 'general';
