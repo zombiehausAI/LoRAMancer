@@ -101,11 +101,61 @@
                 <MudTextField @bind-Value="_blacklistWords" Label="Blacklist / Excluded Words (Comma-separated)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. watermark, signature, blurry" HelperText="Strips these terms from generated captions" Disabled="_isProcessing" />
             </MudItem>
 
-            <MudItem xs="12">
-                <MudSelect @bind-Value="_captionStyle" Label="Caption Style" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_isProcessing">
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_captionStyle" 
+                           @bind-Value:after="OnCaptionStyleOrPresetChanged"
+                           Label="Caption Style" 
+                           Variant="Variant.Outlined" 
+                           Margin="Margin.Dense" 
+                           Disabled="_isProcessing">
                     <MudSelectItem Value="@("tags")">Visual Tags (Comma-separated descriptors for SDXL / Pony / Anime)</MudSelectItem>
                     <MudSelectItem Value="@("natural")">Natural Language (1-2 descriptive sentences for FLUX.1)</MudSelectItem>
                 </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_subjectFocus" 
+                           @bind-Value:after="OnCaptionStyleOrPresetChanged"
+                           Label="Subject Focus Preset" 
+                           Variant="Variant.Outlined" 
+                           Margin="Margin.Dense" 
+                           Disabled="_isProcessing">
+                    <MudSelectItem Value="@("general")">General / Balanced (Subject + Scene)</MudSelectItem>
+                    <MudSelectItem Value="@("person")">Person / Character (Face, Hair, Clothing, Pose)</MudSelectItem>
+                    <MudSelectItem Value="@("object")">Object / Prop (Materials, Shape, Geometry, Details)</MudSelectItem>
+                    <MudSelectItem Value="@("scenery")">Scenery / Environment (Architecture, Lighting, Mood)</MudSelectItem>
+                    <MudSelectItem Value="@("style")">Art Style / Aesthetic (Medium, Technique, Colors)</MudSelectItem>
+                    <MudSelectItem Value="@("custom")">Custom User Prompt (Manual Instructions)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12">
+                <div class="d-flex align-center justify-space-between mb-1">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Small" Color="Color.Primary" />
+                        <span style="font-size: 0.8rem; font-weight: 700; color: #cdd6f4;">Vision Model Prompt / Instructions</span>
+                        @if (_subjectFocus != "custom") {
+                            <span style="font-size: 0.7rem; color: #89b4fa; background: rgba(137,180,250,0.15); padding: 1px 6px; border-radius: 4px;">Preset: @_subjectFocus</span>
+                        } else {
+                            <span style="font-size: 0.7rem; color: #a6e3a1; background: rgba(166,227,161,0.15); padding: 1px 6px; border-radius: 4px;">Custom Prompt</span>
+                        }
+                    </div>
+                    <div class="d-flex align-center gap-2">
+                        <span style="font-size: 0.72rem; color: #a6adc8;">@_customPrompt.Length chars</span>
+                        @if (_subjectFocus != "custom") {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Secondary" Style="font-size: 0.7rem; padding: 0 4px;" OnClick="ResetPromptToPreset">
+                                Reset to Preset
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+                <MudTextField @bind-Value="_customPrompt" 
+                              Lines="3" 
+                              Variant="Variant.Outlined" 
+                              Margin="Margin.Dense" 
+                              Placeholder="Write custom prompt instructions to guide how Ollama analyzes and describes each image..." 
+                              HelperText="Customize or override the instructions sent to the vision model for every image in the dataset." 
+                              Disabled="_isProcessing" />
             </MudItem>
         </MudGrid>
 
@@ -184,6 +234,8 @@
     private string _blacklistWords = string.Empty;
     private string _selectedModel = "llama3.2-vision";
     private string _captionStyle = "tags";
+    private string _subjectFocus = "general";
+    private string _customPrompt = string.Empty;
     private bool _createZip = true;
 
     private bool _isCheckingOllama = true;
@@ -206,6 +258,10 @@
         }
         if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel)) {
             _selectedModel = Settings.Current.OllamaDefaultModel;
+        }
+
+        if (string.IsNullOrWhiteSpace(_customPrompt)) {
+            _customPrompt = GetPresetPrompt(_subjectFocus, _captionStyle);
         }
 
         await CheckOllamaStatusAsync();
@@ -311,8 +367,8 @@
             // Fallback to plugin check in case of custom transport
             try {
                 var result = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "check_ollama", new Dictionary<string, object?> {
-                    ["ollama_url"] = _ollamaUrl.Trim(),
-                    ["api_key"] = _apiKey.Trim()
+                    ["ollama_url"] = (_ollamaUrl ?? string.Empty).Trim(),
+                    ["api_key"] = (_apiKey ?? string.Empty).Trim()
                 });
 
                 if (result.Success && result.Data != null) {
@@ -398,9 +454,10 @@
                 ["blacklist_words"] = _blacklistWords,
                 ["model"] = _selectedModel,
                 ["caption_style"] = _captionStyle,
+                ["custom_prompt"] = _customPrompt.Trim(),
                 ["create_zip"] = _createZip,
-                ["ollama_url"] = _ollamaUrl.Trim(),
-                ["api_key"] = _apiKey.Trim()
+                ["ollama_url"] = (_ollamaUrl ?? string.Empty).Trim(),
+                ["api_key"] = (_apiKey ?? string.Empty).Trim()
             };
 
             var pluginResult = await PluginManager.ExecutePluginAsync("ollama-lora-tagger", "tag_dataset", parameters);
@@ -473,5 +530,35 @@
     public sealed class TaggerDialogResult {
         public string DatasetPath { get; set; } = string.Empty;
         public string TriggerWord { get; set; } = string.Empty;
+    }
+
+    private void OnCaptionStyleOrPresetChanged() {
+        if (_subjectFocus == "custom") return;
+        _customPrompt = GetPresetPrompt(_subjectFocus, _captionStyle);
+    }
+
+    private void ResetPromptToPreset() {
+        _customPrompt = GetPresetPrompt(_subjectFocus, _captionStyle);
+    }
+
+    private static string GetPresetPrompt(string focus, string style) {
+        bool isNatural = style == "natural";
+        return focus switch {
+            "person" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing heavily on the person. Thoroughly describe their facial expression, eye direction, hairstyle, hair color, clothing and attire details, posture, lighting, and background setting. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the person in this image in detail for machine learning training. Describe the subject, hairstyle and hair color, facial expression, eye direction, attire, body pose, framing, lighting, and background setting. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "object" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing on the main object, vehicle, or product. Describe its design, materials, primary and secondary colors, surface textures, wear/condition, viewing angle, and background context. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the primary object or product in this image in detail for machine learning training. Describe the object type, shape, colors, materials, surface textures, condition, viewing angle, and background context. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "scenery" => isNatural
+                ? "Describe this scene in 1-2 detailed sentences for training a text-to-image AI model, focusing on the environment and architecture. Describe the setting, architectural style, structures, environmental elements, atmosphere, time of day, weather, and lighting conditions. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the environment and scene in this image in detail for machine learning training. Describe architectural structures, landscape elements, foliage, weather, time of day, lighting conditions, atmosphere, and perspective. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "style" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, highlighting the artistic style and medium. Describe the composition, artistic medium (e.g. digital painting, oil, anime, photograph), color palette, rendering quality, texture, and aesthetic technique. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the artistic style and visual medium of this image for machine learning training. Describe the art medium, rendering technique, linework, brushwork, texture, color palette, lighting atmosphere, and visual composition. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            _ => isNatural
+                ? "Describe this image thoroughly in 1-2 detailed sentences for training a text-to-image AI model. Focus on subject appearance, posture, clothing, colors, setting, and lighting. Do not say 'This is an image of' or 'The picture shows'. Be descriptive and direct."
+                : "Analyze this image in detail for machine learning training. Provide a concise, comma-separated list of visual tags describing: the subject, attire, hair, expression, pose, background, lighting, and artistic style. Do not include conversational filler, introductory words, or markdown. Output ONLY comma-separated tags."
+        };
     }
 }
