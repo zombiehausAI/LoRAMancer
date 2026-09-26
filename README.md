@@ -3,6 +3,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4)](#requirements--quickstart)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/zombiehaus)
 
 **LoRAMancer** is a production-grade, highly responsive desktop LoRA Manager, Configuration Cloner, and Training Orchestrator application targeting **.NET 10 (Blazor Hybrid MAUI Desktop)** on Windows, with cross-platform **Remote Web UI** capabilities and universal hardware acceleration across **NVIDIA CUDA**, **AMD ROCm**, **Intel XPU**, and **CPU**.
 
@@ -101,6 +102,12 @@ LoRAMancer stands on the shoulders of incredible open-source projects and commun
 - **[MudBlazor](https://mudblazor.com/)** — The Material Design component framework powering LoRAMancer's high-contrast desktop interface and responsive remote web client.
 - **[Civitai](https://civitai.com/)** — Community model repository whose public API provides automated metadata enrichment, trigger keyword detection, and preview caching.
 - **[Cloudflare Quick Tunnels](https://github.com/cloudflare/cloudflared)** — Secure zero-configuration tunnels providing encrypted remote studio access across LAN and WAN without manual port forwarding.
+
+## Support & Contributions
+
+If you find LoRAMancer helpful for your AI workflows, training setups, or Windows ROCm research, consider supporting ongoing development:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/zombiehaus)
 
 ## License
 
