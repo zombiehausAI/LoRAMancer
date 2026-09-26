@@ -270,7 +270,7 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
 - **Top Studio Pipeline Switcher**:
   1. **Curate (`/curate`)**: Full-screen dataset gallery, inline caption editor, tag frequency data grid, batch prefix/suffix trigger words, aspect ratio bucketing, and Semantic Collision Radar.
   2. **Train (`/training`)**: Forge and training studio with live AI-Toolkit loss telemetry, real-time log stream, and hardware acceleration monitors.
-  3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, and Forensic De-Anonymizer. Includes 1-click model clearing and switching back to the browse empty state.
+  3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, Forensic De-Anonymizer, and the LoRA Vehicle Chop-Shop. Includes 1-click model clearing and switching back to the browse empty state.
   4. **Test (`/test`)**: ComfyUI inference studio with live WebSocket image rendering, prompt testing, and AI benchmark matrix sweeps.
   5. **Vault (`/`)**: Central LoRA model library, visual card/table browser, Civitai metadata enricher, and version management.
 - **Configurable Startup Section**:
@@ -319,6 +319,34 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
 - **Trigger Word & Concept Recovery**:
   - Recovers trained concept keywords and frequent dataset tags embedded in headers or inferred via heuristic token analysis.
   - 1-click binding: instantly assigns recovered trigger words into the active Studio Session for immediate inference and testing.
+
+---
+
+## 22. LoRA Vehicle Chop-Shop: Multi-Model Anatomical & Style Grafting Studio
+
+- **The Garage (Multi-Donor Model Shelf)**:
+  - Load up to 5 donor `.safetensors` models simultaneously.
+  - Automatically identifies architecture, rank, Frobenius energy norm, and dominant features (e.g. *Facial Likeness & Anatomy*, *Lighting & Ambiance*, *Micro-Textures & Outfits*).
+  - Inferred trigger word previews extracted directly from Safetensors metadata.
+- **Visual High-Level Anatomical & Style Component Grafting**:
+  - Direct selection of which donor model provides each distinct physical and aesthetic feature:
+    - 👤 **Chassis & Face**: Mid-block anatomical geometry, head shape, jawline, eye socket spacing (`MID00` / `double_blocks 6-12`).
+    - 👁️ **Headlights & Eyes**: Iris pigmentation, catchlights, ocular reflections, pupil sharpness (`OUT09-OUT11` / `single_blocks 30-37`).
+    - 💇 **Custom Paint & Hair**: Hairstyle flow, bangs, braid textures, and hair color projections.
+    - 👗 **Upholstery & Armor**: Garments, jackets, accessories, lace, leather, and uniform styling (`OUT03-OUT06` / `double_blocks 13-18`).
+    - 💡 **Engine & Glow**: Volumetric lighting, atmospheric grading, shadow warmth, and color temperature (`IN00-IN03` / `double_blocks 0-5`).
+    - ⚡ **Detail Polish**: Photorealistic skin pores, wrinkles, and fine edge clarity (`OUT10-OUT11`).
+    - 🔤 **Steering & Triggers**: Text encoder layers dictating prompt responsiveness (`lora_te` / `lora_clip`).
+  - Independent blend multiplier sliders (0.0x to 2.0x) per component.
+- **Advanced Block-by-Block Matrix Overrides**:
+  - Granular table allowing power users to route specific U-Net or DiT transformer blocks to explicit donors with custom weights.
+  - Individual block overrides take precedence over the high-level category assignments.
+- **Smart Auto-Craft Recipe**:
+  - 1-click intelligent analysis: automatically evaluates the energy profiles of all loaded donors and routes the optimal donor to each anatomical and aesthetic part.
+- **SVD Matrix Re-Compression & Compilation**:
+  - Factorizes reconstructed delta tensors back into compact target ranks (Rank 8, 16, 32, or 64).
+  - Optional TIES consensus denoising to eliminate multi-vector interference and parameter fighting.
+  - 1-click promotion of the baked Franken-LoRA directly into the active Studio Session for immediate testing in Stage 4.
 
 
 

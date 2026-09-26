@@ -77,6 +77,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<OverbakeRadarService>();
         builder.Services.AddSingleton<LoraEchoHunterService>();
         builder.Services.AddSingleton<LoraDeAnonymizerService>();
+        builder.Services.AddSingleton<LoraChopShopService>();
         builder.Services.AddSingleton<StudioSessionService>();
         builder.Services.AddSingleton<SystemTrayService>();
 
