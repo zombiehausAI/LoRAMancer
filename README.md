@@ -23,8 +23,12 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 7. **In-App Document Viewer & Theme Engine**: Read full system documentation directly inside the application, and customize your workspace with high-contrast dark themes and importable/exportable JSON palettes.
 8. **One-Click ComfyUI Test Studio**: Automatically generate prompt graphs for FLUX.1, SDXL, and SD 1.5, deploy LoRAs locally via symlinks (or remote LAN/WAN multipart uploads), stream WebSocket sampling progress, and render test outputs directly inside LoRAMancer.
 9. **Dataset Curator & Batch Caption Studio**: Tag frequency analysis, mass find/replace across `.txt` captions, trigger word prefixing/suffixing with automatic backups, and aspect ratio bucketing distribution auditing.
-10. **LoRA Surgery Studio (SVD & Merging)**: Compress high-rank LoRAs (ranks 64/128) down to compact ranks (16/32) using truncated Singular Value Decomposition, and merge pairs of LoRAs with custom linear interpolation weights.
-11. **TensorBoard & Pre-Flight OOM Protection**: Dry-run hardware estimation comparing model requirements against detected GPU VRAM to prevent driver crashes, paired with 1-click TensorBoard launch.
+10. **LoRA Surgery Studio (SVD, Merging & Extraction)**: Compress high-rank LoRAs down to compact ranks (16/32) using truncated SVD, merge pairs of LoRAs with linear interpolation, and extract instant ~30MB LoRAs directly from full fine-tuned checkpoints ($\Delta W = W_{ft} - W_{base}$) with zero training.
+11. **LoRA Gene Therapy (Layer Energy Heatmap & Outlier Pruning)**: Calculate Frobenius weight norms ($\| \Delta W \|_F$) across every transformer/UNet block, detect toxic outliers causing color burn or style bleed, and surgically attenuate or zero-out defective layers without retraining.
+12. **LoRA Visual Diff Inspector**: Compare two LoRAs side-by-side with high-dimensional weight angle cosine similarity drift across every tensor, identifying subtle fine-tuning drift vs heavy divergence alongside recipe hyperparameter diffs.
+13. **Semantic Collision Radar & Anti-Bleed Token Synthesizer**: Detect lexical collisions between proposed trigger words and the base model's CLIP/T5 vocabulary priors to prevent concept bleed; synthesize zero-collision phonetic tokens (e.g. `ohwx`, `v9x`) and cleanse entire datasets in one click.
+14. **Automated AI Benchmark Matrix (Sweet Spot Finder)**: Automatically evaluate multiple epoch checkpoints across a 4-part visual battery (likeness, style flexibility, bleed stress, composition) via ComfyUI, plot the learning curve, and pinpoint the optimal checkpoint before overfitting occurs.
+15. **TensorBoard & Pre-Flight OOM Protection**: Dry-run hardware estimation comparing model requirements against detected GPU VRAM to prevent driver crashes, paired with 1-click TensorBoard launch.
 
 ## Documentation Index
 

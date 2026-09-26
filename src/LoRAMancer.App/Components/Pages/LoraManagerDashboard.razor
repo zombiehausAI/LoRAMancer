@@ -391,6 +391,12 @@
                             <MudTooltip Text="LoRA Surgery & SVD Resizing">
                                 <MudIconButton Icon="@Icons.Material.Filled.ContentCut" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => OpenLoraSurgeryAsync(lora))" />
                             </MudTooltip>
+                            <MudTooltip Text="LoRA Gene Therapy & Outlier Pruning">
+                                <MudIconButton Icon="@Icons.Material.Filled.Biotech" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => OpenLoraGeneTherapyAsync(lora))" />
+                            </MudTooltip>
+                            <MudTooltip Text="LoRA Visual Diff Inspector">
+                                <MudIconButton Icon="@Icons.Material.Filled.Difference" Size="Size.Small" Color="Color.Primary" OnClick="@(() => OpenLoraDiffAsync(lora))" />
+                            </MudTooltip>
                             <MudTooltip Text="Save & Copy Metadata JSON">
                                 <MudIconButton Icon="@Icons.Material.Filled.DataObject" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SaveLoraMetadataJsonAsync(lora))" />
                             </MudTooltip>
@@ -498,6 +504,12 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
                     Use Settings
                 </MudButton>
+                <MudTooltip Text="LoRA Gene Therapy & Outlier Pruning">
+                    <MudIconButton Icon="@Icons.Material.Filled.Biotech" Color="Color.Tertiary" Size="Size.Small" OnClick="@(() => OpenLoraGeneTherapyAsync(context))" />
+                </MudTooltip>
+                <MudTooltip Text="LoRA Visual Diff Inspector">
+                    <MudIconButton Icon="@Icons.Material.Filled.Difference" Color="Color.Primary" Size="Size.Small" OnClick="@(() => OpenLoraDiffAsync(context))" />
+                </MudTooltip>
                 <MudTooltip Text="Save & Copy Metadata JSON">
                     <MudIconButton Icon="@Icons.Material.Filled.DataObject" Color="Color.Primary" Size="Size.Small" OnClick="@(() => SaveLoraMetadataJsonAsync(context))" />
                 </MudTooltip>
@@ -1369,5 +1381,31 @@
             BackdropClick = false
         };
         await DialogService.ShowAsync<LoraSurgeryDialog>("LoRA Surgery & Merger Studio", parameters, options);
+    }
+
+    private async Task OpenLoraGeneTherapyAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<LoraGeneTherapyDialog> {
+            { x => x.InitialLoraPath, lora.FilePath }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<LoraGeneTherapyDialog>("LoRA Gene Therapy Studio", parameters, options);
+    }
+
+    private async Task OpenLoraDiffAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<LoraDiffDialog> {
+            { x => x.InitialPathA, lora.FilePath }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<LoraDiffDialog>("LoRA Visual Diff Inspector", parameters, options);
     }
 }

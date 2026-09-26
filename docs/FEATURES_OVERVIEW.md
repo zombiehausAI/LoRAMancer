@@ -162,3 +162,63 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - 1-click launch of TensorBoard server on port 6006 directly against the active run output directory.
   - Interactive real-time loss curves, learning rate progression, and gradient norms in your browser.
 
+---
+
+## 13. LoRA Gene Therapy (Layer Block Energy Heatmap & Toxic Outlier Pruner)
+
+- **Block Energy Distribution & Frobenius Norm Heatmap**:
+  - Computes the Frobenius weight delta norm ($\| \Delta W \|_F$) across every transformer and UNet block ($W_{up} \times W_{down}$).
+  - Visually renders the energy distribution and flags toxic outliers ($> 2.8\times$ mean energy) causing color fry, contrast crushing, and prompt bleeding.
+  - Detects dead or flat layers ($< 0.05\times$ mean energy) that waste parameter capacity.
+- **Surgical Layer Pruning & Selective Attenuation**:
+  - Select and attenuate ($0.0\times - 0.75\times$) or zero-out defective layers without retraining.
+  - Instantly cures "fried" models and salvages overcooked LoRA checkpoints in seconds.
+
+---
+
+## 14. Instant Model-to-LoRA Checkpoint Extraction
+
+- **Direct Checkpoint Subtraction ($\Delta W = W_{ft} - W_{base}$)**:
+  - Subtracts a base model from a fine-tuned model checkpoint to extract parameter deltas directly.
+  - Employs truncated Singular Value Decomposition (`torch.linalg.svd`) to factorize delta matrices into compact low-rank LoRA matrices ($A \in \mathbb{R}^{d \times r}, B \in \mathbb{R}^{r \times k}$).
+  - Extracts full ~30MB LoRAs from 24GB full models in < 60 seconds on CPU or GPU with zero training required.
+
+---
+
+## 15. LoRA Visual Diff Inspector
+
+- **Side-by-Side Weight Cosine Drift & Layer Matrix**:
+  - Compares two LoRA `.safetensors` files side-by-side with tensor-level precision.
+  - Computes Frobenius norm deltas and high-dimensional weight angle cosine similarity across all shared tensors.
+  - Flags divergence levels: Identical, Subtle Drift, Moderate Drift, Heavy Divergence, or Topology Mismatch.
+- **Training Recipe & Hyperparameter Diffs**:
+  - Compares base architecture, learning rates, schedulers, rank/alpha ratios, dataset tags, and optimizer configurations from Safetensors headers.
+  - Exports clean Markdown audit reports for model versioning and merge comparisons.
+
+---
+
+## 16. Semantic Collision Radar & Anti-Bleed Token Synthesizer
+
+- **CLIP / T5 Lexical Prior Collision Detection**:
+  - Evaluates trigger words and caption tags against high-impact visual archetypes (colors, physical elements, genres, and dictionary primitives).
+  - Calculates a Collision Severity Index (0 - 100%) and explains exactly why a trigger word will cause concept bleeding.
+- **Zero-Collision Synthetic Token Generation**:
+  - Synthesizes phonetically pronounceable rare-token sequences (e.g. `ohwx`, `v9x`, `qelx_zenz`) that have dormant semantic presence in base models.
+- **Full Dataset Caption Cleanser**:
+  - Audits entire caption datasets to surface high-risk tokens.
+  - Automatically replaces conflicting archetype words with clean synthetic tokens across all `.txt` caption files in 1 click.
+
+---
+
+## 17. Automated AI Benchmark Matrix (Sweet Spot Finder)
+
+- **Multi-Epoch Automated Evaluation Matrix**:
+  - Point to a training output folder containing multiple epoch checkpoints.
+  - Executes a standardized 4-part visual challenge matrix: [1] Identity Likeness, [2] Style Flexibility, [3] Negative Bleed Stress, [4] Complex Composition.
+  - Automates rendering across epochs via ComfyUI WebSocket pipeline.
+- **Mathematical Sweet Spot Scoring**:
+  - Evaluates Likeness growth, Style Flexibility decay, and Contrast/Burn penalty curves across training epochs.
+  - Pinpoints the exact mathematical optimal epoch checkpoint before overfitting occurred.
+  - 1-click promotion of the winning checkpoint into the primary LoRA Library.
+
+

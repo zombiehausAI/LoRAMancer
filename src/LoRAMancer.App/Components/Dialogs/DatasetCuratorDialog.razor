@@ -2,6 +2,7 @@
 @using LoRAMancer.App.Services
 @implements IDisposable
 @inject DatasetCuratorService CuratorService
+@inject SemanticCollisionService CollisionService
 @inject NativeFileDialogService FileDialogService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
@@ -231,6 +232,115 @@
                             }
                         </div>
                     </MudTabPanel>
+
+                    <!-- Tab 5: Semantic Collision Radar -->
+                    <MudTabPanel Text="Collision Radar" Icon="@Icons.Material.Filled.Radar">
+                        <!-- Single Token Sandbox -->
+                        <MudCard Elevation="0" Class="pa-3 mb-3 mt-1" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                            <div class="d-flex align-center gap-2 mb-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Tertiary" Size="Size.Small" />
+                                <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Trigger Word Anti-Bleed Sandbox</MudText>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
+                                Test any proposed trigger word or concept tag against CLIP &amp; T5 visual archetype priors to prevent prompt bleeding.
+                            </MudText>
+
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_radarTestToken" Label="Test Proposed Trigger Word / Concept" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. nova, silver, crystal, v9x_manc" Immediate="true" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" OnClick="AnalyzeProposedToken" StartIcon="@Icons.Material.Filled.Search">
+                                    Analyze Token
+                                </MudButton>
+                            </div>
+
+                            @if (_singleTokenReport != null) {
+                                <div class="mt-3 pa-3" style="background-color: var(--bg-dark-base, #11111b); border: 1px solid #313244; border-radius: 6px;">
+                                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                                        <div class="d-flex align-center gap-2">
+                                            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; color: #cdd6f4;">@_singleTokenReport.Token</span>
+                                            <MudChip T="string" Color="@GetRadarSeverityColor(_singleTokenReport.Severity)" Size="Size.Small" Variant="Variant.Filled">
+                                                @_singleTokenReport.Severity (@_singleTokenReport.RiskScore% Bleed Risk)
+                                            </MudChip>
+                                            <span style="font-size: 0.75rem; color: #a6adc8;">Category: @_singleTokenReport.Category</span>
+                                        </div>
+                                    </div>
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">@_singleTokenReport.Explanation</MudText>
+
+                                    @if (_singleTokenReport.RecommendedSynthetics.Count > 0) {
+                                        <div class="pt-2" style="border-top: 1px dashed #313244;">
+                                            <MudText Typo="Typo.caption" Style="font-weight: 600; color: #a6e3a1;">Recommended Zero-Collision Synthetic Tokens:</MudText>
+                                            <div class="d-flex flex-wrap gap-2 mt-1">
+                                                @foreach (var syn in _singleTokenReport.RecommendedSynthetics) {
+                                                    <MudChip T="string" Color="Color.Success" Variant="Variant.Outlined" Size="Size.Small" Icon="@Icons.Material.Filled.Check" OnClick="@(() => AdoptSyntheticToken(syn))" Style="cursor: pointer; font-family: 'JetBrains Mono', monospace;">
+                                                        @syn
+                                                    </MudChip>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </MudCard>
+
+                        <!-- Dataset Mass Audit -->
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <div>
+                                <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Full Dataset Lexical Collision Audit</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Scan all caption files in this dataset to uncover conflicting archetype tags</MudText>
+                            </div>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Radar" OnClick="ScanDatasetRadarAsync" Disabled="_isAuditingDataset">
+                                @(_isAuditingDataset ? "Auditing Tokens..." : "Scan Dataset Captions")
+                            </MudButton>
+                        </div>
+
+                        @if (_datasetAudit != null) {
+                            @if (_datasetAudit.HighRiskTokens.Count == 0) {
+                                <div class="pa-4 text-center" style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" Class="mb-2" />
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #a6e3a1;">Zero High-Risk Semantic Collisions Found!</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Scanned @_datasetAudit.TotalTokensScanned tokens across @_datasetAudit.TotalCaptionFiles caption files. All tags are clean.
+                                    </MudText>
+                                </div>
+                            } else {
+                                <MudTable Items="_datasetAudit.HighRiskTokens" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true">
+                                    <HeaderContent>
+                                        <MudTh>Colliding Tag</MudTh>
+                                        <MudTh>Severity</MudTh>
+                                        <MudTh>Risk Score</MudTh>
+                                        <MudTh>Conflict Archetype</MudTh>
+                                        <MudTh Style="text-align: right;">Anti-Bleed Cleanse</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd>
+                                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #cdd6f4;">@context.Token</span>
+                                        </MudTd>
+                                        <MudTd>
+                                            <MudChip T="string" Color="@GetRadarSeverityColor(context.Severity)" Size="Size.Small" Variant="Variant.Filled">
+                                                @context.Severity
+                                            </MudChip>
+                                        </MudTd>
+                                        <MudTd>
+                                            <div class="d-flex align-center gap-2">
+                                                <MudProgressLinear Color="@GetRadarProgressColor(context.RiskScore)" Value="@context.RiskScore" Size="Size.Small" Style="width: 50px;" />
+                                                <span style="font-size: 0.75rem;">@context.RiskScore%</span>
+                                            </div>
+                                        </MudTd>
+                                        <MudTd>
+                                            <div style="font-size: 0.75rem; color: #a6adc8;">@context.Explanation</div>
+                                        </MudTd>
+                                        <MudTd Style="text-align: right;">
+                                            @if (context.RecommendedSynthetics.Count > 0) {
+                                                var rec = context.RecommendedSynthetics[0];
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="@(() => CleanseCollidingTokenAsync(context.Token, rec))" Disabled="_isReplacingRadarToken" StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                                                    Replace with @rec
+                                                </MudButton>
+                                            }
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                        }
+                    </MudTabPanel>
                 </MudTabs>
             }
         </div>
@@ -261,7 +371,7 @@
     private string _galleryFilter = "all";
 
     private readonly Dictionary<string, string> _thumbnailCache = new();
-    private CancellationTokenSource? _cts;
+    private readonly CancellationTokenSource _cts = new();
 
     protected override async Task OnInitializedAsync() {
         _datasetFolder = InitialDatasetFolder ?? "";
@@ -446,6 +556,82 @@
 
     private void CloseDialog() {
         MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private string _radarTestToken = "";
+    private TokenCollisionReport? _singleTokenReport;
+    private DatasetCollisionAudit? _datasetAudit;
+    private bool _isAuditingDataset;
+    private bool _isReplacingRadarToken;
+
+    private void AnalyzeProposedToken() {
+        if (string.IsNullOrWhiteSpace(_radarTestToken)) return;
+        _singleTokenReport = CollisionService.AnalyzeToken(_radarTestToken);
+    }
+
+    private void AdoptSyntheticToken(string synthetic) {
+        _radarTestToken = synthetic;
+        _batchTagInput = synthetic;
+        AnalyzeProposedToken();
+        Snackbar.Add($"Copied '{synthetic}' to batch trigger input!", Severity.Success);
+    }
+
+    private async Task ScanDatasetRadarAsync() {
+        if (string.IsNullOrWhiteSpace(_datasetFolder) || !Directory.Exists(_datasetFolder)) {
+            Snackbar.Add("Please select a valid dataset directory first.", Severity.Warning);
+            return;
+        }
+
+        _isAuditingDataset = true;
+        StateHasChanged();
+        try {
+            _datasetAudit = await CollisionService.AuditDatasetFolderAsync(_datasetFolder, _cts.Token);
+            if (_datasetAudit.HighRiskTokens.Count > 0) {
+                Snackbar.Add($"Found {_datasetAudit.HighRiskTokens.Count} colliding tags in dataset!", Severity.Warning);
+            } else {
+                Snackbar.Add("All tags in dataset are clean!", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Audit error: {ex.Message}", Severity.Error);
+        } finally {
+            _isAuditingDataset = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CleanseCollidingTokenAsync(string oldToken, string newToken) {
+        if (string.IsNullOrWhiteSpace(_datasetFolder)) return;
+
+        _isReplacingRadarToken = true;
+        StateHasChanged();
+        try {
+            int modified = await CollisionService.ReplaceCollidingTokenInDatasetAsync(_datasetFolder, oldToken, newToken, _cts.Token);
+            Snackbar.Add($"Replaced '{oldToken}' with '{newToken}' across {modified} caption files!", Severity.Success);
+            await ScanFolderAsync();
+            await ScanDatasetRadarAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Cleanse error: {ex.Message}", Severity.Error);
+        } finally {
+            _isReplacingRadarToken = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Color GetRadarSeverityColor(CollisionSeverity sev) {
+        return sev switch {
+            CollisionSeverity.Clean => Color.Success,
+            CollisionSeverity.LowRisk => Color.Info,
+            CollisionSeverity.ModerateRisk => Color.Warning,
+            CollisionSeverity.HighRisk => Color.Error,
+            CollisionSeverity.CriticalBleed => Color.Error,
+            _ => Color.Default
+        };
+    }
+
+    private static Color GetRadarProgressColor(int score) {
+        if (score < 25) return Color.Success;
+        if (score < 60) return Color.Warning;
+        return Color.Error;
     }
 
     public void Dispose() {

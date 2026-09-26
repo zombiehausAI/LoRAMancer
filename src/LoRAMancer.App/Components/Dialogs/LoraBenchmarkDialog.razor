@@ -1,0 +1,288 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject LoraBenchmarkService BenchmarkService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Insights" Color="Color.Tertiary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">AI Benchmark Matrix & Sweet Spot Finder</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Automated multi-epoch evaluation matrix across likeness, style flexibility & color burn
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- Setup & Checkpoint Folder Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <MudGrid Class="align-center">
+                    <MudItem xs="12" md="7">
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField @bind-Value="_checkpointFolder" Label="Training Checkpoints Directory" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isBenchmarking" Placeholder="D:\ai-toolkit\output\my_lora" />
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" OnClick="BrowseFolderAsync" Disabled="_isBenchmarking" />
+                            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="ScanFolderAsync" Disabled="_isBenchmarking || string.IsNullOrWhiteSpace(_checkpointFolder)" StartIcon="@Icons.Material.Filled.Refresh">
+                                Scan
+                            </MudButton>
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <div class="d-flex align-center gap-2">
+                            <MudSelect T="string" @bind-Value="_baseArch" Label="Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isBenchmarking">
+                                <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
+                                <MudSelectItem Value="@("SDXL")">SDXL / Pony</MudSelectItem>
+                                <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
+                            </MudSelect>
+                            <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx" Disabled="_isBenchmarking" />
+                        </div>
+                    </MudItem>
+                </MudGrid>
+
+                @if (_discoveredCheckpoints.Count > 0) {
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mt-3 pt-2" style="border-top: 1px dashed var(--border-dark, #313244);">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Found <strong style="color: #89b4fa;">@_discoveredCheckpoints.Count</strong> epoch checkpoints ready for evaluation.
+                        </MudText>
+                        <div class="d-flex align-center gap-3">
+                            <MudCheckBox @bind-Value="_renderViaComfyUi" Label="Render test images via ComfyUI" Color="Color.Primary" Dense="true" Disabled="_isBenchmarking" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunBenchmarkAsync" Disabled="_isBenchmarking">
+                                @(_isBenchmarking ? "Benchmarking Matrix..." : "Run Sweet Spot Benchmark")
+                            </MudButton>
+                        </div>
+                    </div>
+                }
+
+                @if (_isBenchmarking) {
+                    <div class="mt-3">
+                        <div class="d-flex align-center justify-space-between mb-1">
+                            <MudText Typo="Typo.caption" Color="Color.Info">@_progressMessage</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@_progressCurrent of @_progressTotal</MudText>
+                        </div>
+                        <MudProgressLinear Color="Color.Tertiary" Value="@((int)((double)_progressCurrent / Math.Max(1, _progressTotal) * 100))" Style="height: 6px; border-radius: 3px;" />
+                    </div>
+                }
+            </MudCard>
+
+            @if (_suiteResult != null) {
+                <!-- Recommended Sweet Spot Hero Card -->
+                <MudCard Elevation="0" Class="pa-4" Style="background: linear-gradient(135deg, rgba(166, 227, 161, 0.15), rgba(137, 180, 250, 0.1)); border: 1px solid #a6e3a1; border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Stars" Color="Color.Success" Size="Size.Large" />
+                            <div>
+                                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #a6e3a1;">
+                                    Sweet Spot Detected: Epoch @_suiteResult.RecommendedSweetSpotEpoch
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @Path.GetFileName(_suiteResult.RecommendedCheckpointPath)
+                                </MudText>
+                            </div>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRecommendedPathAsync">
+                            Copy Checkpoint Path
+                        </MudButton>
+                    </div>
+                    <MudText Typo="Typo.body2" Style="color: var(--text-primary, #cdd6f4); line-height: 1.4;">
+                        @_suiteResult.RecommendationReason
+                    </MudText>
+                </MudCard>
+
+                <!-- Epoch Metric Table & Learning Progression Curve -->
+                <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700;" Class="mb-2">Learning Curve & Sweet Spot Breakdown</MudText>
+
+                    <MudTable Items="_suiteResult.EpochResults" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;">
+                        <HeaderContent>
+                            <MudTh>Epoch</MudTh>
+                            <MudTh>Sweet Spot Index</MudTh>
+                            <MudTh>Likeness Growth</MudTh>
+                            <MudTh>Style Flexibility</MudTh>
+                            <MudTh>Burn / Overfit</MudTh>
+                            <MudTh>Verdict</MudTh>
+                            <MudTh Style="text-align: right;">Rendered Matrix</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <span style="font-weight: 700; color: @(context.EpochNumber == _suiteResult.RecommendedSweetSpotEpoch ? "#a6e3a1" : "inherit");">
+                                    Epoch @context.EpochNumber
+                                </span>
+                                @if (context.EpochNumber == _suiteResult.RecommendedSweetSpotEpoch) {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Style="font-size: 0.65rem; height: 18px; margin-left: 4px;">
+                                        ★ OPTIMAL
+                                    </MudChip>
+                                }
+                            </MudTd>
+                            <MudTd>
+                                <div class="d-flex align-center gap-2">
+                                    <MudProgressLinear Color="@GetSweetSpotColor(context.SweetSpotIndex)" Value="@((int)context.SweetSpotIndex)" Style="width: 60px; height: 6px; border-radius: 3px;" />
+                                    <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.85rem;">
+                                        @context.SweetSpotIndex.ToString("F1")
+                                    </span>
+                                </div>
+                            </MudTd>
+                            <MudTd>
+                                <span style="color: #89b4fa; font-family: 'JetBrains Mono', monospace;">@context.LikenessScore.ToString("F1")%</span>
+                            </MudTd>
+                            <MudTd>
+                                <span style="color: #a6e3a1; font-family: 'JetBrains Mono', monospace;">@context.FlexibilityScore.ToString("F1")%</span>
+                            </MudTd>
+                            <MudTd>
+                                <span style="color: @(context.BurnPenalty > 50 ? "#f38ba8" : "#f9e2af"); font-family: 'JetBrains Mono', monospace;">
+                                    @context.BurnPenalty.ToString("F1")%
+                                </span>
+                            </MudTd>
+                            <MudTd>
+                                <MudChip T="string" Size="Size.Small" Color="@GetVerdictChipColor(context.Verdict)" Variant="Variant.Outlined" Style="font-size: 0.65rem; height: 20px;">
+                                    @context.Verdict
+                                </MudChip>
+                            </MudTd>
+                            <MudTd Style="text-align: right;">
+                                @if (context.RenderedImagesBase64.Count > 0) {
+                                    <div class="d-flex justify-end gap-1">
+                                        @foreach (var img in context.RenderedImagesBase64) {
+                                            <img src="@img.Value" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid #313244;" alt="Sample" />
+                                        }
+                                    </div>
+                                } else {
+                                    <span style="font-size: 0.75rem; color: var(--text-secondary, #a6adc8);">Simulated Metric</span>
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </MudCard>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Default" OnClick="CloseDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public string? InitialFolder { get; set; }
+
+    [Parameter]
+    public string? InitialTriggerWord { get; set; }
+
+    private string _checkpointFolder = "";
+    private string _baseArch = "FLUX.1";
+    private string _triggerWord = "";
+    private bool _renderViaComfyUi = false;
+    private bool _isBenchmarking;
+
+    private List<string> _discoveredCheckpoints = new();
+    private BenchmarkSuiteResult? _suiteResult;
+
+    private string _progressMessage = "";
+    private int _progressCurrent;
+    private int _progressTotal;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync() {
+        if (!string.IsNullOrWhiteSpace(InitialFolder)) {
+            _checkpointFolder = InitialFolder;
+            await ScanFolderAsync();
+        }
+        if (!string.IsNullOrWhiteSpace(InitialTriggerWord)) {
+            _triggerWord = InitialTriggerWord;
+        }
+    }
+
+    private async Task BrowseFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Training Output Checkpoints Folder");
+        if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder)) {
+            _checkpointFolder = folder;
+            await ScanFolderAsync();
+        }
+    }
+
+    private async Task ScanFolderAsync() {
+        if (string.IsNullOrWhiteSpace(_checkpointFolder) || !Directory.Exists(_checkpointFolder)) {
+            return;
+        }
+
+        _discoveredCheckpoints = await BenchmarkService.DiscoverCheckpointsAsync(_checkpointFolder);
+        if (_discoveredCheckpoints.Count == 0) {
+            Snackbar.Add("No .safetensors checkpoints found in this directory.", Severity.Warning);
+        } else {
+            Snackbar.Add($"Discovered {_discoveredCheckpoints.Count} epoch checkpoints.", Severity.Success);
+        }
+    }
+
+    private async Task RunBenchmarkAsync() {
+        if (_discoveredCheckpoints.Count == 0) {
+            Snackbar.Add("No checkpoints to evaluate. Scan a folder first.", Severity.Warning);
+            return;
+        }
+
+        _isBenchmarking = true;
+        _progressCurrent = 0;
+        _progressTotal = _discoveredCheckpoints.Count;
+        StateHasChanged();
+
+        try {
+            var prompts = BenchmarkService.GenerateDefaultPrompts(_triggerWord);
+            _suiteResult = await BenchmarkService.RunBenchmarkMatrixAsync(
+                _checkpointFolder,
+                _discoveredCheckpoints,
+                _baseArch,
+                _triggerWord,
+                prompts,
+                renderViaComfyUi: _renderViaComfyUi,
+                onProgress: (msg, cur, tot) => {
+                    _progressMessage = msg;
+                    _progressCurrent = cur;
+                    _progressTotal = tot;
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _cts.Token
+            );
+
+            Snackbar.Add($"Benchmark completed! Recommended: Epoch {_suiteResult.RecommendedSweetSpotEpoch}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Benchmark error: {ex.Message}", Severity.Error);
+        } finally {
+            _isBenchmarking = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyRecommendedPathAsync() {
+        if (_suiteResult == null) return;
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", _suiteResult.RecommendedCheckpointPath);
+        Snackbar.Add("Copied checkpoint path to clipboard!", Severity.Success);
+    }
+
+    private static Color GetSweetSpotColor(double score) {
+        if (score >= 75) return Color.Success;
+        if (score >= 55) return Color.Info;
+        if (score >= 40) return Color.Warning;
+        return Color.Error;
+    }
+
+    private static Color GetVerdictChipColor(string verdict) {
+        if (verdict.Contains("Optimal", StringComparison.OrdinalIgnoreCase)) return Color.Success;
+        if (verdict.Contains("Balanced", StringComparison.OrdinalIgnoreCase)) return Color.Info;
+        if (verdict.Contains("Overfitting", StringComparison.OrdinalIgnoreCase)) return Color.Warning;
+        return Color.Error;
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

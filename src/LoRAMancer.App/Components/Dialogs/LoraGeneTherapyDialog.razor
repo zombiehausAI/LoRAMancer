@@ -1,0 +1,284 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject LoraSurgeryService SurgeryService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Biotech" Color="Color.Tertiary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">LoRA Gene Therapy Studio</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Layer block energy heatmap, toxic outlier detection & surgical layer pruning
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- LoRA Selection Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_loraPath" Label="Target LoRA File (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isAnalyzing || _isPruning" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseLoraAsync" Disabled="_isAnalyzing || _isPruning" StartIcon="@Icons.Material.Filled.FileOpen">
+                        Browse
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" OnClick="AnalyzeLoraAsync" Disabled="_isAnalyzing || _isPruning || string.IsNullOrWhiteSpace(_loraPath)" StartIcon="@Icons.Material.Filled.Insights">
+                        @(_isAnalyzing ? "Analyzing..." : "Analyze Blocks")
+                    </MudButton>
+                </div>
+            </MudCard>
+
+            @if (_analysis != null) {
+                <!-- Metrics Ribbon -->
+                <MudGrid Spacing="2">
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Architecture</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #89b4fa;">@_analysis.DetectedArchitecture</MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Total Blocks</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">@_analysis.Blocks.Count</MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Toxic Outliers</MudText>
+                            <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(_analysis.ToxicBlockCount > 0 ? "#f38ba8" : "#a6e3a1")};")">
+                                @_analysis.ToxicBlockCount
+                            </MudText>
+                        </MudCard>
+                    </MudItem>
+                    <MudItem xs="6" sm="3">
+                        <MudCard Elevation="0" Class="pa-2 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Dead / Inactive Blocks</MudText>
+                            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #f9e2af;">@_analysis.DeadBlockCount</MudText>
+                        </MudCard>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- Selection & Pruning Toolbar -->
+                <MudCard Elevation="0" Class="pa-3" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                        <div class="d-flex gap-2 align-center">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" OnClick="SelectAllToxic" StartIcon="@Icons.Material.Filled.Warning">
+                                Select Toxic (@_analysis.ToxicBlockCount)
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" OnClick="SelectAllDead" StartIcon="@Icons.Material.Filled.Bedtime">
+                                Select Dead (@_analysis.DeadBlockCount)
+                            </MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="ClearSelection">
+                                Deselect All
+                            </MudButton>
+                        </div>
+
+                        <div class="d-flex align-center gap-3">
+                            <MudText Typo="Typo.caption">Selected: <b>@_selectedBlocks.Count</b> blocks</MudText>
+                            <MudSelect T="float" @bind-Value="_attenuationFactor" Label="Intervention" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 170px;">
+                                <MudSelectItem Value="0.0f">Zero-Out (Full Prune)</MudSelectItem>
+                                <MudSelectItem Value="0.25f">Attenuate 75% (0.25x)</MudSelectItem>
+                                <MudSelectItem Value="0.5f">Attenuate 50% (0.50x)</MudSelectItem>
+                            </MudSelect>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-center gap-2 mt-3">
+                        <MudTextField @bind-Value="_outputPath" Label="Cleaned Output LoRA" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" OnClick="ExecutePruneAsync" Disabled="_selectedBlocks.Count == 0 || _isPruning" StartIcon="@Icons.Material.Filled.Healing">
+                            @(_isPruning ? "Applying Therapy..." : "Apply Gene Therapy")
+                        </MudButton>
+                    </div>
+                </MudCard>
+
+                <!-- Layer Blocks Heatmap Table -->
+                <MudTable Items="@_analysis.Blocks" Dense="true" Hover="true" Elevation="0" Outlined="true" Style="background-color: transparent;">
+                    <HeaderContent>
+                        <MudTh Style="width: 50px;">Select</MudTh>
+                        <MudTh>Block Identifier</MudTh>
+                        <MudTh Style="width: 90px;">Layers</MudTh>
+                        <MudTh Style="width: 200px;">Energy Distribution</MudTh>
+                        <MudTh Style="width: 100px;">Avg Norm</MudTh>
+                        <MudTh Style="width: 130px;">Diagnosis</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <MudCheckBox T="bool" Value="@_selectedBlocks.Contains(context.BlockName)" ValueChanged="@(val => ToggleBlock(context.BlockName, val))" Size="Size.Small" Dense="true" />
+                        </MudTd>
+                        <MudTd DataLabel="Block">
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #cdd6f4;">@context.BlockName</span>
+                        </MudTd>
+                        <MudTd DataLabel="Layers">
+                            <span style="color: #a6adc8; font-size: 0.8rem;">@context.LayerCount</span>
+                        </MudTd>
+                        <MudTd DataLabel="Energy">
+                            <div class="d-flex align-center gap-2">
+                                <MudProgressLinear Color="@(context.IsToxic ? Color.Error : context.IsDead ? Color.Default : Color.Tertiary)" Value="@context.WeightPercentage" Size="Size.Medium" Rounded="true" Style="width: 120px;" />
+                                <span style="font-size: 0.75rem; color: #a6adc8;">@context.WeightPercentage.ToString("F1")%</span>
+                            </div>
+                        </MudTd>
+                        <MudTd DataLabel="Norm">
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: @(context.IsToxic ? "#f38ba8" : "#cdd6f4");">@context.AverageNorm.ToString("F3")</span>
+                        </MudTd>
+                        <MudTd DataLabel="Diagnosis">
+                            @if (context.IsToxic) {
+                                <MudChip T="string" Color="Color.Error" Size="Size.Small" Icon="@Icons.Material.Filled.LocalFireDepartment">Toxic Outlier</MudChip>
+                            } else if (context.IsDead) {
+                                <MudChip T="string" Color="Color.Default" Size="Size.Small" Icon="@Icons.Material.Filled.Bedtime">Dead / Flat</MudChip>
+                            } else {
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Outlined">Healthy</MudChip>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public string? InitialLoraPath { get; set; }
+
+    private string _loraPath = "";
+    private string _outputPath = "";
+    private bool _isAnalyzing;
+    private bool _isPruning;
+    private GeneTherapyAnalysis? _analysis;
+    private readonly HashSet<string> _selectedBlocks = new();
+    private float _attenuationFactor = 0.0f;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync() {
+        if (!string.IsNullOrWhiteSpace(InitialLoraPath) && File.Exists(InitialLoraPath)) {
+            _loraPath = InitialLoraPath;
+            UpdateSuggestedOutput();
+            await AnalyzeLoraAsync();
+        }
+    }
+
+    private void UpdateSuggestedOutput() {
+        if (!string.IsNullOrWhiteSpace(_loraPath)) {
+            string dir = Path.GetDirectoryName(_loraPath) ?? "";
+            string name = Path.GetFileNameWithoutExtension(_loraPath);
+            _outputPath = Path.Combine(dir, $"{name}_therapy.safetensors");
+        }
+    }
+
+    private async Task BrowseLoraAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _loraPath = file;
+            UpdateSuggestedOutput();
+            await AnalyzeLoraAsync();
+        }
+    }
+
+    private async Task AnalyzeLoraAsync() {
+        if (string.IsNullOrWhiteSpace(_loraPath) || !File.Exists(_loraPath)) {
+            Snackbar.Add("LoRA file does not exist.", Severity.Warning);
+            return;
+        }
+
+        _isAnalyzing = true;
+        _selectedBlocks.Clear();
+        StateHasChanged();
+
+        try {
+            _analysis = await SurgeryService.AnalyzeLayerBlocksAsync(_loraPath);
+            if (_analysis != null) {
+                if (_analysis.ToxicBlockCount > 0) {
+                    SelectAllToxic();
+                    Snackbar.Add($"Analysis found {_analysis.ToxicBlockCount} toxic outlier blocks!", Severity.Warning);
+                } else {
+                    Snackbar.Add($"Analysis completed! Model has {_analysis.Blocks.Count} blocks.", Severity.Success);
+                }
+            } else {
+                Snackbar.Add("Failed to analyze layer blocks. Check python environment.", Severity.Error);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Analysis error: {ex.Message}", Severity.Error);
+        } finally {
+            _isAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleBlock(string blockName, bool isSelected) {
+        if (isSelected) {
+            _selectedBlocks.Add(blockName);
+        } else {
+            _selectedBlocks.Remove(blockName);
+        }
+    }
+
+    private void SelectAllToxic() {
+        if (_analysis == null) return;
+        foreach (var b in _analysis.Blocks.Where(x => x.IsToxic)) {
+            _selectedBlocks.Add(b.BlockName);
+        }
+    }
+
+    private void SelectAllDead() {
+        if (_analysis == null) return;
+        foreach (var b in _analysis.Blocks.Where(x => x.IsDead)) {
+            _selectedBlocks.Add(b.BlockName);
+        }
+    }
+
+    private void ClearSelection() {
+        _selectedBlocks.Clear();
+    }
+
+    private async Task ExecutePruneAsync() {
+        if (string.IsNullOrWhiteSpace(_loraPath) || !File.Exists(_loraPath) || _selectedBlocks.Count == 0) {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_outputPath)) {
+            UpdateSuggestedOutput();
+        }
+
+        _isPruning = true;
+        StateHasChanged();
+        try {
+            var result = await SurgeryService.PruneOrAttenuateBlocksAsync(
+                _loraPath,
+                _outputPath,
+                _selectedBlocks.ToList(),
+                _attenuationFactor
+            );
+
+            if (result.Success) {
+                Snackbar.Add($"Applied Gene Therapy! Saved to {Path.GetFileName(_outputPath)}", Severity.Success);
+            } else {
+                Snackbar.Add($"Gene Therapy failed: {result.Message}", Severity.Error);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Prune execution error: {ex.Message}", Severity.Error);
+        } finally {
+            _isPruning = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

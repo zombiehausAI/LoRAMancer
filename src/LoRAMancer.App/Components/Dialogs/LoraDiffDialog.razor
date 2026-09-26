@@ -1,0 +1,393 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject LoraDiffService DiffService
+@inject NativeFileDialogService FileDialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Difference" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">LoRA Visual Diff Inspector</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Side-by-side weight cosine drift, layer energy delta & recipe hyperparameter diff
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- Model Selectors -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <MudGrid Class="align-center">
+                    <MudItem xs="12" md="5">
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField @bind-Value="_pathA" Label="Model A (Baseline / Reference)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isComparing" />
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" OnClick="BrowseModelAAsync" Disabled="_isComparing" />
+                        </div>
+                    </MudItem>
+                    <MudItem xs="12" md="2" Class="d-flex justify-center">
+                        <MudTooltip Text="Swap Model A and Model B">
+                            <MudIconButton Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Secondary" Variant="Variant.Outlined" OnClick="SwapModels" Disabled="_isComparing" />
+                        </MudTooltip>
+                    </MudItem>
+                    <MudItem xs="12" md="5">
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField @bind-Value="_pathB" Label="Model B (Comparison / Target)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isComparing" />
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" OnClick="BrowseModelBAsync" Disabled="_isComparing" />
+                        </div>
+                    </MudItem>
+                </MudGrid>
+
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mt-2 pt-2" style="border-top: 1px dashed var(--border-dark, #313244);">
+                    <MudCheckBox @bind-Value="_deepAnalysis" Label="Deep PyTorch Cosine Analysis (calculates exact angle drift across layer weights)" Color="Color.Primary" Dense="true" Disabled="_isComparing" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CompareArrows" OnClick="ExecuteDiffAsync" Disabled="_isComparing || string.IsNullOrWhiteSpace(_pathA) || string.IsNullOrWhiteSpace(_pathB)">
+                        @(_isComparing ? "Analyzing Tensors..." : "Run Diff Inspection")
+                    </MudButton>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_statusMessage)) {
+                    <div class="d-flex align-center gap-2 mt-2">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                        <MudText Typo="Typo.caption" Color="Color.Info">@_statusMessage</MudText>
+                    </div>
+                }
+            </MudCard>
+
+            @if (_summary != null) {
+                <!-- Summary Metrics Overview -->
+                <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+                        <div class="d-flex align-center gap-2">
+                            <MudChip T="string" Color="@GetVerdictColor(_summary.CompatibilityStatus)" Variant="Variant.Filled" Size="Size.Small" Style="font-weight: 700;">
+                                @_summary.CompatibilityStatus
+                            </MudChip>
+                            <MudText Typo="Typo.body2" Style="font-weight: 600;">
+                                @_summary.ModelNameA vs @_summary.ModelNameB
+                            </MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            Duration: @_summary.Duration.TotalSeconds.ToString("F2")s
+                        </MudText>
+                    </div>
+
+                    <div class="d-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;">
+                        <div class="pa-2 text-center" style="background-color: var(--bg-dark-base, #1e1e2e); border-radius: 6px;">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary, #a6adc8);">AVG COSINE SIM</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: #a6e3a1;">@_summary.AverageCosineSimilarity.ToString("F4")</div>
+                        </div>
+                        <div class="pa-2 text-center" style="background-color: var(--bg-dark-base, #1e1e2e); border-radius: 6px;">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary, #a6adc8);">AVG WEIGHT DRIFT</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: #f9e2af;">@_summary.AverageDriftScore.ToString("P2")</div>
+                        </div>
+                        <div class="pa-2 text-center" style="background-color: var(--bg-dark-base, #1e1e2e); border-radius: 6px;">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary, #a6adc8);">SHARED TENSORS</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: #89b4fa;">@_summary.SharedTensorsCount / @Math.Max(_summary.TotalTensorsA, _summary.TotalTensorsB)</div>
+                        </div>
+                        <div class="pa-2 text-center" style="background-color: var(--bg-dark-base, #1e1e2e); border-radius: 6px;">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary, #a6adc8);">EXCLUSIVE TENSORS</div>
+                            <div style="font-size: 1.1rem; font-weight: 700; color: #cdd6f4;">A: @_summary.OnlyInACount | B: @_summary.OnlyInBCount</div>
+                        </div>
+                    </div>
+                </MudCard>
+
+                <!-- Detailed Tabs -->
+                <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Color="Color.Transparent">
+                    <!-- Tab 1: Layer Tensor Drift Matrix -->
+                    <MudTabPanel Text="@($"Layer Tensors ({_summary.LayerDiffs.Count})")" Icon="@Icons.Material.Filled.Layers">
+                        <div class="d-flex align-center justify-space-between flex-wrap gap-2 my-2">
+                            <div class="d-flex gap-1">
+                                <MudButton Variant="@(_layerFilter == "all" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" Color="Color.Primary" OnClick="@(() => _layerFilter = "all")">
+                                    All (@_summary.LayerDiffs.Count)
+                                </MudButton>
+                                <MudButton Variant="@(_layerFilter == "divergent" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" Color="Color.Warning" OnClick="@(() => _layerFilter = "divergent")">
+                                    Divergent Only (@_summary.LayerDiffs.Count(x => x.DriftScore > 0.005))
+                                </MudButton>
+                                <MudButton Variant="@(_layerFilter == "mismatch" ? Variant.Filled : Variant.Outlined)" Size="Size.Small" Color="Color.Error" OnClick="@(() => _layerFilter = "mismatch")">
+                                    Mismatches / Missing (@_summary.LayerDiffs.Count(x => x.Status != "Matched"))
+                                </MudButton>
+                            </div>
+                            <MudTextField @bind-Value="_layerSearch" Placeholder="Search layer..." Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Style="max-width: 250px;" />
+                        </div>
+
+                        <MudTable Items="FilteredLayers" Dense="true" Hover="true" Elevation="0" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
+                            <HeaderContent>
+                                <MudTh>Layer Name</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Cosine Sim</MudTh>
+                                <MudTh>Norm A vs B</MudTh>
+                                <MudTh>Rel Delta</MudTh>
+                                <MudTh>Divergence</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>
+                                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; word-break: break-all;">
+                                        @context.LayerName
+                                    </div>
+                                    <div style="font-size: 0.65rem; color: var(--text-secondary, #a6adc8);">
+                                        Shape: @context.ShapeA @(context.ShapeA != context.ShapeB ? $" vs {context.ShapeB}" : "")
+                                    </div>
+                                </MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Outlined">
+                                        @context.Status
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd>
+                                    @if (context.Status == "Matched") {
+                                        <div class="d-flex align-center gap-2">
+                                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; width: 50px;">
+                                                @context.CosineSimilarity.ToString("F4")
+                                            </div>
+                                            <MudProgressLinear Color="@GetCosineBarColor(context.CosineSimilarity)" Value="@((int)(context.CosineSimilarity * 100))" Style="width: 80px; height: 6px; border-radius: 3px;" />
+                                        </div>
+                                    } else {
+                                        <span style="color: var(--text-secondary, #a6adc8);">-</span>
+                                    }
+                                </MudTd>
+                                <MudTd>
+                                    @if (context.NormA > 0 || context.NormB > 0) {
+                                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                                            @context.NormA.ToString("F3") <span style="color: #6c7086;">→</span> @context.NormB.ToString("F3")
+                                        </div>
+                                    } else {
+                                        <span style="color: var(--text-secondary, #a6adc8);">-</span>
+                                    }
+                                </MudTd>
+                                <MudTd>
+                                    @if (context.Status == "Matched" && (context.NormA > 0 || context.NormB > 0)) {
+                                        <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: @(context.RelativeDeltaPct >= 0 ? "#f9e2af" : "#89b4fa");">
+                                            @(context.RelativeDeltaPct >= 0 ? "+" : "")@context.RelativeDeltaPct.ToString("F1")%
+                                        </span>
+                                    } else {
+                                        <span style="color: var(--text-secondary, #a6adc8);">-</span>
+                                    }
+                                </MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetDivergenceColor(context.DivergenceLevel)" Variant="Variant.Filled" Style="font-size: 0.65rem; height: 20px;">
+                                        @context.DivergenceLevel
+                                    </MudChip>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </MudTabPanel>
+
+                    <!-- Tab 2: Recipe & Metadata Diffs -->
+                    <MudTabPanel Text="@($"Recipe Diffs ({_summary.MetadataDiffs.Count(x => x.IsDifferent)})")" Icon="@Icons.Material.Filled.Tune">
+                        <MudTable Items="_summary.MetadataDiffs" Dense="true" Hover="true" Elevation="0" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
+                            <HeaderContent>
+                                <MudTh>Property</MudTh>
+                                <MudTh>Model A</MudTh>
+                                <MudTh>Model B</MudTh>
+                                <MudTh>Status</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd Style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">@context.Key</MudTd>
+                                <MudTd Style="word-break: break-all; color: var(--text-primary, #cdd6f4);">@(context.ValueA ?? "-")</MudTd>
+                                <MudTd Style="word-break: break-all; color: var(--text-primary, #cdd6f4);">@(context.ValueB ?? "-")</MudTd>
+                                <MudTd>
+                                    @if (context.IsDifferent) {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled" Style="font-size: 0.65rem; height: 20px;">
+                                            Changed
+                                        </MudChip>
+                                    } else {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Style="font-size: 0.65rem; height: 20px;">
+                                            Match
+                                        </MudChip>
+                                    }
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </MudTabPanel>
+
+                    <!-- Tab 3: Export Report -->
+                    <MudTabPanel Text="Export Report" Icon="@Icons.Material.Filled.Description">
+                        <div class="d-flex align-center justify-space-between my-2">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Generate a complete Markdown audit report for your diff comparison</MudText>
+                            <div class="d-flex gap-2">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyMarkdownReportAsync">
+                                    Copy Markdown
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveMarkdownReportAsync">
+                                    Save Report to Disk
+                                </MudButton>
+                            </div>
+                        </div>
+                        <MudTextField Value="@DiffService.ExportMarkdownReport(_summary)" Lines="14" ReadOnly="true" Variant="Variant.Outlined" Style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;" />
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Default" OnClick="CloseDialog">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public string? InitialPathA { get; set; }
+
+    [Parameter]
+    public string? InitialPathB { get; set; }
+
+    private string _pathA = "";
+    private string _pathB = "";
+    private bool _deepAnalysis = true;
+    private bool _isComparing;
+    private string _statusMessage = "";
+    private LoraDiffSummary? _summary;
+
+    private string _layerFilter = "all";
+    private string _layerSearch = "";
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync() {
+        if (!string.IsNullOrWhiteSpace(InitialPathA)) _pathA = InitialPathA;
+        if (!string.IsNullOrWhiteSpace(InitialPathB)) _pathB = InitialPathB;
+
+        if (!string.IsNullOrWhiteSpace(_pathA) && !string.IsNullOrWhiteSpace(_pathB) && File.Exists(_pathA) && File.Exists(_pathB)) {
+            await ExecuteDiffAsync();
+        }
+    }
+
+    private async Task BrowseModelAAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _pathA = file;
+        }
+    }
+
+    private async Task BrowseModelBAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _pathB = file;
+        }
+    }
+
+    private void SwapModels() {
+        (_pathA, _pathB) = (_pathB, _pathA);
+    }
+
+    private async Task ExecuteDiffAsync() {
+        if (string.IsNullOrWhiteSpace(_pathA) || !File.Exists(_pathA)) {
+            Snackbar.Add("Please select a valid file for Model A.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_pathB) || !File.Exists(_pathB)) {
+            Snackbar.Add("Please select a valid file for Model B.", Severity.Warning);
+            return;
+        }
+
+        _isComparing = true;
+        _statusMessage = "Starting diff inspection...";
+        StateHasChanged();
+
+        try {
+            _summary = await DiffService.CompareLorasAsync(
+                _pathA,
+                _pathB,
+                deepTensorAnalysis: _deepAnalysis,
+                onProgress: msg => {
+                    _statusMessage = msg;
+                    InvokeAsync(StateHasChanged);
+                },
+                cancellationToken: _cts.Token
+            );
+
+            Snackbar.Add($"Diff analysis complete: {_summary.SharedTensorsCount} matched tensors.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Diff error: {ex.Message}", Severity.Error);
+        } finally {
+            _isComparing = false;
+            _statusMessage = "";
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<LayerDiffItem> FilteredLayers {
+        get {
+            if (_summary == null) return Enumerable.Empty<LayerDiffItem>();
+            var query = _summary.LayerDiffs.AsEnumerable();
+
+            if (_layerFilter == "divergent") {
+                query = query.Where(x => x.DriftScore > 0.005);
+            } else if (_layerFilter == "mismatch") {
+                query = query.Where(x => x.Status != "Matched");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_layerSearch)) {
+                query = query.Where(x => x.LayerName.Contains(_layerSearch, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return query;
+        }
+    }
+
+    private async Task CopyMarkdownReportAsync() {
+        if (_summary == null) return;
+        string md = DiffService.ExportMarkdownReport(_summary);
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", md);
+        Snackbar.Add("Markdown report copied to clipboard!", Severity.Success);
+    }
+
+    private async Task SaveMarkdownReportAsync() {
+        if (_summary == null) return;
+        try {
+            string dir = Path.GetDirectoryName(_summary.PathA) ?? "";
+            string filename = $"diff_{_summary.ModelNameA}_vs_{_summary.ModelNameB}.md";
+            string outPath = Path.Combine(dir, filename);
+            string md = DiffService.ExportMarkdownReport(_summary);
+            await File.WriteAllTextAsync(outPath, md);
+            Snackbar.Add($"Saved report to {filename}!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Save error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static Color GetVerdictColor(string status) {
+        if (status.Contains("Twin", StringComparison.OrdinalIgnoreCase) || status.Contains("Fully", StringComparison.OrdinalIgnoreCase)) return Color.Success;
+        if (status.Contains("Partial", StringComparison.OrdinalIgnoreCase)) return Color.Warning;
+        return Color.Error;
+    }
+
+    private static Color GetStatusColor(string status) {
+        return status switch {
+            "Matched" => Color.Success,
+            "OnlyInA" => Color.Info,
+            "OnlyInB" => Color.Tertiary,
+            _ => Color.Error
+        };
+    }
+
+    private static Color GetCosineBarColor(double cos) {
+        if (cos > 0.98) return Color.Success;
+        if (cos > 0.85) return Color.Warning;
+        return Color.Error;
+    }
+
+    private static Color GetDivergenceColor(string level) {
+        return level switch {
+            "Identical" => Color.Success,
+            "Subtle Drift" => Color.Info,
+            "Moderate Drift" => Color.Warning,
+            "Heavy Divergence" => Color.Error,
+            _ => Color.Dark
+        };
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    public void Dispose() {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

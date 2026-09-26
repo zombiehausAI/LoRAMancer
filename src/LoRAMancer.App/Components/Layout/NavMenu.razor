@@ -23,6 +23,15 @@
     <MudNavLink Icon="@Icons.Material.Filled.ContentCut" OnClick="OpenLoraSurgeryAsync">
         LoRA Surgery & Merger
     </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.Biotech" OnClick="OpenLoraGeneTherapyAsync">
+        LoRA Gene Therapy
+    </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.Difference" OnClick="OpenLoraDiffAsync">
+        LoRA Visual Diff
+    </MudNavLink>
+    <MudNavLink Icon="@Icons.Material.Filled.Insights" OnClick="OpenLoraBenchmarkAsync">
+        AI Benchmark Matrix
+    </MudNavLink>
 
     <MudDivider Class="my-4" Style="border-color: #313244;" />
 
@@ -63,5 +72,20 @@
     private async Task OpenLoraSurgeryAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraSurgeryDialog>("LoRA Surgery & Merger Studio", options);
+    }
+
+    private async Task OpenLoraGeneTherapyAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraGeneTherapyDialog>("LoRA Gene Therapy Studio", options);
+    }
+
+    private async Task OpenLoraDiffAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraDiffDialog>("LoRA Visual Diff Inspector", options);
+    }
+
+    private async Task OpenLoraBenchmarkAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraBenchmarkDialog>("AI Benchmark Matrix & Sweet Spot Finder", options);
     }
 }

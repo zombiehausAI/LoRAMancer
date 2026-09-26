@@ -48,6 +48,9 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\ComfyUiService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\DatasetCuratorService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraSurgeryService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraDiffService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\SemanticCollisionService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraBenchmarkService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>

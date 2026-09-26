@@ -105,6 +105,55 @@
                         </MudButton>
                     </div>
                 </MudTabPanel>
+
+                <!-- Tab 3: Checkpoint-to-LoRA Extraction -->
+                <MudTabPanel Text="Checkpoint Extraction" Icon="@Icons.Material.Filled.AutoFixHigh">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                        Subtract a base model from a fine-tuned checkpoint (ΔW = Checkpoint - Base) and extract an instant ~30MB LoRA using SVD decomposition without any training.
+                    </MudText>
+
+                    <MudGrid Spacing="2">
+                        <!-- Finetuned Checkpoint -->
+                        <MudItem xs="12">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_extractFinetunedPath" Label="Finetuned Model Checkpoint (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseExtractFinetunedAsync" Disabled="_isProcessing" StartIcon="@Icons.Material.Filled.FileOpen">
+                                    Browse
+                                </MudButton>
+                            </div>
+                        </MudItem>
+
+                        <!-- Base Checkpoint -->
+                        <MudItem xs="12">
+                            <div class="d-flex align-center gap-2">
+                                <MudTextField @bind-Value="_extractBasePath" Label="Base Foundation Checkpoint (.safetensors)" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="BrowseExtractBaseAsync" Disabled="_isProcessing" StartIcon="@Icons.Material.Filled.FileOpen">
+                                    Browse
+                                </MudButton>
+                            </div>
+                        </MudItem>
+
+                        <!-- Target Rank Selector -->
+                        <MudItem xs="12" md="4">
+                            <MudSelect T="int" @bind-Value="_extractRank" Label="Extracted LoRA Rank" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isProcessing">
+                                <MudSelectItem Value="16">Rank 16 (~30MB)</MudSelectItem>
+                                <MudSelectItem Value="32">Rank 32 (~60MB)</MudSelectItem>
+                                <MudSelectItem Value="64">Rank 64 (~120MB)</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+
+                        <!-- Output LoRA Destination -->
+                        <MudItem xs="12" md="8">
+                            <MudTextField @bind-Value="_extractOutputPath" Label="Extracted LoRA Destination" Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" Disabled="_isProcessing" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <div class="d-flex justify-end mt-3">
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="StartExtractionAsync" Disabled="_isProcessing || string.IsNullOrWhiteSpace(_extractFinetunedPath) || string.IsNullOrWhiteSpace(_extractBasePath)" StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                            @(_isProcessing ? "Extracting LoRA..." : "Extract LoRA from Checkpoint")
+                        </MudButton>
+                    </div>
+                </MudTabPanel>
             </MudTabs>
 
             <!-- Execution Logs Console -->
@@ -292,6 +341,84 @@
         } catch (Exception ex) {
             _statusMessage = "Error: " + ex.Message;
             Snackbar.Add($"Merge failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private string _extractFinetunedPath = "";
+    private string _extractBasePath = "";
+    private int _extractRank = 16;
+    private string _extractOutputPath = "";
+
+    private async Task BrowseExtractFinetunedAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _extractFinetunedPath = file;
+            UpdateSuggestedExtractOutput();
+        }
+    }
+
+    private async Task BrowseExtractBaseAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file)) {
+            _extractBasePath = file;
+            UpdateSuggestedExtractOutput();
+        }
+    }
+
+    private void UpdateSuggestedExtractOutput() {
+        if (!string.IsNullOrWhiteSpace(_extractFinetunedPath)) {
+            string dir = Path.GetDirectoryName(_extractFinetunedPath) ?? "";
+            string name = Path.GetFileNameWithoutExtension(_extractFinetunedPath);
+            _extractOutputPath = Path.Combine(dir, $"{name}_extracted_lora.safetensors");
+        }
+    }
+
+    private async Task StartExtractionAsync() {
+        if (string.IsNullOrWhiteSpace(_extractFinetunedPath) || !File.Exists(_extractFinetunedPath)) {
+            Snackbar.Add("Finetuned checkpoint file not found.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_extractBasePath) || !File.Exists(_extractBasePath)) {
+            Snackbar.Add("Base checkpoint file not found.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_extractOutputPath)) {
+            UpdateSuggestedExtractOutput();
+        }
+
+        _isProcessing = true;
+        _statusMessage = "Extracting LoRA via difference decomposition...";
+        _logs.Clear();
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try {
+            var result = await SurgeryService.ExtractLoraFromCheckpointAsync(
+                _extractFinetunedPath,
+                _extractBasePath,
+                _extractOutputPath,
+                _extractRank,
+                line => {
+                    _logs.Add(line);
+                    InvokeAsync(StateHasChanged);
+                },
+                _cts.Token
+            );
+
+            if (result.Success) {
+                _statusMessage = "Extraction complete!";
+                Snackbar.Add(result.Message, Severity.Success);
+            } else {
+                _statusMessage = "Extraction failed";
+                Snackbar.Add(result.Message, Severity.Error);
+            }
+        } catch (Exception ex) {
+            _statusMessage = "Error: " + ex.Message;
+            Snackbar.Add($"Extraction failed: {ex.Message}", Severity.Error);
         } finally {
             _isProcessing = false;
             StateHasChanged();
