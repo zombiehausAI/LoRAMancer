@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using LoRAMancer.App.Engines;
 using LoRAMancer.App.Models;
 using Microsoft.AspNetCore.Builder;
@@ -80,6 +82,55 @@ public sealed class TrainingEstimateRequestDto {
     public int NetworkDim { get; set; } = 16;
 }
 
+public sealed class OllamaTagRequestDto {
+    public string? InputPath { get; set; }
+    public string? TriggerWord { get; set; }
+    public string? Model { get; set; }
+    public string? SubjectFocus { get; set; } = "general";
+    public string? CaptionStyle { get; set; } = "tags";
+    public string? CustomPrompt { get; set; }
+    public string? IncludedPhrases { get; set; }
+    public string? BlacklistWords { get; set; }
+}
+
+public sealed class ToolResizeRequestDto {
+    public string? SourceLora { get; set; }
+    public string? OutputLora { get; set; }
+    public int TargetRank { get; set; } = 16;
+}
+
+public sealed class ToolMergeRequestDto {
+    public string? ModelA { get; set; }
+    public string? ModelB { get; set; }
+    public double Ratio { get; set; } = 0.5;
+    public string? OutputLora { get; set; }
+}
+
+public sealed class ToolGeneTherapyAnalyzeDto {
+    public string? LoraPath { get; set; }
+}
+
+public sealed class ToolGeneTherapyPruneDto {
+    public string? LoraPath { get; set; }
+    public string? OutputPath { get; set; }
+    public double Threshold { get; set; } = 2.8;
+}
+
+public sealed class ToolDiffCompareDto {
+    public string? ModelAPath { get; set; }
+    public string? ModelBPath { get; set; }
+}
+
+public sealed class ToolBenchmarkScanDto {
+    public string? FolderPath { get; set; }
+}
+
+public sealed class ToolBenchmarkStartDto {
+    public string? CheckpointFolder { get; set; }
+    public string? BaseArch { get; set; } = "FLUX.1";
+    public string? TriggerWord { get; set; }
+}
+
 public sealed class NetworkServerService : IAsyncDisposable {
     private readonly SettingsService _settingsService;
     private readonly TrainingRunnerService _trainingRunner;
@@ -96,6 +147,9 @@ public sealed class NetworkServerService : IAsyncDisposable {
     private readonly AiToolkitConfigBuilder? _configBuilder;
     private readonly TrainingEstimationService? _estimationService;
     private readonly SafeTensorsMetadataReader? _metadataReader;
+    private readonly PluginManagerService? _pluginManager;
+    private readonly LoraDiffService? _diffService;
+    private readonly LoraBenchmarkService? _benchmarkService;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -123,7 +177,10 @@ public sealed class NetworkServerService : IAsyncDisposable {
         ComfyUiService? comfyUiService = null,
         AiToolkitConfigBuilder? configBuilder = null,
         TrainingEstimationService? estimationService = null,
-        SafeTensorsMetadataReader? metadataReader = null
+        SafeTensorsMetadataReader? metadataReader = null,
+        PluginManagerService? pluginManager = null,
+        LoraDiffService? diffService = null,
+        LoraBenchmarkService? benchmarkService = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
@@ -140,6 +197,9 @@ public sealed class NetworkServerService : IAsyncDisposable {
         _configBuilder = configBuilder;
         _estimationService = estimationService;
         _metadataReader = metadataReader;
+        _pluginManager = pluginManager;
+        _diffService = diffService;
+        _benchmarkService = benchmarkService;
 
         _trainingRunner.OnProgressUpdated += HandleProgressUpdated;
         _trainingRunner.OnLogReceived += HandleLogReceived;
@@ -173,10 +233,6 @@ public sealed class NetworkServerService : IAsyncDisposable {
         WebApplication app = builder.Build();
         app.UseCors();
 
-        // 1. PWA Manifest & App Chrome Assets
-        app.MapGet("/manifest.json", () => Results.Text(GetWebManifestJson(), "application/manifest+json"));
-        app.MapGet("/sw.js", () => Results.Text(GetServiceWorkerJs(), "application/javascript"));
-        app.MapGet("/icon.svg", () => Results.Text(GetAppIconSvg(), "image/svg+xml"));
 
         // 2. Auth Session Check / Token Validation
         app.MapPost("/api/v1/auth/login", async (HttpRequest request) => {
@@ -278,15 +334,20 @@ public sealed class NetworkServerService : IAsyncDisposable {
             if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
 
             var env = await _venvProvisioner.DetectEnvironmentAsync();
+            var detected = _estimationService?.GetDetectedGpu() ?? ("AMD Radeon RX 7900 XTX", 24.0);
+            string gpuName = !string.IsNullOrWhiteSpace(env.GpuName) && !env.GpuName.Contains("Fallback") ? env.GpuName : detected.GpuName;
+            int totalVramMb = (int)Math.Round(detected.VramGb * 1024);
+            int availVramMb = (int)Math.Round(totalVramMb * 0.85);
+
             return Results.Json(new {
                 detectedVendor = env.DetectedVendor.ToString(),
-                gpuName = string.IsNullOrWhiteSpace(env.GpuName) ? "AMD Radeon Graphics" : env.GpuName,
+                gpuName = gpuName,
                 rocmFound = env.RocmDriverFound,
                 rocmVersion = env.RocmVersion,
                 pythonFound = !string.IsNullOrWhiteSpace(env.PythonExecutable),
                 pythonVersion = env.PythonVersion,
-                vramTotalMb = 16384,
-                vramAvailableMb = 12288,
+                vramTotalMb = totalVramMb,
+                vramAvailableMb = availVramMb,
                 torchVersion = _settingsService.Current.PyTorchVersion,
                 os = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
                 machineName = Environment.MachineName,
@@ -433,8 +494,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
                 estimatedDurationMinutes = totalSteps * 1.35 / 60.0,
                 formattedDuration = TimeSpan.FromSeconds(totalSteps * 1.35).ToString(@"hh\:mm\:ss"),
                 stepBreakdown = $"{req.ImageCount} images × {req.Repeats} reps × {req.Epochs} ep ÷ {safeBatch} = {totalSteps} steps",
-                totalVramGb = 16.0,
-                gpuName = "AMD Radeon Graphics",
+                totalVramGb = 24.0,
+                gpuName = "AMD Radeon RX 7900 XTX",
                 hasSufficientVram = true,
                 warnings = Array.Empty<string>()
             });
@@ -778,7 +839,364 @@ public sealed class NetworkServerService : IAsyncDisposable {
             }
         });
 
-        // 23. Embedded Desktop-Replicating HTML Interface
+        // 22b. Ollama Vision Status Check & Models Enumeration
+        app.MapGet("/api/v1/curate/ollama/status", async (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+
+            string configuredUrl = (_settingsService.Current.OllamaEndpointUrl ?? "http://localhost:11434").Trim().TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(configuredUrl)) configuredUrl = "http://localhost:11434";
+
+            var candidates = new List<string> { configuredUrl };
+            if (configuredUrl.Contains("localhost")) candidates.Add(configuredUrl.Replace("localhost", "127.0.0.1"));
+            else if (configuredUrl.Contains("127.0.0.1")) candidates.Add(configuredUrl.Replace("127.0.0.1", "localhost"));
+
+            bool connected = false;
+            string activeUrl = configuredUrl;
+            var visionModels = new List<string>();
+            var allModels = new List<string>();
+            string defaultModel = _settingsService.Current.OllamaDefaultModel ?? "llama3.2-vision";
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            http.DefaultRequestHeaders.Add("User-Agent", "LoRAMancer-Tagger/1.0");
+            if (!string.IsNullOrWhiteSpace(_settingsService.Current.OllamaApiKey)) {
+                http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settingsService.Current.OllamaApiKey.Trim());
+            }
+
+            foreach (var cand in candidates) {
+                try {
+                    using var resp = await http.GetAsync($"{cand}/api/tags");
+                    if (resp.IsSuccessStatusCode) {
+                        var json = await resp.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("models", out var modelsElem) && modelsElem.ValueKind == JsonValueKind.Array) {
+                            foreach (var m in modelsElem.EnumerateArray()) {
+                                string name = m.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
+                                if (!string.IsNullOrEmpty(name)) {
+                                    allModels.Add(name);
+                                    string nLower = name.ToLowerInvariant();
+                                    bool isVis = nLower.Contains("vision") || nLower.Contains("llava") || nLower.Contains("bakllava") || nLower.Contains("qwen") || nLower.Contains("minicpm");
+                                    if (!isVis && m.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array) {
+                                        foreach (var cap in caps.EnumerateArray()) {
+                                            if (string.Equals(cap.GetString(), "vision", StringComparison.OrdinalIgnoreCase)) {
+                                                isVis = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (!isVis && m.TryGetProperty("details", out var det) && det.TryGetProperty("family", out var fam)) {
+                                        string f = (fam.GetString() ?? "").ToLowerInvariant();
+                                        if (f.Contains("vl") || f.Contains("clip") || f.Contains("vision")) isVis = true;
+                                    }
+                                    if (isVis && !visionModels.Contains(name)) {
+                                        visionModels.Add(name);
+                                    }
+                                }
+                            }
+                        }
+                        connected = true;
+                        activeUrl = cand;
+                        break;
+                    }
+                } catch { }
+            }
+
+            if (visionModels.Count == 0 && allModels.Count > 0) {
+                visionModels.AddRange(allModels);
+            }
+            if (visionModels.Count > 0 && !visionModels.Contains(defaultModel)) {
+                defaultModel = visionModels[0];
+            }
+
+            return Results.Json(new {
+                reachable = connected,
+                url = activeUrl,
+                visionModels = visionModels,
+                defaultModel = defaultModel
+            });
+        });
+
+        // 22c. Ollama Automated Dataset Tagging (In-Place)
+        app.MapPost("/api/v1/curate/ollama/tag", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+
+            var req = await JsonSerializer.DeserializeAsync<OllamaTagRequestDto>(request.Body);
+            if (req == null) return Results.BadRequest(new { error = "Invalid tag request parameters." });
+
+            string inputPath = req.InputPath ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(inputPath) || (!Directory.Exists(inputPath) && !File.Exists(inputPath))) {
+                string uploads = GetEffectiveUploadsDirectory();
+                if (Directory.Exists(uploads)) {
+                    var subDirs = Directory.GetDirectories(uploads);
+                    if (subDirs.Length > 0) {
+                        inputPath = subDirs.OrderByDescending(Directory.GetLastWriteTimeUtc).First();
+                    } else {
+                        inputPath = uploads;
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(inputPath) || (!Directory.Exists(inputPath) && !File.Exists(inputPath))) {
+                return Results.BadRequest(new { error = "No valid dataset directory or ZIP archive specified." });
+            }
+
+            string focus = (req.SubjectFocus ?? "general").ToLowerInvariant();
+            string style = (req.CaptionStyle ?? "tags").ToLowerInvariant();
+            string prompt = req.CustomPrompt?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(prompt)) {
+                prompt = style == "natural"
+                    ? (focus switch {
+                        "character" => "Describe this character in detail in 1-2 natural sentences, focusing on physical likeness, facial features, hair, clothing, pose, and expression. Do not use filler words.",
+                        "style" => "Describe the visual and artistic style of this image in 1-2 sentences, focusing on medium, brushwork, lighting, color palette, and textures.",
+                        "concept" => "Describe the primary object or concept in this image in 1-2 sentences, noting its material, structure, and distinctive visual attributes.",
+                        "clothing" => "Describe the outfit, clothing materials, tailoring, and accessories in detail in 1-2 sentences.",
+                        _ => "Describe this image thoroughly in 1-2 detailed sentences for training a text-to-image AI model. Focus on subject appearance, posture, clothing, colors, setting, and lighting."
+                    })
+                    : (focus switch {
+                        "character" => "Analyze this image for character training. Output ONLY comma-separated tags describing: gender, hair color, eye color, facial expression, clothing, pose, camera angle, and background.",
+                        "style" => "Analyze this image for art style training. Output ONLY comma-separated tags describing: artistic medium, art style, brushwork, color palette, lighting atmosphere, and texture.",
+                        "concept" => "Analyze this image for concept or object training. Output ONLY comma-separated tags describing: the primary object, mechanical parts, material, colors, and setting.",
+                        "clothing" => "Analyze this image for fashion and outfit training. Output ONLY comma-separated tags describing: garment type, clothing style, fabric material, color, patterns, and accessories.",
+                        _ => "Analyze this image in detail for machine learning training. Output ONLY concise, comma-separated tags describing the subject, attire, hair, expression, pose, background, lighting, and artistic style."
+                    });
+            }
+
+            string model = !string.IsNullOrWhiteSpace(req.Model) ? req.Model : (_settingsService.Current.OllamaDefaultModel ?? "llama3.2-vision");
+            string ollamaUrl = _settingsService.Current.OllamaEndpointUrl ?? "http://localhost:11434";
+            string apiKey = _settingsService.Current.OllamaApiKey ?? string.Empty;
+
+            if (_pluginManager != null) {
+                var parameters = new Dictionary<string, object?> {
+                    ["input_path"] = inputPath,
+                    ["output_path"] = string.Empty,
+                    ["trigger_word"] = req.TriggerWord ?? string.Empty,
+                    ["included_phrases"] = req.IncludedPhrases ?? string.Empty,
+                    ["blacklist_words"] = req.BlacklistWords ?? string.Empty,
+                    ["model"] = model,
+                    ["caption_style"] = style,
+                    ["custom_prompt"] = prompt,
+                    ["create_zip"] = false,
+                    ["ollama_url"] = ollamaUrl,
+                    ["api_key"] = apiKey
+                };
+
+                var pluginResult = await _pluginManager.ExecutePluginAsync(
+                    "ollama-lora-tagger",
+                    "tag_dataset",
+                    parameters,
+                    line => {
+                        BroadcastTelemetry(new TrainingTelemetryDto {
+                            EventType = "tag_log",
+                            Message = line,
+                            Timestamp = DateTime.UtcNow
+                        });
+                    },
+                    null,
+                    CancellationToken.None
+                );
+
+                int processed = 0;
+                var sampleCaptions = new List<object>();
+
+                if (pluginResult.Data != null) {
+                    try {
+                        using var doc = JsonDocument.Parse(pluginResult.Data.ToString() ?? "{}");
+                        if (doc.RootElement.TryGetProperty("processed", out var pElem)) processed = pElem.GetInt32();
+                        if (doc.RootElement.TryGetProperty("sample_captions", out var sElem) && sElem.ValueKind == JsonValueKind.Array) {
+                            foreach (var s in sElem.EnumerateArray()) {
+                                sampleCaptions.Add(new {
+                                    image = s.TryGetProperty("image", out var img) ? img.GetString() : "",
+                                    caption = s.TryGetProperty("caption", out var cap) ? cap.GetString() : ""
+                                });
+                            }
+                        }
+                    } catch { }
+                }
+
+                var report = await _datasetInspector.InspectDatasetAsync(inputPath);
+
+                return Results.Json(new {
+                    success = pluginResult.Success,
+                    processedCount = processed > 0 ? processed : report.TotalCaptions,
+                    totalImages = report.TotalImages,
+                    captionCount = report.TotalCaptions,
+                    datasetPath = inputPath,
+                    sampleCaptions = sampleCaptions,
+                    message = pluginResult.Success ? $"Auto-tagging complete! Processed {processed} image(s) in-place." : (pluginResult.Message ?? "Auto-tagging failed.")
+                });
+            }
+
+            return Results.BadRequest(new { error = "Plugin manager service is not initialized on host." });
+        });
+
+        // 23. Documentation Endpoints
+        app.MapGet("/api/v1/docs", (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            string dir = LocateDocsDirectory();
+            if (!Directory.Exists(dir)) return Results.Json(Array.Empty<object>());
+
+            var docs = Directory.GetFiles(dir, "*.md")
+                .Select(f => {
+                    string fn = Path.GetFileName(f);
+                    return new {
+                        fileName = fn,
+                        title = GetDocFriendlyTitle(fn),
+                        icon = GetDocIcon(fn),
+                        sortWeight = GetDocSortWeight(fn),
+                        category = "Guides"
+                    };
+                })
+                .OrderBy(d => d.sortWeight)
+                .ToList();
+
+            return Results.Json(docs);
+        });
+
+        app.MapGet("/api/v1/docs/{fileName}", async (string fileName, HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            string cleanName = Path.GetFileName(fileName);
+            string dir = LocateDocsDirectory();
+            string fullPath = Path.Combine(dir, cleanName);
+
+            if (!File.Exists(fullPath)) {
+                return Results.NotFound(new { error = $"Document '{cleanName}' not found." });
+            }
+
+            string md = await File.ReadAllTextAsync(fullPath);
+            string html = ConvertMarkdownToHtml(md);
+            return Results.Json(new {
+                fileName = cleanName,
+                title = GetDocFriendlyTitle(cleanName),
+                icon = GetDocIcon(cleanName),
+                markdown = md,
+                html = html
+            });
+        });
+
+        app.MapGet("/docs", async (HttpContext context) => {
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.WriteAsync(GetEmbeddedWebInterfaceHtml());
+        });
+
+        // 24. Studio Modal Tools API Endpoints
+        app.MapPost("/api/v1/tools/surgery/resize", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_surgeryService == null) return Results.BadRequest(new { error = "Surgery service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolResizeRequestDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.SourceLora) || string.IsNullOrWhiteSpace(dto.OutputLora)) {
+                return Results.BadRequest(new { error = "Source and destination LoRA paths are required." });
+            }
+
+            var result = await _surgeryService.ResizeLoraAsync(dto.SourceLora, dto.OutputLora, dto.TargetRank);
+            return Results.Json(result);
+        });
+
+        app.MapPost("/api/v1/tools/surgery/merge", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_surgeryService == null) return Results.BadRequest(new { error = "Surgery service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolMergeRequestDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.ModelA) || string.IsNullOrWhiteSpace(dto.ModelB) || string.IsNullOrWhiteSpace(dto.OutputLora)) {
+                return Results.BadRequest(new { error = "Model A, Model B, and output destination paths are required." });
+            }
+
+            float w1 = (float)dto.Ratio;
+            float w2 = (float)(1.0 - dto.Ratio);
+            var result = await _surgeryService.MergeLorasAsync(dto.ModelA, w1, dto.ModelB, w2, dto.OutputLora);
+            return Results.Json(result);
+        });
+
+        app.MapPost("/api/v1/tools/genetherapy/analyze", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_surgeryService == null) return Results.BadRequest(new { error = "Surgery service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolGeneTherapyAnalyzeDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.LoraPath)) {
+                return Results.BadRequest(new { error = "Target LoRA file path is required." });
+            }
+
+            var analysis = await _surgeryService.AnalyzeLayerBlocksAsync(dto.LoraPath);
+            if (analysis == null) return Results.BadRequest(new { error = "Analysis failed or model invalid." });
+            return Results.Json(analysis);
+        });
+
+        app.MapPost("/api/v1/tools/genetherapy/prune", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_surgeryService == null) return Results.BadRequest(new { error = "Surgery service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolGeneTherapyPruneDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.LoraPath) || string.IsNullOrWhiteSpace(dto.OutputPath)) {
+                return Results.BadRequest(new { error = "Target and output paths are required." });
+            }
+
+            var analysis = await _surgeryService.AnalyzeLayerBlocksAsync(dto.LoraPath);
+            if (analysis == null) return Results.BadRequest(new { error = "Failed to inspect model blocks for pruning." });
+
+            double thresh = dto.Threshold > 0 ? dto.Threshold : 2.8;
+            var toxicBlocks = analysis.Blocks
+                .Where(b => (b.AverageNorm > (analysis.OverallAverageNorm * thresh) && b.AverageNorm > 0.5) || b.IsToxic)
+                .Select(b => b.BlockName)
+                .ToList();
+
+            if (toxicBlocks.Count == 0) {
+                return Results.Json(new { success = false, message = "No toxic outliers found exceeding the threshold." });
+            }
+
+            var result = await _surgeryService.PruneOrAttenuateBlocksAsync(dto.LoraPath, dto.OutputPath, toxicBlocks, 0.0f);
+            return Results.Json(result);
+        });
+
+        app.MapPost("/api/v1/tools/diff/compare", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_diffService == null) return Results.BadRequest(new { error = "Diff service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolDiffCompareDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.ModelAPath) || string.IsNullOrWhiteSpace(dto.ModelBPath)) {
+                return Results.BadRequest(new { error = "Model A and Model B paths are required." });
+            }
+
+            var summary = await _diffService.CompareLorasAsync(dto.ModelAPath, dto.ModelBPath);
+            return Results.Json(summary);
+        });
+
+        app.MapPost("/api/v1/tools/benchmark/scan", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_benchmarkService == null) return Results.BadRequest(new { error = "Benchmark service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolBenchmarkScanDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.FolderPath)) {
+                return Results.BadRequest(new { error = "Folder path is required." });
+            }
+
+            var checkpoints = await _benchmarkService.DiscoverCheckpointsAsync(dto.FolderPath);
+            return Results.Json(new { count = checkpoints.Count, checkpoints = checkpoints });
+        });
+
+        app.MapPost("/api/v1/tools/benchmark/start", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_benchmarkService == null) return Results.BadRequest(new { error = "Benchmark service not initialized." });
+
+            var dto = await JsonSerializer.DeserializeAsync<ToolBenchmarkStartDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.CheckpointFolder)) {
+                return Results.BadRequest(new { error = "Checkpoint folder is required." });
+            }
+
+            var checkpoints = await _benchmarkService.DiscoverCheckpointsAsync(dto.CheckpointFolder);
+            if (checkpoints.Count == 0) return Results.BadRequest(new { error = "No .safetensors checkpoints discovered in folder." });
+
+            var prompts = _benchmarkService.GenerateDefaultPrompts(dto.TriggerWord ?? "");
+            var result = await _benchmarkService.RunBenchmarkMatrixAsync(
+                dto.CheckpointFolder,
+                checkpoints,
+                dto.BaseArch ?? "FLUX.1",
+                dto.TriggerWord ?? "",
+                prompts,
+                renderViaComfyUi: false
+            );
+            return Results.Json(result);
+        });
+
+        // 25. Embedded Desktop-Replicating HTML Interface
         app.MapGet("/", async (HttpContext context) => {
             context.Response.ContentType = "text/html; charset=utf-8";
             await context.Response.WriteAsync(GetEmbeddedWebInterfaceHtml());
@@ -788,6 +1206,24 @@ public sealed class NetworkServerService : IAsyncDisposable {
         app.MapGet("/login", async (HttpContext context) => {
             context.Response.ContentType = "text/html; charset=utf-8";
             await context.Response.WriteAsync(GetEmbeddedLoginPageHtml());
+        });
+
+        // 25. PWA Web App Manifest
+        app.MapGet("/manifest.json", async (HttpContext context) => {
+            context.Response.ContentType = "application/manifest+json; charset=utf-8";
+            await context.Response.WriteAsync(GetWebManifestJson());
+        });
+
+        // 26. PWA Service Worker
+        app.MapGet("/sw.js", async (HttpContext context) => {
+            context.Response.ContentType = "application/javascript; charset=utf-8";
+            await context.Response.WriteAsync(GetServiceWorkerJs());
+        });
+
+        // 27. App Icon (SVG)
+        app.MapGet("/icon.svg", async (HttpContext context) => {
+            context.Response.ContentType = "image/svg+xml; charset=utf-8";
+            await context.Response.WriteAsync(GetAppIconSvg());
         });
 
         ListeningUrl = $"http://{bindAddress}:{port}";
@@ -923,20 +1359,253 @@ public sealed class NetworkServerService : IAsyncDisposable {
         await StopServerAsync();
     }
 
+    private static string LocateDocsDirectory() {
+        string baseDir = AppContext.BaseDirectory;
+        string appDocs = Path.Combine(baseDir, "docs");
+        if (Directory.Exists(appDocs) && Directory.GetFiles(appDocs, "*.md").Length > 0) {
+            return appDocs;
+        }
+
+        string candidate = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "docs"));
+        if (Directory.Exists(candidate) && Directory.GetFiles(candidate, "*.md").Length > 0) {
+            return candidate;
+        }
+
+        string curCandidate = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "docs"));
+        if (Directory.Exists(curCandidate) && Directory.GetFiles(curCandidate, "*.md").Length > 0) {
+            return curCandidate;
+        }
+
+        return appDocs;
+    }
+
+    private static string GetDocFriendlyTitle(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => "Features & Subsystem Reference",
+            "HYPERPARAMETER_GUIDE.MD" => "Hyperparameters & Options Guide",
+            "LORA_LIBRARY_BROWSER.MD" => "LoRA Library & Multi-Library Browser",
+            "TRAINING_WIZARD.MD" => "Easy Use Training Wizard",
+            "HISTORY_AND_VAULT.MD" => "LoRA Training History & Vault",
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => "Universal GPU Setup (ROCm / CUDA / Intel)",
+            "AMD_ROCM_SETUP.MD" => "AMD ROCm Windows Setup Guide",
+            "REMOTE_TRAINING.MD" => "Remote Web UI & Public Serving",
+            "PLUGINS.MD" => "Plugin System (C# & Python)",
+            "ARCHITECTURE.MD" => "Architecture & Core Engine",
+            "INSTALLER_AND_UPDATES.MD" => "Installer & Update Specs",
+            _ => Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ')
+        };
+    }
+
+    private static string GetDocIcon(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => "⭐",
+            "HYPERPARAMETER_GUIDE.MD" => "🎛️",
+            "LORA_LIBRARY_BROWSER.MD" => "📚",
+            "TRAINING_WIZARD.MD" => "🧙",
+            "HISTORY_AND_VAULT.MD" => "🏛️",
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => "⚡",
+            "AMD_ROCM_SETUP.MD" => "🔴",
+            "REMOTE_TRAINING.MD" => "🌐",
+            "PLUGINS.MD" => "🔌",
+            "ARCHITECTURE.MD" => "🏗️",
+            "INSTALLER_AND_UPDATES.MD" => "📦",
+            _ => "📄"
+        };
+    }
+
+    private static int GetDocSortWeight(string fileName) {
+        return fileName.ToUpperInvariant() switch {
+            "FEATURES_OVERVIEW.MD" => 1,
+            "HYPERPARAMETER_GUIDE.MD" => 2,
+            "LORA_LIBRARY_BROWSER.MD" => 3,
+            "TRAINING_WIZARD.MD" => 4,
+            "HISTORY_AND_VAULT.MD" => 5,
+            "GPU_AND_ENVIRONMENT_SETUP.MD" => 6,
+            "AMD_ROCM_SETUP.MD" => 7,
+            "REMOTE_TRAINING.MD" => 8,
+            "PLUGINS.MD" => 9,
+            "ARCHITECTURE.MD" => 10,
+            "INSTALLER_AND_UPDATES.MD" => 11,
+            _ => 99
+        };
+    }
+
+    private static string ConvertMarkdownToHtml(string markdown) {
+        if (string.IsNullOrWhiteSpace(markdown)) {
+            return string.Empty;
+        }
+
+        var lines = markdown.Replace("\r\n", "\n").Split('\n');
+        var sb = new StringBuilder();
+        bool inCodeBlock = false;
+        bool inList = false;
+        bool inTable = false;
+        bool isTableHeader = false;
+
+        foreach (var rawLine in lines) {
+            string line = rawLine;
+
+            // Fenced code blocks
+            if (line.TrimStart().StartsWith("```")) {
+                if (!inCodeBlock) {
+                    inCodeBlock = true;
+                    if (inList) { inList = false; sb.Append("</ul>\n"); }
+                    if (inTable) { inTable = false; sb.Append("</table>\n"); }
+                    sb.Append("<pre style='background:#11111b; border:1px solid #313244; padding:12px; border-radius:6px; overflow-x:auto; font-family:monospace; font-size:0.85rem; color:#cdd6f4;'><code>");
+                } else {
+                    inCodeBlock = false;
+                    sb.Append("</code></pre>\n");
+                }
+                continue;
+            }
+
+            if (inCodeBlock) {
+                sb.Append(System.Net.WebUtility.HtmlEncode(line)).Append('\n');
+                continue;
+            }
+
+            string trimmed = line.Trim();
+
+            // Tables
+            if (trimmed.StartsWith("|") && trimmed.EndsWith("|")) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                if (!inTable) {
+                    inTable = true;
+                    isTableHeader = true;
+                    sb.Append("<table style='width:100%; border-collapse:collapse; margin:16px 0; font-size:0.88rem; background:rgba(17,17,27,0.5); border-radius:6px; overflow:hidden; border:1px solid #313244;'>\n");
+                }
+                if (trimmed.Contains("---")) {
+                    isTableHeader = false;
+                    continue;
+                }
+                var cells = trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries);
+                sb.Append("<tr style='border-bottom:1px solid #313244;'>");
+                foreach (var cell in cells) {
+                    if (isTableHeader) {
+                        sb.Append("<th style='padding:8px 12px; background:#181825; color:#cba6f7; text-align:left; font-weight:700;'>").Append(FormatDocInline(cell.Trim())).Append("</th>");
+                    } else {
+                        sb.Append("<td style='padding:8px 12px; color:#cdd6f4;'>").Append(FormatDocInline(cell.Trim())).Append("</td>");
+                    }
+                }
+                sb.Append("</tr>\n");
+                continue;
+            } else if (inTable) {
+                inTable = false;
+                sb.Append("</table>\n");
+            }
+
+            // Headings
+            if (trimmed.StartsWith("### ")) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                sb.Append("<h3 style='margin-top:1.4rem; margin-bottom:0.5rem; font-weight:700; color:#cdd6f4; font-size:1.15rem;'>")
+                  .Append(FormatDocInline(trimmed[4..]))
+                  .Append("</h3>\n");
+                continue;
+            }
+            if (trimmed.StartsWith("## ")) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                sb.Append("<h2 style='margin-top:1.8rem; margin-bottom:0.6rem; font-weight:700; color:var(--accent-purple); font-size:1.35rem; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px;'>")
+                  .Append(FormatDocInline(trimmed[3..]))
+                  .Append("</h2>\n");
+                continue;
+            }
+            if (trimmed.StartsWith("# ")) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                sb.Append("<h1 style='margin-top:0.8rem; margin-bottom:0.8rem; font-weight:800; color:var(--accent-purple); font-size:1.6rem;'>")
+                  .Append(FormatDocInline(trimmed[2..]))
+                  .Append("</h1>\n");
+                continue;
+            }
+
+            // Horizontal rule
+            if (trimmed == "---" || trimmed == "***" || trimmed == "___") {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                sb.Append("<hr style='border:0; border-top:1px solid #313244; margin:1.5rem 0;' />\n");
+                continue;
+            }
+
+            // Callout alerts
+            if (trimmed.StartsWith("> [!")) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                int closeBracket = trimmed.IndexOf(']');
+                string alertType = closeBracket > 4 ? trimmed[4..closeBracket].ToUpperInvariant() : "NOTE";
+                sb.Append("<div style='background:rgba(203,166,247,0.08); border-left:4px solid var(--accent-purple); border-radius:4px; padding:10px 14px; margin:12px 0;'><b style='color:var(--accent-purple);'>")
+                  .Append(alertType)
+                  .Append(":</b> ");
+                continue;
+            }
+            if (trimmed.StartsWith("> ")) {
+                sb.Append(FormatDocInline(trimmed[2..])).Append("</div>\n");
+                continue;
+            }
+
+            // Unordered list items
+            if (trimmed.StartsWith("- ") || trimmed.StartsWith("* ")) {
+                if (!inList) {
+                    inList = true;
+                    sb.Append("<ul style='padding-left:1.5rem; margin-bottom:0.8rem;'>\n");
+                }
+                sb.Append("<li style='margin-bottom:4px;'>").Append(FormatDocInline(trimmed[2..])).Append("</li>\n");
+                continue;
+            }
+
+            // Numbered list items
+            var numMatch = Regex.Match(trimmed, @"^(\d+)\.\s+(.*)$");
+            if (numMatch.Success) {
+                if (!inList) {
+                    inList = true;
+                    sb.Append("<ol style='padding-left:1.5rem; margin-bottom:0.8rem;'>\n");
+                }
+                sb.Append("<li style='margin-bottom:4px;'>").Append(FormatDocInline(numMatch.Groups[2].Value)).Append("</li>\n");
+                continue;
+            }
+
+            // Blank line
+            if (string.IsNullOrWhiteSpace(trimmed)) {
+                if (inList) { inList = false; sb.Append("</ul>\n"); }
+                continue;
+            }
+
+            // Regular paragraph
+            if (inList) { inList = false; sb.Append("</ul>\n"); }
+            sb.Append("<p style='margin-bottom:0.8rem; line-height:1.6;'>").Append(FormatDocInline(trimmed)).Append("</p>\n");
+        }
+
+        if (inList) sb.Append("</ul>\n");
+        if (inTable) sb.Append("</table>\n");
+        return sb.ToString();
+    }
+
+    private static string FormatDocInline(string text) {
+        if (string.IsNullOrEmpty(text)) {
+            return string.Empty;
+        }
+
+        string result = System.Net.WebUtility.HtmlEncode(text);
+        result = Regex.Replace(result, @"\*\*(.+?)\*\*", "<strong style='color:#ffffff; font-weight:700;'>$1</strong>");
+        result = Regex.Replace(result, @"\b__(.+?)__\b", "<strong style='color:#ffffff; font-weight:700;'>$1</strong>");
+        result = Regex.Replace(result, @"`([^`]+)`", "<code style='background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:0.88em; color:var(--accent-purple);'>$1</code>");
+        result = Regex.Replace(result, @"\[([^\]]+)\]\(([^)]+)\)", "<span style='color:var(--accent-purple); text-decoration:underline;'>$1</span>");
+        return result;
+    }
+
     private static string GetWebManifestJson() {
         return """
 {
+  "id": "/",
   "name": "LoRAMancer Studio",
   "short_name": "LoRAMancer",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#11111b",
   "theme_color": "#181825",
   "description": "Desktop-Class Remote Web UI for AMD ROCm & PyTorch LoRA Training",
   "icons": [
     {
       "src": "/icon.svg",
-      "sizes": "any",
+      "sizes": "192x192 512x512 any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
@@ -947,16 +1616,37 @@ public sealed class NetworkServerService : IAsyncDisposable {
 
     private static string GetServiceWorkerJs() {
         return """
-const CACHE_NAME = 'loramancer-v2-cache';
+const CACHE_NAME = 'loramancer-pwa-v2';
+const PRECACHE_ASSETS = [
+    '/',
+    '/manifest.json',
+    '/icon.svg'
+];
+
 self.addEventListener('install', (e) => {
+    e.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_ASSETS))
+    );
     self.skipWaiting();
 });
+
 self.addEventListener('activate', (e) => {
-    e.waitUntil(clients.claim());
+    e.waitUntil(
+        caches.keys().then((keys) => Promise.all(
+            keys.map((k) => { if (k !== CACHE_NAME) return caches.delete(k); })
+        ))
+    );
+    self.clients.claim();
 });
+
 self.addEventListener('fetch', (e) => {
-    // Transparent pass-through with offline fallback
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    if (e.request.method !== 'GET') return;
+    const url = e.request.url;
+    // Transparent pass-through for API requests, SSE telemetry streams, and WebSockets
+    if (url.includes('/api/')) return;
+    e.respondWith(
+        fetch(e.request).catch(() => caches.match(e.request))
+    );
 });
 """;
     }
@@ -981,6 +1671,13 @@ self.addEventListener('fetch', (e) => {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LoRAMancer Studio - Authentication</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#11111b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="LoRAMancer" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <style>
         :root {
             --bg-base: #11111b;
@@ -1709,6 +2406,161 @@ self.addEventListener('fetch', (e) => {
             border-color: var(--accent-purple);
             background: rgba(203, 166, 247, 0.05);
         }
+
+        /* MODAL DIALOG OVERLAYS */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(17, 17, 27, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-window {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-dark);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 880px;
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+            overflow: hidden;
+            animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-dark);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-overlay);
+        }
+
+        .modal-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
+        .modal-close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.4rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 4px 10px;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+
+        .modal-close-btn:hover {
+            color: var(--accent-red);
+            background: rgba(243, 139, 168, 0.15);
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .modal-footer {
+            padding: 14px 20px;
+            border-top: 1px solid var(--border-dark);
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-overlay);
+        }
+
+        /* DOCUMENTATION VIEWER STYLES */
+        .doc-nav-item {
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+
+        .doc-nav-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .doc-nav-item.active {
+            background: rgba(203, 166, 247, 0.14);
+            border-left: 3px solid var(--accent-purple);
+            color: var(--accent-purple);
+            font-weight: 700;
+        }
+
+        .markdown-rendered-view pre {
+            background: #11111b;
+            border: 1px solid #313244;
+            padding: 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.84rem;
+        }
+
+        .markdown-rendered-view code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .markdown-rendered-view table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.86rem;
+            background: rgba(17, 17, 27, 0.5);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #313244;
+        }
+
+        .markdown-rendered-view th {
+            padding: 10px 14px;
+            background: #181825;
+            color: var(--accent-purple);
+            text-align: left;
+            font-weight: 700;
+            border-bottom: 1px solid #313244;
+        }
+
+        .markdown-rendered-view td {
+            padding: 9px 14px;
+            color: var(--text-primary);
+            border-bottom: 1px solid #232336;
+        }
     </style>
 </head>
 <body>
@@ -1751,7 +2603,32 @@ self.addEventListener('fetch', (e) => {
                 <span class="nav-badge">Stage 5</span>
             </div>
 
-            <div class="nav-group-header">Modal Tools</div>
+            <div class="nav-group-header">Studio Modal Tools</div>
+            <div class="nav-item" onclick="openModalApp('ollama')">
+                <span class="nav-icon">🤖</span>
+                <span>Ollama Vision Tagger</span>
+                <span class="nav-badge" style="color:var(--accent-purple);">Modal</span>
+            </div>
+            <div class="nav-item" onclick="openModalApp('surgery')">
+                <span class="nav-icon">✂️</span>
+                <span>LoRA Surgery &amp; Merger</span>
+                <span class="nav-badge" style="color:var(--accent-blue);">Modal</span>
+            </div>
+            <div class="nav-item" onclick="openModalApp('genetherapy')">
+                <span class="nav-icon">🧬</span>
+                <span>LoRA Gene Therapy</span>
+                <span class="nav-badge" style="color:var(--accent-green);">Modal</span>
+            </div>
+            <div class="nav-item" onclick="openModalApp('diff')">
+                <span class="nav-icon">🔍</span>
+                <span>LoRA Visual Diff</span>
+                <span class="nav-badge" style="color:var(--accent-peach);">Modal</span>
+            </div>
+            <div class="nav-item" onclick="openModalApp('benchmark')">
+                <span class="nav-icon">📊</span>
+                <span>AI Benchmark Matrix</span>
+                <span class="nav-badge" style="color:var(--accent-yellow);">Modal</span>
+            </div>
             <div class="nav-item" onclick="switchView('chop')">
                 <span class="nav-icon">🛠️</span>
                 <span>LoRA Chop-Shop</span>
@@ -1767,7 +2644,7 @@ self.addEventListener('fetch', (e) => {
                 <span class="nav-icon">💻</span>
                 <span>Compute Environment</span>
             </div>
-            <div class="nav-item" onclick="openDocs()">
+            <div class="nav-item" onclick="switchView('docs')">
                 <span class="nav-icon">📖</span>
                 <span>Documentation</span>
             </div>
@@ -1781,6 +2658,11 @@ self.addEventListener('fetch', (e) => {
             <div class="host-status-row">
                 <span>Public Tunnel</span>
                 <span id="tunnelStatusBadge" style="color:var(--accent-blue);">Direct LAN</span>
+            </div>
+            <div id="pwaSidebarItem" style="display:none; margin-top:8px; padding:6px 10px; background:rgba(203,166,247,0.1); border:1px solid rgba(203,166,247,0.25); border-radius:6px; cursor:pointer;" onclick="triggerPwaInstall()">
+                <div style="display:flex; align-items:center; gap:8px; font-size:0.75rem; font-weight:700; color:var(--accent-purple);">
+                    <span>📲</span> Install Desktop App
+                </div>
             </div>
         </div>
     </div>
@@ -1804,6 +2686,9 @@ self.addEventListener('fetch', (e) => {
             </div>
 
             <div class="topbar-right">
+                <button id="pwaInstallBtn" class="btn btn-sm" style="display:none; background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)); color:#11111b; font-weight:800; border:none; padding:5px 12px; border-radius:6px; cursor:pointer;" onclick="triggerPwaInstall()">
+                    <span>📲</span> Install App
+                </button>
                 <div class="rocm-pill">
                     <span>🔥</span>
                     <span id="rocmTelemetryBadge">AMD ROCm Active</span>
@@ -1836,8 +2721,103 @@ self.addEventListener('fetch', (e) => {
                             <div class="stat-label">Uploaded Dataset Health Report</div>
                             <div id="curateReportStatus" style="font-size:0.95rem; font-weight:700; color:var(--accent-purple); margin-top:6px;">No dataset uploaded yet</div>
                             <div id="curateDetails" style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">Upload a ZIP above to audit images and caption pairs.</div>
-                            <button id="sendToTrainerBtn" class="btn btn-sm" style="margin-top:12px; display:none;" onclick="sendCurateDatasetToTrain()">🪄 Use in Training Wizard</button>
+                            <button id="sendToTrainerBtn" class="btn btn-sm" style="margin-top:12px; display:none;" onclick="sendCurateDatasetToTrain()">🪄 Use in Easy Use Wizard</button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Stage 1b: Ollama Vision Automated Captioning & Tagging Studio -->
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header-bar">
+                        <div class="card-title">🤖 Ollama Vision Automated Captioning</div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span id="ollamaStatusPill" class="chip chip-stage" style="color:var(--accent-yellow);">Checking Ollama...</span>
+                            <button class="btn btn-secondary btn-sm" onclick="loadOllamaStatus()">🔄 Test / Refresh</button>
+                        </div>
+                    </div>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
+                        Auto-caption images in-place using Ollama multimodal vision models (e.g. <code>llama3.2-vision</code>, <code>llava</code>, <code>qwen2-vl</code>). Captions are generated and saved directly as <code>.txt</code> files alongside your images with zero duplication.
+                    </p>
+
+                    <div class="grid-3">
+                        <div class="input-group">
+                            <label>Target Dataset Directory</label>
+                            <input id="ollamaDatasetPath" type="text" placeholder="Upload ZIP above or enter host folder..." />
+                        </div>
+                        <div class="input-group">
+                            <label>Ollama Vision Model</label>
+                            <select id="ollamaModelSelect">
+                                <option value="llama3.2-vision">llama3.2-vision</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>Trigger Activation Phrase</label>
+                            <input id="ollamaTriggerWord" type="text" placeholder="e.g. sks character, ohwx style" />
+                        </div>
+                    </div>
+
+                    <!-- Subject Focus Presets -->
+                    <div style="margin-top:12px;">
+                        <label style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:8px;">Subject Focus Preset</label>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button type="button" id="btnFocusGeneral" class="btn btn-sm btn-secondary active" onclick="setOllamaFocusPreset('general')">🌐 General / Balanced</button>
+                            <button type="button" id="btnFocusCharacter" class="btn btn-sm btn-secondary" onclick="setOllamaFocusPreset('character')">👤 Character / Likeness</button>
+                            <button type="button" id="btnFocusStyle" class="btn btn-sm btn-secondary" onclick="setOllamaFocusPreset('style')">🎨 Art Style / Medium</button>
+                            <button type="button" id="btnFocusConcept" class="btn btn-sm btn-secondary" onclick="setOllamaFocusPreset('concept')">⚙️ Concept / Object</button>
+                            <button type="button" id="btnFocusClothing" class="btn btn-sm btn-secondary" onclick="setOllamaFocusPreset('clothing')">👗 Clothing / Fashion</button>
+                            <button type="button" id="btnFocusCustom" class="btn btn-sm btn-secondary" onclick="setOllamaFocusPreset('custom')">✏️ Custom Prompt</button>
+                        </div>
+                    </div>
+
+                    <!-- Caption Style Selection -->
+                    <div style="margin-top:14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <label style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:6px;">Caption Format Style</label>
+                            <div class="segmented-tabs" style="max-width:440px; margin-bottom:0;">
+                                <button type="button" id="btnStyleTags" class="tab-btn active" onclick="setOllamaCaptionStyle('tags')">🏷️ Visual Tags (SDXL / Pony)</button>
+                                <button type="button" id="btnStyleNatural" class="tab-btn" onclick="setOllamaCaptionStyle('natural')">📝 Natural Sentences (FLUX.1)</button>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:flex-end;">
+                            <button id="btnRunOllamaTag" class="btn" onclick="startOllamaTagging()">
+                                <span>🚀</span> Run In-Place Vision Auto-Tagging
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Custom Prompt Instruction -->
+                    <div style="margin-top:14px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                            <label style="font-size:0.8rem; font-weight:700; color:var(--text-secondary);">Vision System Prompt / Instructions</label>
+                            <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.7rem; padding:2px 8px;" onclick="resetOllamaPrompt()">Reset to Preset</button>
+                        </div>
+                        <textarea id="ollamaCustomPrompt" rows="3" style="width:100%; background:#11111b; border:1px solid var(--border-dark); border-radius:8px; padding:10px; color:#fff; font-size:0.8rem; font-family:inherit; resize:vertical;"></textarea>
+                    </div>
+
+                    <!-- Progress & Logs Box -->
+                    <div id="ollamaProgressCard" style="display:none; margin-top:14px; background:#11111b; border:1px solid var(--border-dark); border-radius:8px; padding:12px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                            <div style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:0.85rem;">
+                                <span id="ollamaSpinIcon">⏳</span>
+                                <span id="ollamaProgressStatus">Tagging images with Ollama...</span>
+                            </div>
+                            <span id="ollamaProgressCount" class="chip chip-stage" style="color:var(--accent-purple);">Processing</span>
+                        </div>
+                        <div style="background:#09090d; border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px 12px; font-family:monospace; font-size:0.75rem; color:#a6adc8; max-height:160px; overflow-y:auto;" id="ollamaLogBox">
+                        </div>
+                    </div>
+
+                    <!-- Results & Sample Captions -->
+                    <div id="ollamaResultsBox" style="display:none; margin-top:14px; background:#11111b; border:1px solid rgba(166,227,161,0.3); border-radius:8px; padding:14px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:1.2rem;">🎉</span>
+                                <b style="color:var(--accent-green);" id="ollamaResultTitle">Auto-Tagging Complete!</b>
+                            </div>
+                            <button class="btn btn-sm" onclick="sendOllamaDatasetToWizard()">🪄 Use in Easy Use Wizard</button>
+                        </div>
+                        <div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:8px;">Sample Generated Captions:</div>
+                        <div id="ollamaSampleCaptionsList" style="display:flex; flex-direction:column; gap:6px;"></div>
                     </div>
                 </div>
             </div>
@@ -1982,7 +2962,10 @@ self.addEventListener('fetch', (e) => {
                                 <span id="auditCaptionsBadge" class="chip chip-stage">20 Captions</span>
                                 <span id="auditMissingBadge" class="chip chip-stage" style="color:var(--accent-green);">0 Missing</span>
                             </div>
-                            <button class="btn btn-secondary btn-sm" onclick="prependTriggerToCaptions()">🪄 Prepend Trigger to Captions</button>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <button class="btn btn-secondary btn-sm" onclick="autoTagWizardCaptionsWithOllama()">🤖 Auto-Tag with Ollama</button>
+                                <button class="btn btn-secondary btn-sm" onclick="prependTriggerToCaptions()">🪄 Prepend Trigger to Captions</button>
+                            </div>
                         </div>
                     </div>
 
@@ -2404,6 +3387,359 @@ self.addEventListener('fetch', (e) => {
                 </div>
             </div>
 
+            <!-- VIEW: DOCUMENTATION VIEWER -->
+            <div id="view-docs" class="view-panel">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header-bar">
+                        <div class="card-title">📖 Documentation &amp; User Guides</div>
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn btn-secondary btn-sm" onclick="copyCurrentDocMarkdown()">📋 Copy Markdown</button>
+                            <button class="btn btn-secondary btn-sm" onclick="loadDocsList()">🔄 Reload Guides</button>
+                        </div>
+                    </div>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0;">
+                        Comprehensive manuals, architectural specifications, and hardware setup guides packaged directly with LoRAMancer.
+                    </p>
+                </div>
+
+                <div style="display:flex; gap:20px; align-items:flex-start;">
+                    <!-- Left: Filter & Document Index List -->
+                    <div style="width:300px; flex-shrink:0; background:var(--bg-surface); border:1px solid var(--border-dark); border-radius:10px; padding:14px; box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+                        <div class="input-group" style="margin-bottom:10px;">
+                            <input id="docsSearchInput" type="text" placeholder="🔍 Filter guides..." oninput="filterDocs(this.value)" />
+                        </div>
+                        <div id="docsNavContainer" style="display:flex; flex-direction:column; gap:4px; max-height:calc(100vh - 280px); overflow-y:auto; padding-right:4px;">
+                            <div style="color:var(--text-secondary); font-size:0.8rem; padding:8px;">Loading available guides...</div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Rendered Document Viewport -->
+                    <div style="flex:1; background:var(--bg-surface); border:1px solid var(--border-dark); border-radius:10px; padding:24px 30px; box-shadow:0 4px 16px rgba(0,0,0,0.3); min-height:650px; overflow-y:auto; max-height:calc(100vh - 220px);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border-dark); padding-bottom:14px; margin-bottom:20px;">
+                            <div>
+                                <h2 id="docActiveTitle" style="margin:0; font-size:1.4rem; color:var(--accent-purple); font-weight:800;">Selecting guide...</h2>
+                                <div id="docActiveMeta" style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">docs/FEATURES_OVERVIEW.md</div>
+                            </div>
+                        </div>
+                        <div id="docActiveContent" class="markdown-rendered-view" style="color:var(--text-primary); line-height:1.7; font-size:0.92rem;">
+                            Select a guide on the left to read its complete technical documentation.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- MODAL APPS OVERLAY -->
+    <div id="appModalOverlay" class="modal-overlay" style="display:none;" onclick="handleModalBackdropClick(event)">
+        <!-- Modal: Ollama Vision Tagger -->
+        <div id="modal-ollama" class="modal-window" style="display:none;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">🤖 Ollama Vision LoRA Tagger</div>
+                    <div class="modal-subtitle">Multimodal in-place automated captioning with Ollama vision models</div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Target Dataset Directory</label>
+                        <input id="modalOllamaPath" type="text" placeholder="Folder path on host..." />
+                    </div>
+                    <div class="input-group">
+                        <label>Trigger Activation Phrase</label>
+                        <input id="modalOllamaTrigger" type="text" placeholder="e.g. ohwx style, sks person" />
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Ollama Vision Model</label>
+                        <select id="modalOllamaModel">
+                            <option value="llama3.2-vision">llama3.2-vision</option>
+                            <option value="llava">llava</option>
+                            <option value="qwen2-vl">qwen2-vl</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Format Style</label>
+                        <select id="modalOllamaStyle" onchange="updateModalOllamaPrompt()">
+                            <option value="tags">🏷️ Visual Tags (SDXL / Pony)</option>
+                            <option value="natural">📝 Natural Sentences (FLUX.1)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>Subject Focus Preset</label>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+                        <button type="button" class="btn btn-sm btn-secondary active" onclick="setModalOllamaPreset('general', this)">🌐 General</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="setModalOllamaPreset('character', this)">👤 Character</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="setModalOllamaPreset('style', this)">🎨 Style</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="setModalOllamaPreset('concept', this)">⚙️ Concept</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="setModalOllamaPreset('clothing', this)">👗 Clothing</button>
+                    </div>
+                </div>
+                <div class="input-group" style="margin-top:10px;">
+                    <label>Vision Instruction Prompt</label>
+                    <textarea id="modalOllamaPrompt" rows="3"></textarea>
+                </div>
+                <div id="modalOllamaProgress" style="display:none; margin-top:12px;" class="alert-info">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="pulse-indicator"></span>
+                        <span id="modalOllamaStatus">Processing dataset with Ollama vision...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Cancel</button>
+                <button id="modalOllamaRunBtn" class="btn" onclick="runModalOllamaTagging()">🚀 Run Auto-Tagging</button>
+            </div>
+        </div>
+
+        <!-- Modal: LoRA Surgery & Merger -->
+        <div id="modal-surgery" class="modal-window" style="display:none;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">✂️ LoRA Surgery &amp; Merger Studio</div>
+                    <div class="modal-subtitle">SVD rank compression &amp; multi-LoRA weight matrix merging</div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="segmented-tabs" style="max-width:400px; margin-bottom:16px;">
+                    <button id="surgeryTabBtnResize" class="tab-btn active" onclick="switchSurgeryTab('resize')">📉 SVD Rank Resizing</button>
+                    <button id="surgeryTabBtnMerge" class="tab-btn" onclick="switchSurgeryTab('merge')">🧬 Multi-LoRA Merging</button>
+                </div>
+
+                <!-- Tab: SVD Resize -->
+                <div id="surgeryTabResize">
+                    <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px;">
+                        Compress heavy LoRAs (ranks 64, 128, 256) down to lightweight ranks (16, 32) using truncated Singular Value Decomposition. Retains &gt;95% concept fidelity while reducing file size by up to 80%.
+                    </p>
+                    <div class="input-group">
+                        <label>Source LoRA (.safetensors)</label>
+                        <input id="surgeryResizeSource" type="text" placeholder="Full path to source LoRA..." />
+                    </div>
+                    <div class="grid-2">
+                        <div class="input-group">
+                            <label>Target Rank (Dimension)</label>
+                            <select id="surgeryResizeRank">
+                                <option value="8">Rank 8 (Ultra-compact ~10MB)</option>
+                                <option value="16" selected>Rank 16 (Standard / Highly Recommended)</option>
+                                <option value="32">Rank 32 (High Detail)</option>
+                                <option value="64">Rank 64 (Original)</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>Output LoRA Destination</label>
+                            <input id="surgeryResizeOutput" type="text" placeholder="Output .safetensors path..." />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: Multi-LoRA Merge -->
+                <div id="surgeryTabMerge" style="display:none;">
+                    <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px;">
+                        Merge two compatible LoRAs into a single weighted model. Linear interpolation combines weights without retraining.
+                    </p>
+                    <div class="grid-2">
+                        <div class="input-group">
+                            <label>Model A (Primary)</label>
+                            <input id="surgeryMergeA" type="text" placeholder="Path to Model A..." />
+                        </div>
+                        <div class="input-group">
+                            <label>Model B (Secondary)</label>
+                            <input id="surgeryMergeB" type="text" placeholder="Path to Model B..." />
+                        </div>
+                    </div>
+                    <div class="input-group" style="margin:12px 0;">
+                        <label style="display:flex; justify-content:space-between;">
+                            <span>Merge Ratio</span>
+                            <span id="surgeryMergeRatioLabel" style="color:var(--accent-purple); font-weight:800;">50% A / 50% B</span>
+                        </label>
+                        <input id="surgeryMergeRatio" type="range" min="0" max="1" step="0.05" value="0.5" oninput="updateSurgeryMergeRatio(this.value)" />
+                    </div>
+                    <div class="input-group">
+                        <label>Output Merged LoRA Destination</label>
+                        <input id="surgeryMergeOutput" type="text" placeholder="Output destination path..." />
+                    </div>
+                </div>
+
+                <div id="surgeryStatusBox" style="display:none; margin-top:14px; font-size:0.84rem; padding:10px 14px; border-radius:6px; background:#11111b; border:1px solid #313244;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Close</button>
+                <button id="surgeryExecuteBtn" class="btn" onclick="executeSurgeryAction()">Execute SVD Compression</button>
+            </div>
+        </div>
+
+        <!-- Modal: LoRA Gene Therapy -->
+        <div id="modal-genetherapy" class="modal-window" style="display:none;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">🧬 LoRA Gene Therapy Studio</div>
+                    <div class="modal-subtitle">Layer block energy heatmap, toxic outlier detection &amp; surgical layer pruning</div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>Target LoRA File (.safetensors)</label>
+                    <div style="display:flex; gap:8px;">
+                        <input id="gtLoraPath" type="text" placeholder="Full path to LoRA model..." style="flex:1;" />
+                        <button class="btn btn-secondary btn-sm" onclick="runGeneTherapyAnalyze()">🔬 Analyze Blocks</button>
+                    </div>
+                </div>
+
+                <div id="gtAnalysisResult" style="display:none; margin-top:16px;">
+                    <div class="grid-4" style="margin-bottom:14px;">
+                        <div class="stat-box"><div class="stat-label">Architecture</div><div id="gtArch" class="stat-val" style="font-size:1rem; color:var(--accent-purple);">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Overall Mean Norm</div><div id="gtMeanNorm" class="stat-val" style="font-size:1rem;">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Toxic Outliers</div><div id="gtToxicCount" class="stat-val" style="font-size:1rem; color:var(--accent-red);">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Dead Layers</div><div id="gtDeadCount" class="stat-val" style="font-size:1rem; color:var(--accent-yellow);">-</div></div>
+                    </div>
+
+                    <div style="max-height:220px; overflow-y:auto; border:1px solid var(--border-dark); border-radius:6px; margin-bottom:14px;">
+                        <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                            <thead style="background:#181825; position:sticky; top:0; border-bottom:1px solid var(--border-dark);">
+                                <tr>
+                                    <th style="padding:6px 10px; text-align:left;">Block</th>
+                                    <th style="padding:6px 10px;">Layers</th>
+                                    <th style="padding:6px 10px;">Avg Norm</th>
+                                    <th style="padding:6px 10px;">Max Norm</th>
+                                    <th style="padding:6px 10px;">Health Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gtBlocksTableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="grid-2" style="align-items:flex-end;">
+                        <div class="input-group" style="margin-bottom:0;">
+                            <label>Surgical Output Path</label>
+                            <input id="gtOutputPath" type="text" placeholder="Output destination path..." />
+                        </div>
+                        <div>
+                            <button id="gtPruneBtn" class="btn" style="width:100%;" onclick="runGeneTherapyPrune()">💉 Prune Toxic Outliers</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="gtStatusBox" style="display:none; margin-top:14px; font-size:0.84rem; padding:10px 14px; border-radius:6px; background:#11111b; border:1px solid #313244;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Close</button>
+            </div>
+        </div>
+
+        <!-- Modal: LoRA Visual Diff -->
+        <div id="modal-diff" class="modal-window" style="display:none;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">🔍 LoRA Visual Diff Inspector</div>
+                    <div class="modal-subtitle">Side-by-side weight cosine drift, layer energy delta &amp; recipe hyperparameter diff</div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Model A (Baseline / Reference)</label>
+                        <input id="diffModelA" type="text" placeholder="Path to Model A..." />
+                    </div>
+                    <div class="input-group">
+                        <label>Model B (Comparison / Target)</label>
+                        <input id="diffModelB" type="text" placeholder="Path to Model B..." />
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                    <button class="btn btn-secondary btn-sm" onclick="swapDiffModels()">⇄ Swap Models</button>
+                    <button id="diffRunBtn" class="btn btn-sm" onclick="runVisualDiff()">🔍 Run Visual Diff</button>
+                </div>
+
+                <div id="diffResultsBox" style="display:none;">
+                    <div class="grid-4" style="margin-bottom:14px;">
+                        <div class="stat-box"><div class="stat-label">Avg Similarity</div><div id="diffAvgSim" class="stat-val" style="font-size:1rem; color:var(--accent-green);">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Avg Drift Score</div><div id="diffAvgDrift" class="stat-val" style="font-size:1rem; color:var(--accent-peach);">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Shared Tensors</div><div id="diffSharedCount" class="stat-val" style="font-size:1rem;">-</div></div>
+                        <div class="stat-box"><div class="stat-label">Status</div><div id="diffStatusBadge" class="stat-val" style="font-size:1rem; color:var(--accent-purple);">-</div></div>
+                    </div>
+
+                    <div style="max-height:240px; overflow-y:auto; border:1px solid var(--border-dark); border-radius:6px;">
+                        <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                            <thead style="background:#181825; position:sticky; top:0; border-bottom:1px solid var(--border-dark);">
+                                <tr>
+                                    <th style="padding:6px 10px; text-align:left;">Tensor</th>
+                                    <th style="padding:6px 10px;">Status</th>
+                                    <th style="padding:6px 10px;">Cosine Similarity</th>
+                                    <th style="padding:6px 10px;">Drift Score</th>
+                                    <th style="padding:6px 10px;">Divergence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="diffLayersTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="diffStatusMsg" style="display:none; margin-top:12px; font-size:0.84rem; padding:10px 14px; border-radius:6px; background:#11111b; border:1px solid #313244;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Close</button>
+            </div>
+        </div>
+
+        <!-- Modal: AI Benchmark Matrix -->
+        <div id="modal-benchmark" class="modal-window" style="display:none;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title">📊 AI Benchmark Matrix &amp; Sweet Spot Finder</div>
+                    <div class="modal-subtitle">Automated multi-epoch evaluation matrix across likeness, style flexibility &amp; color burn</div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="grid-3">
+                    <div class="input-group" style="grid-column: span 2;">
+                        <label>Training Checkpoints Directory</label>
+                        <div style="display:flex; gap:8px;">
+                            <input id="bmFolder" type="text" placeholder="Folder containing epoch checkpoints..." style="flex:1;" />
+                            <button class="btn btn-secondary btn-sm" onclick="scanBenchmarkFolder()">🔍 Scan</button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>Base Architecture</label>
+                        <select id="bmArch">
+                            <option value="FLUX.1">FLUX.1-dev</option>
+                            <option value="SDXL">SDXL 1.0</option>
+                            <option value="Chroma">Chroma 1 HD</option>
+                            <option value="SD1.5">Stable Diffusion 1.5</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Trigger Word</label>
+                        <input id="bmTrigger" type="text" placeholder="e.g. ohwx character" />
+                    </div>
+                    <div class="input-group">
+                        <label>Discovered Checkpoints</label>
+                        <div id="bmCheckpointsBadge" style="padding:8px 12px; background:#11111b; border:1px solid #313244; border-radius:6px; font-size:0.85rem; color:var(--accent-purple);">0 checkpoints scanned</div>
+                    </div>
+                </div>
+
+                <div id="bmResultsBox" style="display:none; margin-top:16px;">
+                    <div style="font-size:0.9rem; font-weight:700; color:#fff; margin-bottom:8px;">Benchmark Evaluation Matrix</div>
+                    <div id="bmEpochGrid" class="grid-3" style="margin-bottom:14px;"></div>
+                    <div id="bmRecommendationCard" class="card" style="margin-bottom:0; background:rgba(203,166,247,0.08); border-color:var(--accent-purple);"></div>
+                </div>
+
+                <div id="bmStatusBox" style="display:none; margin-top:12px; font-size:0.84rem; padding:10px 14px; border-radius:6px; background:#11111b; border:1px solid #313244;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Close</button>
+                <button id="bmRunBtn" class="btn" onclick="runBenchmarkMatrix()">🚀 Run Benchmark Matrix</button>
+            </div>
         </div>
     </div>
 
@@ -2443,7 +3779,7 @@ self.addEventListener('fetch', (e) => {
 
             const navMap = {
                 'curate': 0, 'train': 1, 'lab': 2, 'comfy': 3, 'vault': 4,
-                'chop': 5, 'history': 6, 'telemetry': 7
+                'chop': 10, 'history': 11, 'telemetry': 12, 'docs': 13
             };
             const navItems = document.querySelectorAll('.nav-scroller .nav-item');
             if (navMap[viewName] !== undefined && navItems[navMap[viewName]]) {
@@ -2467,7 +3803,8 @@ self.addEventListener('fetch', (e) => {
                 'vault': '5. Library & Vault',
                 'chop': 'LoRA Chop-Shop',
                 'history': 'Training History',
-                'telemetry': 'Compute Environment'
+                'telemetry': 'Compute Environment',
+                'docs': 'Documentation & Guides'
             };
             document.getElementById('topConceptName').textContent = conceptTitles[viewName] || 'LoRAMancer';
 
@@ -2476,6 +3813,7 @@ self.addEventListener('fetch', (e) => {
             if (viewName === 'telemetry') loadEnvironment();
             if (viewName === 'comfy') checkComfyStatus();
             if (viewName === 'chop') renderChopGarage();
+            if (viewName === 'docs') loadDocsList();
         }
 
         function switchTrainMode(mode) {
@@ -2715,6 +4053,7 @@ self.addEventListener('fetch', (e) => {
                     document.getElementById('curateDetails').textContent = `Stored on host: ${data.extractedPath}`;
                     document.getElementById('sendToTrainerBtn').style.display = 'inline-flex';
                     window._lastCuratedPath = data.extractedPath;
+                    document.getElementById('ollamaDatasetPath').value = data.extractedPath;
                 }
             } catch (e) {
                 alert('Dataset upload failed: ' + e.message);
@@ -2726,6 +4065,208 @@ self.addEventListener('fetch', (e) => {
                 document.getElementById('wizDatasetInput').value = window._lastCuratedPath;
                 switchView('train');
                 switchTrainMode('wizard');
+            }
+        }
+
+        // --- OLLAMA VISION AUTO-TAGGING ---
+        let currentOllamaFocus = 'general';
+        let currentOllamaStyle = 'tags';
+
+        const OLLAMA_PROMPTS = {
+            tags: {
+                character: "Analyze this image for character training. Output ONLY comma-separated tags describing: gender, hair color, eye color, facial expression, clothing, pose, camera angle, and background.",
+                style: "Analyze this image for art style training. Output ONLY comma-separated tags describing: artistic medium, art style, brushwork, color palette, lighting atmosphere, and texture.",
+                concept: "Analyze this image for concept or object training. Output ONLY comma-separated tags describing: the primary object, mechanical parts, material, colors, and setting.",
+                clothing: "Analyze this image for fashion and outfit training. Output ONLY comma-separated tags describing: garment type, clothing style, fabric material, color, patterns, and accessories.",
+                general: "Analyze this image in detail for machine learning training. Output ONLY concise, comma-separated tags describing the subject, attire, hair, expression, pose, background, lighting, and artistic style.",
+                custom: ""
+            },
+            natural: {
+                character: "Describe this character in detail in 1-2 natural sentences, focusing on physical likeness, facial features, hair, clothing, pose, and expression. Do not use filler words.",
+                style: "Describe the visual and artistic style of this image in 1-2 sentences, focusing on medium, brushwork, lighting, color palette, and textures.",
+                concept: "Describe the primary object or concept in this image in 1-2 sentences, noting its material, structure, and distinctive visual attributes.",
+                clothing: "Describe the outfit, clothing materials, tailoring, and accessories in detail in 1-2 sentences.",
+                general: "Describe this image thoroughly in 1-2 detailed sentences for training a text-to-image AI model. Focus on subject appearance, posture, clothing, colors, setting, and lighting.",
+                custom: ""
+            }
+        };
+
+        async function loadOllamaStatus() {
+            const pill = document.getElementById('ollamaStatusPill');
+            pill.textContent = 'Checking Ollama...';
+            pill.style.color = 'var(--accent-yellow)';
+
+            try {
+                const res = await fetch('/api/v1/curate/ollama/status', {
+                    headers: getHeaders()
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.reachable) {
+                        pill.textContent = `Online: ${data.url}`;
+                        pill.style.color = 'var(--accent-green)';
+                        const select = document.getElementById('ollamaModelSelect');
+                        select.innerHTML = '';
+                        (data.visionModels || ['llama3.2-vision']).forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m;
+                            opt.textContent = m;
+                            if (m === data.defaultModel) opt.selected = true;
+                            select.appendChild(opt);
+                        });
+                    } else {
+                        pill.textContent = `Offline: ${data.url}`;
+                        pill.style.color = 'var(--accent-red)';
+                    }
+                }
+            } catch (e) {
+                pill.textContent = 'Offline (Check `ollama serve`)';
+                pill.style.color = 'var(--accent-red)';
+            }
+        }
+
+        function setOllamaFocusPreset(focus) {
+            currentOllamaFocus = focus;
+            ['btnFocusGeneral', 'btnFocusCharacter', 'btnFocusStyle', 'btnFocusConcept', 'btnFocusClothing', 'btnFocusCustom'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.classList.remove('active');
+            });
+            const cap = focus.charAt(0).toUpperCase() + focus.slice(1);
+            const activeBtn = document.getElementById('btnFocus' + cap);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            resetOllamaPrompt();
+        }
+
+        function setOllamaCaptionStyle(style) {
+            currentOllamaStyle = style;
+            document.getElementById('btnStyleTags').classList.toggle('active', style === 'tags');
+            document.getElementById('btnStyleNatural').classList.toggle('active', style === 'natural');
+            resetOllamaPrompt();
+        }
+
+        function resetOllamaPrompt() {
+            const promptsForStyle = OLLAMA_PROMPTS[currentOllamaStyle] || OLLAMA_PROMPTS.tags;
+            const prompt = promptsForStyle[currentOllamaFocus] || promptsForStyle.general;
+            document.getElementById('ollamaCustomPrompt').value = prompt;
+        }
+
+        async function startOllamaTagging() {
+            let inputPath = document.getElementById('ollamaDatasetPath').value.trim();
+            if (!inputPath && window._lastCuratedPath) {
+                inputPath = window._lastCuratedPath;
+                document.getElementById('ollamaDatasetPath').value = inputPath;
+            }
+            if (!inputPath) {
+                alert('Please upload a dataset ZIP or enter the extracted folder path first.');
+                return;
+            }
+
+            const model = document.getElementById('ollamaModelSelect').value;
+            const trigger = document.getElementById('ollamaTriggerWord').value.trim();
+            const customPrompt = document.getElementById('ollamaCustomPrompt').value.trim();
+
+            const btn = document.getElementById('btnRunOllamaTag');
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Auto-Tagging Dataset...';
+
+            const progressCard = document.getElementById('ollamaProgressCard');
+            progressCard.style.display = 'block';
+            document.getElementById('ollamaLogBox').innerHTML = '<div style="color:var(--accent-purple);">Connecting to Ollama vision worker...</div>';
+            document.getElementById('ollamaResultsBox').style.display = 'none';
+
+            try {
+                const res = await fetch('/api/v1/curate/ollama/tag', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        inputPath: inputPath,
+                        model: model,
+                        triggerWord: trigger,
+                        subjectFocus: currentOllamaFocus,
+                        captionStyle: currentOllamaStyle,
+                        customPrompt: customPrompt
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    document.getElementById('ollamaResultTitle').textContent = `Auto-Tagging Complete! Tagged ${data.processedCount} images.`;
+                    const list = document.getElementById('ollamaSampleCaptionsList');
+                    list.innerHTML = '';
+                    (data.sampleCaptions || []).forEach(sc => {
+                        const row = document.createElement('div');
+                        row.style = 'font-size:0.75rem; background:#181825; padding:6px 10px; border-radius:4px; border:1px solid rgba(255,255,255,0.05); color:#cdd6f4;';
+                        row.innerHTML = `<b style="color:var(--accent-purple);">${sc.image}:</b> ${sc.caption}`;
+                        list.appendChild(row);
+                    });
+                    document.getElementById('ollamaResultsBox').style.display = 'block';
+                    document.getElementById('curateReportStatus').textContent = `✅ Extracted & Tagged ${data.totalImages} images (${data.captionCount} captions)`;
+                    document.getElementById('sendToTrainerBtn').style.display = 'inline-flex';
+                    window._lastCuratedPath = data.datasetPath;
+                } else {
+                    alert('Tagging failed: ' + (data.error || data.message || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Request failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🚀</span> Run In-Place Vision Auto-Tagging';
+                progressCard.style.display = 'none';
+            }
+        }
+
+        function sendOllamaDatasetToWizard() {
+            if (window._lastCuratedPath) {
+                document.getElementById('wizDatasetInput').value = window._lastCuratedPath;
+                const trg = document.getElementById('ollamaTriggerWord').value.trim();
+                if (trg) document.getElementById('wizTriggerWord').value = trg;
+                switchView('train');
+                switchTrainMode('wizard');
+            }
+        }
+
+        async function autoTagWizardCaptionsWithOllama() {
+            const inputPath = document.getElementById('wizDatasetInput').value.trim();
+            if (!inputPath) {
+                alert('Please upload or specify a dataset first.');
+                return;
+            }
+            const trg = document.getElementById('wizTriggerWord').value.trim();
+            const btn = event?.currentTarget;
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '⏳ Auto-Tagging with Ollama...';
+            }
+
+            try {
+                const res = await fetch('/api/v1/curate/ollama/tag', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        inputPath: inputPath,
+                        triggerWord: trg,
+                        subjectFocus: 'general',
+                        captionStyle: 'tags'
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    document.getElementById('auditCaptionsBadge').textContent = `${data.captionCount} Captions`;
+                    document.getElementById('auditMissingBadge').textContent = '0 Missing';
+                    document.getElementById('auditMissingBadge').style.color = 'var(--accent-green)';
+                    recalculateEstimators();
+                    alert(`Ollama vision tagging completed! Generated ${data.processedCount} caption file(s) in-place.`);
+                } else {
+                    alert('Ollama tagging failed: ' + (data.error || data.message || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🤖 Auto-Tag with Ollama';
+                }
             }
         }
 
@@ -3336,7 +4877,7 @@ self.addEventListener('fetch', (e) => {
                         const pct = t.TotalSteps > 0 ? (t.Step / t.TotalSteps * 100) : 0;
                         document.getElementById('progressBar').style.width = pct + '%';
                         document.getElementById('trainStatusVal').textContent = 'Training';
-                    } else if (t.EventType === 'log' || t.EventType === 'chop_log') {
+                    } else if (t.EventType === 'log' || t.EventType === 'chop_log' || t.EventType === 'tag_log') {
                         const box = document.getElementById('consoleLogBox');
                         const p = document.createElement('div');
                         p.className = 'log-entry';
@@ -3350,17 +4891,570 @@ self.addEventListener('fetch', (e) => {
                         if (document.getElementById('autoscrollLock').checked) {
                             box.scrollTop = box.scrollHeight;
                         }
+
+                        // Also pipe tagger logs to curate terminal
+                        if (t.EventType === 'tag_log') {
+                            const oBox = document.getElementById('ollamaLogBox');
+                            if (oBox) {
+                                const entry = document.createElement('div');
+                                entry.style = 'margin-bottom:2px;';
+                                entry.textContent = line;
+                                oBox.appendChild(entry);
+                                oBox.scrollTop = oBox.scrollHeight;
+                            }
+                            const statusElem = document.getElementById('ollamaProgressStatus');
+                            if (statusElem && line.includes('Processing')) {
+                                statusElem.textContent = line;
+                            }
+                        }
                     }
                 } catch (err) { }
             };
         }
 
+        // --- PWA LIFECYCLE & DYNAMIC INSTALLATION ---
+        let deferredPrompt = null;
+
+        function isPwaRunningStandalone() {
+            return window.matchMedia('(display-mode: standalone)').matches ||
+                   window.navigator.standalone === true ||
+                   document.referrer.includes('android-app://');
+        }
+
+        function updatePwaUi() {
+            const standalone = isPwaRunningStandalone();
+            const btn = document.getElementById('pwaInstallBtn');
+            const side = document.getElementById('pwaSidebarItem');
+            if (standalone) {
+                if (btn) btn.style.display = 'none';
+                if (side) side.style.display = 'none';
+            } else {
+                if (btn) btn.style.display = 'inline-flex';
+                if (side) side.style.display = 'block';
+            }
+        }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then((reg) => {
+                    console.log('PWA ServiceWorker registered with scope:', reg.scope);
+                }).catch((err) => {
+                    console.warn('PWA ServiceWorker registration failed:', err);
+                });
+            });
+        }
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            updatePwaUi();
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredPrompt = null;
+            updatePwaUi();
+        });
+
+        async function triggerPwaInstall() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    console.log('User installed LoRAMancer PWA');
+                }
+                deferredPrompt = null;
+                updatePwaUi();
+            } else {
+                alert('To install LoRAMancer Studio as a standalone app:\n\n• In Chrome/Edge: Look for the install icon (🖥️ or ⊕) in the browser address bar, or click Menu (⋮) -> "Install LoRAMancer Studio".\n• On Mobile: Tap Share -> "Add to Home Screen".');
+            }
+        }
+
+        // --- MODAL DIALOG CONTROLLER ---
+        let activeModalId = null;
+
+        function openModalApp(appId) {
+            closeModalApp();
+            activeModalId = 'modal-' + appId;
+            const overlay = document.getElementById('appModalOverlay');
+            const target = document.getElementById(activeModalId);
+            if (overlay && target) {
+                overlay.style.display = 'flex';
+                target.style.display = 'flex';
+            }
+        }
+
+        function closeModalApp() {
+            const overlay = document.getElementById('appModalOverlay');
+            if (overlay) overlay.style.display = 'none';
+            if (activeModalId) {
+                const target = document.getElementById(activeModalId);
+                if (target) target.style.display = 'none';
+                activeModalId = null;
+            }
+        }
+
+        function handleModalBackdropClick(e) {
+            if (e.target && e.target.id === 'appModalOverlay') {
+                closeModalApp();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && activeModalId) {
+                closeModalApp();
+            }
+        });
+
+        // Modal: Ollama Vision Tagger logic
+        let modalOllamaFocus = 'general';
+        function setModalOllamaPreset(focus, btn) {
+            modalOllamaFocus = focus;
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            updateModalOllamaPrompt();
+        }
+
+        function updateModalOllamaPrompt() {
+            const style = document.getElementById('modalOllamaStyle').value;
+            const prompts = OLLAMA_PROMPTS[style] || OLLAMA_PROMPTS.tags;
+            document.getElementById('modalOllamaPrompt').value = prompts[modalOllamaFocus] || prompts.general;
+        }
+
+        async function runModalOllamaTagging() {
+            const path = document.getElementById('modalOllamaPath').value.trim();
+            if (!path) {
+                alert('Please enter a target dataset folder path.');
+                return;
+            }
+            const model = document.getElementById('modalOllamaModel').value;
+            const trigger = document.getElementById('modalOllamaTrigger').value.trim();
+            const style = document.getElementById('modalOllamaStyle').value;
+            const prompt = document.getElementById('modalOllamaPrompt').value.trim();
+
+            const btn = document.getElementById('modalOllamaRunBtn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Tagging...';
+            const prog = document.getElementById('modalOllamaProgress');
+            prog.style.display = 'block';
+
+            try {
+                const res = await fetch('/api/v1/curate/ollama/tag', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        inputPath: path,
+                        model: model,
+                        triggerWord: trigger,
+                        subjectFocus: modalOllamaFocus,
+                        captionStyle: style,
+                        customPrompt: prompt
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    alert(`Auto-tagging completed! Processed ${data.processedCount} images.`);
+                    closeModalApp();
+                } else {
+                    alert('Tagging error: ' + (data.error || data.message || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Request failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Run Auto-Tagging';
+                prog.style.display = 'none';
+            }
+        }
+
+        // Modal: LoRA Surgery & Merger logic
+        let currentSurgeryTab = 'resize';
+        function switchSurgeryTab(tab) {
+            currentSurgeryTab = tab;
+            document.getElementById('surgeryTabBtnResize').classList.toggle('active', tab === 'resize');
+            document.getElementById('surgeryTabBtnMerge').classList.toggle('active', tab === 'merge');
+            document.getElementById('surgeryTabResize').style.display = tab === 'resize' ? 'block' : 'none';
+            document.getElementById('surgeryTabMerge').style.display = tab === 'merge' ? 'block' : 'none';
+            document.getElementById('surgeryExecuteBtn').textContent = tab === 'resize' ? 'Execute SVD Compression' : 'Execute LoRA Merge';
+        }
+
+        function updateSurgeryMergeRatio(val) {
+            const pctA = Math.round(val * 100);
+            const pctB = 100 - pctA;
+            document.getElementById('surgeryMergeRatioLabel').textContent = `${pctA}% A / ${pctB}% B`;
+        }
+
+        async function executeSurgeryAction() {
+            const btn = document.getElementById('surgeryExecuteBtn');
+            const statusBox = document.getElementById('surgeryStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.textContent = 'Processing operation on host...';
+            btn.disabled = true;
+
+            try {
+                if (currentSurgeryTab === 'resize') {
+                    const src = document.getElementById('surgeryResizeSource').value.trim();
+                    const dst = document.getElementById('surgeryResizeOutput').value.trim();
+                    const rank = parseInt(document.getElementById('surgeryResizeRank').value) || 16;
+                    if (!src || !dst) {
+                        alert('Please specify source and output paths.');
+                        btn.disabled = false;
+                        return;
+                    }
+                    const res = await fetch('/api/v1/tools/surgery/resize', {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify({ sourceLora: src, outputLora: dst, targetRank: rank })
+                    });
+                    const data = await res.json();
+                    statusBox.textContent = data.message || (data.success ? 'SVD Compression succeeded!' : 'SVD compression failed.');
+                    statusBox.style.color = data.success ? 'var(--accent-green)' : 'var(--accent-red)';
+                } else {
+                    const a = document.getElementById('surgeryMergeA').value.trim();
+                    const b = document.getElementById('surgeryMergeB').value.trim();
+                    const dst = document.getElementById('surgeryMergeOutput').value.trim();
+                    const ratio = parseFloat(document.getElementById('surgeryMergeRatio').value) || 0.5;
+                    if (!a || !b || !dst) {
+                        alert('Please specify Model A, Model B, and output destination.');
+                        btn.disabled = false;
+                        return;
+                    }
+                    const res = await fetch('/api/v1/tools/surgery/merge', {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify({ modelA: a, modelB: b, ratio: ratio, outputLora: dst })
+                    });
+                    const data = await res.json();
+                    statusBox.textContent = data.message || (data.success ? 'Merge completed!' : 'Merge failed.');
+                    statusBox.style.color = data.success ? 'var(--accent-green)' : 'var(--accent-red)';
+                }
+            } catch (e) {
+                statusBox.textContent = 'Error: ' + e.message;
+                statusBox.style.color = 'var(--accent-red)';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Modal: Gene Therapy logic
+        async function runGeneTherapyAnalyze() {
+            const path = document.getElementById('gtLoraPath').value.trim();
+            if (!path) {
+                alert('Please enter a target LoRA file path.');
+                return;
+            }
+            const statusBox = document.getElementById('gtStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.textContent = 'Analyzing layer block energy distributions...';
+
+            try {
+                const res = await fetch('/api/v1/tools/genetherapy/analyze', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ loraPath: path })
+                });
+                const data = await res.json();
+                if (res.ok && data.blocks) {
+                    statusBox.style.display = 'none';
+                    document.getElementById('gtArch').textContent = data.architecture || 'FLUX.1';
+                    document.getElementById('gtMeanNorm').textContent = data.overallMeanNorm ? data.overallMeanNorm.toFixed(3) : '1.0';
+                    document.getElementById('gtToxicCount').textContent = data.toxicCount || 0;
+                    document.getElementById('gtDeadCount').textContent = data.deadCount || 0;
+
+                    const tbody = document.getElementById('gtBlocksTableBody');
+                    tbody.innerHTML = '';
+                    data.blocks.forEach(b => {
+                        const tr = document.createElement('tr');
+                        tr.style = 'border-bottom:1px solid #1f1f2e;';
+                        let badge = '<span class="chip" style="color:var(--accent-green); font-size:0.65rem;">🟢 Healthy</span>';
+                        if (b.isToxic) badge = '<span class="chip" style="color:var(--accent-red); font-size:0.65rem;">🔴 Toxic Outlier</span>';
+                        else if (b.isDead) badge = '<span class="chip" style="color:var(--accent-yellow); font-size:0.65rem;">🟡 Dead / Inactive</span>';
+                        tr.innerHTML = `
+                            <td style="padding:6px 10px; font-weight:700;">${b.blockName}</td>
+                            <td style="padding:6px 10px; text-align:center;">${b.layerCount}</td>
+                            <td style="padding:6px 10px; text-align:center; font-family:monospace;">${b.avgNorm.toFixed(3)}</td>
+                            <td style="padding:6px 10px; text-align:center; font-family:monospace;">${b.maxNorm.toFixed(3)}</td>
+                            <td style="padding:6px 10px; text-align:center;">${badge}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                    document.getElementById('gtAnalysisResult').style.display = 'block';
+                    document.getElementById('gtOutputPath').value = path.replace('.safetensors', '_therapy.safetensors');
+                } else {
+                    statusBox.textContent = 'Analysis failed: ' + (data.error || 'Check server logs');
+                    statusBox.style.color = 'var(--accent-red)';
+                }
+            } catch (e) {
+                statusBox.textContent = 'Error: ' + e.message;
+                statusBox.style.color = 'var(--accent-red)';
+            }
+        }
+
+        async function runGeneTherapyPrune() {
+            const path = document.getElementById('gtLoraPath').value.trim();
+            const dst = document.getElementById('gtOutputPath').value.trim();
+            const btn = document.getElementById('gtPruneBtn');
+            const statusBox = document.getElementById('gtStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.textContent = 'Surgically attenuating outlier blocks...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/v1/tools/genetherapy/prune', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ loraPath: path, outputPath: dst, threshold: 2.8 })
+                });
+                const data = await res.json();
+                statusBox.textContent = data.message || (data.success ? 'Therapy completed successfully!' : 'Pruning failed.');
+                statusBox.style.color = data.success ? 'var(--accent-green)' : 'var(--accent-red)';
+            } catch (e) {
+                statusBox.textContent = 'Error: ' + e.message;
+                statusBox.style.color = 'var(--accent-red)';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Modal: Visual Diff logic
+        function swapDiffModels() {
+            const a = document.getElementById('diffModelA').value;
+            const b = document.getElementById('diffModelB').value;
+            document.getElementById('diffModelA').value = b;
+            document.getElementById('diffModelB').value = a;
+        }
+
+        async function runVisualDiff() {
+            const a = document.getElementById('diffModelA').value.trim();
+            const b = document.getElementById('diffModelB').value.trim();
+            if (!a || !b) {
+                alert('Please specify both Model A and Model B paths.');
+                return;
+            }
+            const btn = document.getElementById('diffRunBtn');
+            const msg = document.getElementById('diffStatusMsg');
+            msg.style.display = 'block';
+            msg.textContent = 'Comparing tensor cosine similarities and weight drift...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/v1/tools/diff/compare', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ modelAPath: a, modelBPath: b })
+                });
+                const data = await res.json();
+                if (res.ok && data.layerDiffs) {
+                    msg.style.display = 'none';
+                    document.getElementById('diffAvgSim').textContent = data.averageCosineSimilarity ? data.averageCosineSimilarity.toFixed(4) : '1.000';
+                    document.getElementById('diffAvgDrift').textContent = data.averageDriftScore ? data.averageDriftScore.toFixed(4) : '0.000';
+                    document.getElementById('diffSharedCount').textContent = data.sharedTensorsCount || 0;
+                    document.getElementById('diffStatusBadge').textContent = data.compatibilityStatus || 'Compatible';
+
+                    const tbody = document.getElementById('diffLayersTableBody');
+                    tbody.innerHTML = '';
+                    (data.layerDiffs || []).slice(0, 100).forEach(l => {
+                        const tr = document.createElement('tr');
+                        tr.style = 'border-bottom:1px solid #1f1f2e;';
+                        tr.innerHTML = `
+                            <td style="padding:6px 10px; font-family:monospace; font-size:0.75rem;">${l.layerName}</td>
+                            <td style="padding:6px 10px; text-align:center;">${l.status}</td>
+                            <td style="padding:6px 10px; text-align:center; font-family:monospace;">${l.cosineSimilarity ? l.cosineSimilarity.toFixed(4) : '-'}</td>
+                            <td style="padding:6px 10px; text-align:center; font-family:monospace;">${l.driftScore ? l.driftScore.toFixed(4) : '-'}</td>
+                            <td style="padding:6px 10px; text-align:center;"><span class="chip" style="font-size:0.65rem;">${l.divergenceLevel || 'Identical'}</span></td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                    document.getElementById('diffResultsBox').style.display = 'block';
+                } else {
+                    msg.textContent = 'Diff failed: ' + (data.error || 'Check server logs');
+                    msg.style.color = 'var(--accent-red)';
+                }
+            } catch (e) {
+                msg.textContent = 'Error: ' + e.message;
+                msg.style.color = 'var(--accent-red)';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Modal: AI Benchmark Matrix logic
+        async function scanBenchmarkFolder() {
+            const folder = document.getElementById('bmFolder').value.trim();
+            if (!folder) {
+                alert('Please enter a checkpoints folder path.');
+                return;
+            }
+            try {
+                const res = await fetch('/api/v1/tools/benchmark/scan', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ folderPath: folder })
+                });
+                const data = await res.json();
+                document.getElementById('bmCheckpointsBadge').textContent = `${data.count || 0} checkpoints discovered`;
+            } catch (e) {
+                alert('Scan failed: ' + e.message);
+            }
+        }
+
+        async function runBenchmarkMatrix() {
+            const folder = document.getElementById('bmFolder').value.trim();
+            const arch = document.getElementById('bmArch').value;
+            const trigger = document.getElementById('bmTrigger').value.trim();
+            if (!folder) {
+                alert('Please specify a checkpoints folder.');
+                return;
+            }
+            const btn = document.getElementById('bmRunBtn');
+            const statusBox = document.getElementById('bmStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.textContent = 'Executing benchmark suite evaluation matrix...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/v1/tools/benchmark/start', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ checkpointFolder: folder, baseArch: arch, triggerWord: trigger })
+                });
+                const data = await res.json();
+                if (res.ok && data.epochResults) {
+                    statusBox.style.display = 'none';
+                    const grid = document.getElementById('bmEpochGrid');
+                    grid.innerHTML = '';
+                    data.epochResults.forEach(r => {
+                        const card = document.createElement('div');
+                        card.className = 'stat-box';
+                        const isOptimal = r.verdict && r.verdict.includes('Optimal');
+                        card.style = isOptimal ? 'border-color:var(--accent-green); background:rgba(166,227,161,0.06);' : '';
+                        card.innerHTML = `
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <span style="font-weight:700; color:#fff;">Epoch ${r.epochNumber}</span>
+                                <span class="chip" style="font-size:0.65rem;">${r.verdict}</span>
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:4px;">Sweet Spot Score: <b style="color:var(--accent-purple);">${r.sweetSpotIndex}</b></div>
+                            <div style="font-size:0.75rem; color:var(--text-secondary);">Likeness: ${Math.round(r.likenessScore)}% | Flex: ${Math.round(r.flexibilityScore)}%</div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                    const recCard = document.getElementById('bmRecommendationCard');
+                    recCard.innerHTML = `
+                        <div style="font-weight:700; color:var(--accent-purple); margin-bottom:4px;">🎯 Recommended Sweet Spot: Epoch ${data.recommendedSweetSpotEpoch}</div>
+                        <div style="font-size:0.8rem; color:var(--text-secondary);">${data.recommendationReason || 'Optimal compromise between fidelity and flexibility.'}</div>
+                    `;
+                    document.getElementById('bmResultsBox').style.display = 'block';
+                } else {
+                    statusBox.textContent = 'Benchmark failed: ' + (data.error || 'Check server logs');
+                    statusBox.style.color = 'var(--accent-red)';
+                }
+            } catch (e) {
+                statusBox.textContent = 'Error: ' + e.message;
+                statusBox.style.color = 'var(--accent-red)';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // --- DOCUMENTATION VIEWER ---
+        let docsIndex = [];
+        let activeDocFileName = '';
+        window._currentDocMarkdown = '';
+
+        async function loadDocsList() {
+            try {
+                const res = await fetch('/api/v1/docs', { headers: getHeaders() });
+                if (res.ok) {
+                    docsIndex = await res.json();
+                    renderDocsNav(docsIndex);
+                    if (docsIndex.length > 0 && !activeDocFileName) {
+                        selectDoc(docsIndex[0].fileName);
+                    }
+                }
+            } catch (e) { }
+        }
+
+        function renderDocsNav(items) {
+            const container = document.getElementById('docsNavContainer');
+            if (!container) return;
+            if (items.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-secondary); font-size:0.8rem; padding:8px;">No guides match search.</div>';
+                return;
+            }
+            container.innerHTML = '';
+            items.forEach(doc => {
+                const el = document.createElement('div');
+                el.className = 'doc-nav-item' + (doc.fileName === activeDocFileName ? ' active' : '');
+                el.onclick = () => selectDoc(doc.fileName);
+                el.innerHTML = `
+                    <span style="font-size:1.1rem;">${doc.icon || '📄'}</span>
+                    <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <div style="font-weight:600; font-size:0.82rem;">${doc.title}</div>
+                        <div style="font-size:0.7rem; color:var(--text-muted);">${doc.fileName}</div>
+                    </div>
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        function filterDocs(query) {
+            const q = (query || '').toLowerCase().trim();
+            const filtered = docsIndex.filter(d =>
+                d.title.toLowerCase().includes(q) ||
+                d.fileName.toLowerCase().includes(q)
+            );
+            renderDocsNav(filtered);
+        }
+
+        async function selectDoc(fileName) {
+            activeDocFileName = fileName;
+            renderDocsNav(docsIndex);
+            const titleEl = document.getElementById('docActiveTitle');
+            const metaEl = document.getElementById('docActiveMeta');
+            const contentEl = document.getElementById('docActiveContent');
+
+            titleEl.textContent = 'Loading guide...';
+            contentEl.innerHTML = '<div style="color:var(--text-secondary); padding:20px;">Fetching document from host...</div>';
+
+            try {
+                const res = await fetch('/api/v1/docs/' + encodeURIComponent(fileName), { headers: getHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    titleEl.textContent = data.title;
+                    metaEl.textContent = `docs/${data.fileName}`;
+                    contentEl.innerHTML = data.html;
+                    window._currentDocMarkdown = data.markdown;
+                } else {
+                    titleEl.textContent = 'Document Not Found';
+                    contentEl.innerHTML = '<div style="color:var(--accent-red);">Failed to load document content.</div>';
+                }
+            } catch (e) {
+                titleEl.textContent = 'Error';
+                contentEl.innerHTML = `<div style="color:var(--accent-red);">${e.message}</div>`;
+            }
+        }
+
+        async function copyCurrentDocMarkdown() {
+            if (window._currentDocMarkdown) {
+                try {
+                    await navigator.clipboard.writeText(window._currentDocMarkdown);
+                    alert('Markdown copied to clipboard!');
+                } catch {
+                    alert('Could not copy to clipboard.');
+                }
+            }
+        }
+
         // INIT
         window.addEventListener('DOMContentLoaded', () => {
+            updatePwaUi();
             connectSSE();
             loadEnvironment();
             loadVaultLoras();
+            loadOllamaStatus();
+            resetOllamaPrompt();
             recalculateEstimators();
+            loadDocsList();
         });
     </script>
 </body>

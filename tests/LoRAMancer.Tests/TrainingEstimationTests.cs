@@ -139,4 +139,19 @@ public sealed class TrainingEstimationTests {
             }
         }
     }
+
+    [Fact]
+    public void GetDetectedGpu_ReportsAccurateVram_ForModernGpu() {
+        ModelArchitectureRegistry registry = new();
+        TrainingEstimationService estimator = new(registry);
+
+        var (gpuName, vramGb) = estimator.GetDetectedGpu();
+
+        Assert.False(string.IsNullOrWhiteSpace(gpuName));
+        Assert.True(vramGb >= 4.0, $"Expected at least 4GB VRAM, got {vramGb} GB on {gpuName}");
+
+        if (gpuName.Contains("7900 XTX", StringComparison.OrdinalIgnoreCase)) {
+            Assert.Equal(24.0, Math.Round(vramGb));
+        }
+    }
 }

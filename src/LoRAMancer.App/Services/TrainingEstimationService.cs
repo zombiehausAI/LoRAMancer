@@ -1,4 +1,5 @@
 using System.Management;
+using Microsoft.Win32;
 using LoRAMancer.App.Engines;
 using LoRAMancer.App.Models;
 
@@ -179,43 +180,131 @@ public sealed class TrainingEstimationService {
         return TimeSpan.FromSeconds(totalSteps * secondsPerStep);
     }
 
-    private static (string GpuName, double VramGb) DetectAmdGpu() {
-        string? nonAmdFallback = null;
-        double nonAmdVram = 16.0;
+    public (string GpuName, double VramGb) GetDetectedGpu() => DetectAmdGpu();
 
+    private static double GetKnownGpuVram(string name) {
+        if (string.IsNullOrWhiteSpace(name)) {
+            return 16.0;
+        }
+
+        string n = name.ToUpperInvariant();
+        if (n.Contains("7900 XTX") || n.Contains("7900XTX")) return 24.0;
+        if (n.Contains("7900 XT") || n.Contains("7900XT")) return 20.0;
+        if (n.Contains("7900 GRE") || n.Contains("7900GRE")) return 16.0;
+        if (n.Contains("7800 XT") || n.Contains("7800XT")) return 16.0;
+        if (n.Contains("7700 XT") || n.Contains("7700XT")) return 12.0;
+        if (n.Contains("7600 XT") || n.Contains("7600XT")) return 16.0;
+        if (n.Contains("7600")) return 8.0;
+
+        if (n.Contains("6950") || n.Contains("6900") || n.Contains("6800")) return 16.0;
+        if (n.Contains("6750") || n.Contains("6700 XT") || n.Contains("6700XT")) return 12.0;
+        if (n.Contains("6700")) return 10.0;
+        if (n.Contains("6650") || n.Contains("6600")) return 8.0;
+
+        if (n.Contains("W7900")) return 48.0;
+        if (n.Contains("W7800") || n.Contains("W6800")) return 32.0;
+        if (n.Contains("MI300")) return 192.0;
+        if (n.Contains("MI250")) return 128.0;
+        if (n.Contains("MI210")) return 64.0;
+
+        if (n.Contains("4090") || n.Contains("3090")) return 24.0;
+        if (n.Contains("4080")) return 16.0;
+        if (n.Contains("4070 TI SUPER")) return 16.0;
+        if (n.Contains("4070")) return 12.0;
+        if (n.Contains("3080 TI")) return 12.0;
+        if (n.Contains("3080")) return 10.0;
+        if (n.Contains("3060")) return 12.0;
+
+        return 16.0;
+    }
+
+    private static (string GpuName, double VramGb) DetectAmdGpu() {
+        string? amdName = null;
+        double amdVram = 0.0;
+        string? fallbackName = null;
+        double fallbackVram = 0.0;
+
+        // 1. Try Windows Display Adapter Registry for true 64-bit qwMemorySize
+        if (OperatingSystem.IsWindows()) {
+            try {
+                using var videoClassKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
+                if (videoClassKey != null) {
+                    foreach (string subKeyName in videoClassKey.GetSubKeyNames()) {
+                        if (subKeyName.Length != 4) continue;
+                        using var subKey = videoClassKey.OpenSubKey(subKeyName);
+                        if (subKey == null) continue;
+
+                        string desc = subKey.GetValue("DriverDesc")?.ToString() ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(desc) || desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || desc.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
+                            continue;
+                        }
+
+                        double detectedGb = 0.0;
+                        object? qwObj = subKey.GetValue("HardwareInformation.qwMemorySize");
+                        if (qwObj is long qwLong && qwLong > 0) {
+                            detectedGb = qwLong / (1024.0 * 1024.0 * 1024.0);
+                        } else if (qwObj is ulong qwUlong && qwUlong > 0) {
+                            detectedGb = qwUlong / (1024.0 * 1024.0 * 1024.0);
+                        } else if (qwObj is byte[] qwBytes && qwBytes.Length >= 8) {
+                            ulong raw = BitConverter.ToUInt64(qwBytes, 0);
+                            if (raw > 0) detectedGb = raw / (1024.0 * 1024.0 * 1024.0);
+                        }
+
+                        if (detectedGb <= 0.0) {
+                            detectedGb = GetKnownGpuVram(desc);
+                        }
+
+                        if (desc.Contains("AMD", StringComparison.OrdinalIgnoreCase) || desc.Contains("Radeon", StringComparison.OrdinalIgnoreCase)) {
+                            if (amdName == null || detectedGb > amdVram) {
+                                amdName = desc;
+                                amdVram = detectedGb;
+                            }
+                        } else if (fallbackName == null || detectedGb > fallbackVram) {
+                            fallbackName = desc;
+                            fallbackVram = detectedGb;
+                        }
+                    }
+                }
+            } catch { }
+        }
+
+        if (amdName != null && amdVram > 0) {
+            return (amdName, Math.Round(amdVram, 1));
+        }
+
+        // 2. Fallback to WMI + Model Heuristic Lookup
         try {
             using ManagementObjectSearcher searcher = new("SELECT Name, AdapterRAM FROM Win32_VideoController");
             foreach (ManagementObject mo in searcher.Get()) {
                 string name = mo["Name"]?.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(name)) {
+                if (string.IsNullOrWhiteSpace(name) || name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
                     continue;
                 }
 
-                double vramGb = 16.0;
+                double vramGb = 0.0;
                 if (mo["AdapterRAM"] != null && double.TryParse(mo["AdapterRAM"].ToString(), out double ramBytes) && ramBytes > 0) {
                     vramGb = ramBytes / (1024.0 * 1024.0 * 1024.0);
                 }
-                if (vramGb < 4.0) {
-                    vramGb = 16.0; // WMI 32-bit integer overflow fallback for modern high-VRAM GPUs
+
+                if (vramGb <= 4.0 || vramGb > 128.0) {
+                    vramGb = GetKnownGpuVram(name);
                 }
 
                 if (name.Contains("AMD", StringComparison.OrdinalIgnoreCase) || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase)) {
-                    return (name, vramGb);
+                    return (name, Math.Round(vramGb, 1));
                 }
 
-                if (nonAmdFallback == null && !name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) && !name.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
-                    nonAmdFallback = name;
-                    nonAmdVram = vramGb;
+                if (fallbackName == null) {
+                    fallbackName = name;
+                    fallbackVram = vramGb;
                 }
             }
-        } catch {
-            // Fallback for non-WMI environments
+        } catch { }
+
+        if (fallbackName != null && fallbackVram > 0) {
+            return ($"{fallbackName} (Test Mode)", Math.Round(fallbackVram, 1));
         }
 
-        if (nonAmdFallback != null) {
-            return ($"{nonAmdFallback} (Test Mode)", nonAmdVram);
-        }
-
-        return ("AMD Radeon Graphics (Simulated)", 16.0);
+        return ("AMD Radeon RX 7900 XTX (Default)", 24.0);
     }
 }

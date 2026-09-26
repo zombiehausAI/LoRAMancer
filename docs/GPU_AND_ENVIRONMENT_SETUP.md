@@ -77,3 +77,19 @@ LoRAMancer strictly prevents training dependencies and AI-Toolkit engines from p
   - `HF_HOME`: `<InstallDir>\cache\huggingface` (or custom configured path in Settings)
   - `TORCH_HOME`: `<InstallDir>\cache\torch`
 - **User Site-Packages Disabled**: `PYTHONNOUSERSITE=1` and `pip install --no-user` are enforced on all subprocess runs, preventing packages from touching `AppData\Roaming\Python` or user-level site-packages.
+
+---
+
+## NVIDIA CUDA Native "Super Studio" & Distributed Architecture Note
+
+### NVIDIA Zero-Patch Execution
+While LoRAMancer features custom runtime stubs and patching specifically engineered to make AMD ROCm functional on Windows, **NVIDIA hardware operates completely unencumbered**:
+- **Pure Upstream PyTorch**: When an NVIDIA GPU is detected, LoRAMancer provisions standard official CUDA 12.4 (`https://download.pytorch.org/whl/cu124`).
+- **Zero Workarounds**: No metadata shims, torchao distributed workarounds, or DLL stubs are applied. It runs pure native CUDA, delivering the full capabilities of the underlying `ai-toolkit` engine.
+- **Unified Super Studio**: All advanced tooling—including the Curate Studio with Ollama vision auto-tagging, Easy Use Wizard, ComfyUI Test Studio, SVD Rank Surgery, Gene Therapy outlier pruning, Cosine Visual Diff, and AI Benchmark Sweet Spot matrix—runs at peak native performance on NVIDIA cards.
+
+### Target Audience & Distributed Training Considerations
+- **Current Creator & Hobbyist Focus**: LoRAMancer is primarily designed around the single-GPU creator and hobbyist workflow. It employs a **sequential single-GPU queue** with pre-flight VRAM estimation and Out-Of-Memory (OOM) protection to guarantee system stability on consumer workstations.
+- **Client/Server Remote Studio**: Distributed control is supported via the **Client Mode** and Progressive Web App (PWA), allowing users on laptops, mobile devices, Macs, or secondary PCs to remotely dispatch and monitor jobs running on a dedicated AI PC over LAN, WAN, or VPN.
+- **Multi-GPU Parallelism (DDP / FSDP / Clusters)**: As LoRAMancer garners wider adoption among power users, full multi-GPU parallel distribution (such as multi-card DDP, FSDP, or multi-node cluster slicing via `torchrun` and Hugging Face `accelerate`) represents a natural future architectural expansion beyond the current single-GPU execution paradigm.
+

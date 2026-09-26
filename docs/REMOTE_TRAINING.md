@@ -112,11 +112,22 @@ The embedded Kestrel server exposes the following endpoints (all protected by Au
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | `GET` | Responsive embedded web control interface and PWA app shell (returns 401 Lock Gate if unauthorized) |
+| `/docs` | `GET` | Direct web route into the Documentation Viewer |
 | `/manifest.json` | `GET` | Web App Manifest providing PWA metadata, standalone display mode, and icons |
 | `/icon.svg` | `GET` | Vector SVG application icon with maskable support |
 | `/sw.js` | `GET` | Progressive Web App Service Worker for shell asset caching |
 | `/api/v1/auth/login` | `POST` | Authenticates Auth Token, setting secure session cookie |
 | `/api/v1/health` | `GET` | Health probe returning host machine name, GPU info, and training state |
+| `/api/v1/docs` | `GET` | List all discovered system markdown guides with titles, icons, and categories |
+| `/api/v1/docs/{fileName}` | `GET` | Fetch and render markdown guide to HTML with table and callout parsing |
+| `/api/v1/tools/ollama/tag` | `POST` | Ollama multimodal vision captioning and auto-tagging on host |
+| `/api/v1/tools/surgery/resize` | `POST` | LoRA SVD rank compression and rank resizing |
+| `/api/v1/tools/surgery/merge` | `POST` | Multi-LoRA weighted linear interpolation merging |
+| `/api/v1/tools/genetherapy/analyze` | `POST` | Layer block Frobenius norm inspection and toxic outlier identification |
+| `/api/v1/tools/genetherapy/prune` | `POST` | Surgical layer block zeroing or attenuation to purge bad traits |
+| `/api/v1/tools/diff/compare` | `POST` | High-dimensional tensor cosine similarity drift and recipe hyperparameter diff |
+| `/api/v1/tools/benchmark/scan` | `POST` | Scan directory for multi-epoch checkpoint `.safetensors` files |
+| `/api/v1/tools/benchmark/start` | `POST` | Launch multi-epoch 4-part visual benchmark battery via ComfyUI |
 | `/api/v1/datasets/upload` | `POST` | Multipart form upload of dataset `.zip` archive, auto-extracted on host |
 | `/api/v1/training/start` | `POST` | Dispatches and initiates a training job with config YAML |
 | `/api/v1/training/stop` | `POST` | Sends a cancellation signal to the active training runner |
@@ -143,4 +154,24 @@ LoRAMancer includes a built-in Core Auth Token Manager (`AuthTokenManagerService
   - **Instant Revocation**: Block compromised or temporary tokens with 1 click without deleting their audit record.
   - **Usage Telemetry**: Tracks creation timestamps, expiration dates, last used timestamp, and total authentication hits.
   - **Cryptographic Generation**: Issues cryptographically secure `lrm_<48-hex>` tokens or accepts custom strings.
+
+---
+
+## 8. Web UI Studio Modal Tools & In-App Document Viewer
+
+The remote web interface provides full 1:1 parity with the desktop application's specialized studio tools and documentation:
+
+1. **In-App Technical Document Viewer (`/docs` or Sidebar → Documentation)**:
+   - Full two-column reader mirroring desktop `DocsPage.razor`.
+   - Real-time search filter across all guides in `docs/`.
+   - Native Markdown rendering supporting GitHub alerts (`[!NOTE]`, `[!WARNING]`, `[!TIP]`), syntax-highlighted code blocks, and formatted tables with horizontal scrolling.
+   - One-click **Copy Markdown** action button to export guide source.
+
+2. **Studio Modal Tools (Sidebar → Studio Modal Tools)**:
+   - 👁️ **Ollama Vision Tagger**: Automated image description and caption generation using local multimodal vision LLMs (`llava`, `llama3.2-vision`, `minicpm-v`).
+   - ✂️ **LoRA Surgery & Merger**: Truncated SVD rank reduction (e.g. compressing rank 64 down to 16/32) and weighted multi-LoRA linear interpolation merging.
+   - 🧬 **LoRA Gene Therapy**: Transformer/UNet layer block Frobenius norm calculations ($\| \Delta W \|_F$) with toxic outlier highlighting and surgical layer zeroing/attenuation.
+   - 🔍 **LoRA Visual Diff**: Tensor-by-tensor high-dimensional cosine similarity drift inspector with color-coded drift badges and recipe hyperparameter diffing.
+   - 📊 **AI Benchmark Matrix**: Automated scanning of multi-epoch checkpoint directories, running 4-part visual test batteries (likeness, style flexibility, bleed stress, composition) to find the sweet spot before overfitting.
+
 
