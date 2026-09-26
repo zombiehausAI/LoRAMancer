@@ -351,6 +351,25 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
   - Real-time compilation console with progress tracking.
   - 1-click direct promotion to the active session and 1-click **Test in ComfyUI Studio** button.
 
+---
+
+## 23. Embedded Remote Web Server & Full-Feature Web Studio
+
+- **Auto-Start on Launch Setting**:
+  - `AutoStartServerOnAppLaunch` setting (default off, configurable via Settings & Admin).
+  - Automatically initializes and serves the background Kestrel web server on app launch without manual intervention.
+- **Cross-Platform Remote Management (Linux, Mac, Mobile)**:
+  - Connect to the host Windows AI PC from any Linux browser, Mac, iPad, or Android phone via local LAN IP or WAN tunnel.
+  - PWA installable application shell with offline caching and responsive touch interface.
+- **Full Studio Feature Suite in Web Frontend**:
+  - **🏋️ Remote Training & Live Telemetry**: Upload dataset ZIP archives, configure target steps, triggers, and architecture, and monitor loss graphs with real-time SSE stream.
+  - **📚 Server LoRA Vault**: Browse all `.safetensors` models stored on the host PC with instant action buttons (*Send to Lab*, *Send to Chop-Shop*, *Test in ComfyUI*).
+  - **🔬 Diagnostic Lab & Overbake Radar**: Inspect any server model for overbaking, view Frobenius energy norms and layer counts, and execute layer rescaling / rank pruning directly on the host.
+  - **🛠️ LoRA Vehicle Chop-Shop**: Dynamically select donor models from the server, assign anatomical visual features (Chassis, Eyes, Hair, Armor, Glow, Detail, Steering) with sliders, and bake Franken-LoRAs via server-side SVD synthesis.
+  - **🎨 ComfyUI Studio**: Configure prompt, negative prompt, LoRA model, weight, CFG, and steps to trigger render jobs on the server's ComfyUI instance and view/download the generated preview directly in the browser.
+  - **📜 Training History**: Full historical archive with 1-click re-run and retrain triggers.
+
+
 
 
 

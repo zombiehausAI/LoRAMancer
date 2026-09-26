@@ -5,6 +5,7 @@
 @inject AmdVenvProvisioner Provisioner
 @inject StudioSessionService StudioSession
 @inject SettingsService Settings
+@inject NetworkServerService NetworkServer
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
@@ -322,6 +323,20 @@
             _envInfo = await Provisioner.DetectEnvironmentAsync();
         } catch {
             // Fallback non-critical
+        }
+
+        if (Settings.Current.AutoStartServerOnAppLaunch && !NetworkServer.IsRunning) {
+            _ = Task.Run(async () => {
+                try {
+                    await NetworkServer.StartServerAsync(
+                        Settings.Current.ServerPort,
+                        Settings.Current.ServerBindAddress,
+                        Settings.Current.ServerAccessToken
+                    );
+                } catch {
+                    // Suppress startup server failure to protect main UI
+                }
+            });
         }
     }
 

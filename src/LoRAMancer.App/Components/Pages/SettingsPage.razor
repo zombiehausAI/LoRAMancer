@@ -536,6 +536,13 @@
                             🔒 <strong>Strict Token Enforcement:</strong> Every request without this token (via Bearer header, <code>?token=</code> query, or session cookie) is immediately denied with HTTP 401 Unauthorized.
                         </MudText>
 
+                        <div class="mb-3">
+                            <MudSwitch @bind-Value="_settings.AutoStartServerOnAppLaunch" Label="Run Web Server on App Startup (Serve Remote Frontend)" Color="Color.Primary" />
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-1">
+                                Automatically launches the background web server and remote frontend when LoRAMancer starts, allowing remote control from Linux, Mac, or mobile browsers without manual toggling.
+                            </MudText>
+                        </div>
+
                         <MudDivider Class="my-2" />
 
                         <MudText Typo="Typo.subtitle2" Class="mb-1" Style="font-weight: 600;">

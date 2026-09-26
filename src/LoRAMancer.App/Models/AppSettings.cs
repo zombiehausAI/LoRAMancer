@@ -81,6 +81,7 @@ public sealed class AppSettings {
 
     // Network Server / Remote Engine
     public bool ServerEnabled { get; set; }
+    public bool AutoStartServerOnAppLaunch { get; set; } = false;
     public int ServerPort { get; set; } = 8420;
     public string ServerBindAddress { get; set; } = "0.0.0.0";
     public string ServerAccessToken { get; set; } = string.Empty;
