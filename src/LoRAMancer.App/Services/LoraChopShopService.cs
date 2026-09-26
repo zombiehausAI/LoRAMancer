@@ -325,6 +325,24 @@ def classify_tensor(key):
             if f"single_blocks.{i}" in k or f"single_blocks_{i}" in k:
                 return "HairAndHairstyle"
         return "SkinAndMicroDetails"
+
+    # Chroma / Generic DiT / Transformer Blocks Mapping (e.g. layers.0, transformer_blocks.5, blocks.12)
+    import re
+    m = re.search(r'(?:layers|transformer_blocks|blocks)[\._](\d+)', k)
+    if m:
+        idx = int(m.group(1))
+        if idx < 4:
+            return "LightingAndAmbiance"
+        elif idx < 10:
+            return "FaceAndAnatomy"
+        elif idx < 16:
+            return "ClothingAndOutfit"
+        elif idx < 22:
+            return "HairAndHairstyle"
+        elif idx < 26:
+            return "EyesAndIris"
+        else:
+            return "SkinAndMicroDetails"
         
     return "FaceAndAnatomy"
 
@@ -351,10 +369,12 @@ def run_chop_shop():
         print("[ChopShop] Error: No donor models loaded successfully.")
         sys.exit(1)
         
-    # Gather union of all keys
+    # Gather union of all keys, ignoring internal trainer state & auxiliary metadata keys
     all_keys = set()
     for ddict in donor_weights.values():
-        all_keys.update(ddict.keys())
+        for k in ddict.keys():
+            if not k.startswith("_aux") and not k.startswith("__") and "optimizer" not in k.lower():
+                all_keys.add(k)
         
     down_keys = [k for k in all_keys if "lora_down" in k or "down.weight" in k or "lora_A" in k]
     assembled_tensors = {}
@@ -410,8 +430,10 @@ def run_chop_shop():
                 assembled_tensors[ak] = src_dict[ak]
             total_grafted += 2
             
-    # Include any remaining non-matrix tensors
+    # Include any remaining legitimate non-matrix model tensors (e.g., alphas, scales, text encoder projections)
     for dk in all_keys:
+        if dk.startswith("_aux") or dk.startswith("__") or "optimizer" in dk.lower():
+            continue
         if dk not in assembled_tensors and not ("lora_down" in dk or "lora_up" in dk or "lora_A" in dk or "lora_B" in dk):
             for sdict in donor_weights.values():
                 if dk in sdict:
