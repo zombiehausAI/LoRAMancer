@@ -322,14 +322,16 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
 
 ---
 
-## 22. LoRA Vehicle Chop-Shop: Multi-Model Anatomical & Style Grafting Studio
+## 22. LoRA Vehicle Chop-Shop: Standalone Multi-Model Grafting Studio (`/chop-shop`)
 
-- **The Garage (Multi-Donor Model Shelf)**:
-  - Load up to 5 donor `.safetensors` models simultaneously.
-  - Automatically identifies architecture, rank, Frobenius energy norm, and dominant features (e.g. *Facial Likeness & Anatomy*, *Lighting & Ambiance*, *Micro-Textures & Outfits*).
-  - Inferred trigger word previews extracted directly from Safetensors metadata.
-- **Visual High-Level Anatomical & Style Component Grafting**:
-  - Direct selection of which donor model provides each distinct physical and aesthetic feature:
+- **Standalone Studio Architecture**:
+  - Accessible directly from the main sidebar under **Studio Pipeline** (`LoRA Chop-Shop`), operating independently from single-model diagnostic sessions.
+  - Divided into 4 focused tabs: **The Garage & Donors**, **Anatomical Assembly**, **Block Matrix Overrides**, and **Bake & Synthesis**.
+- **The Garage (Dynamic Multi-Donor Shelf)**:
+  - Dynamically load unlimited donor `.safetensors` models.
+  - Automatically identifies architecture, rank, Frobenius energy norm, dominant feature badges (*Facial Likeness & Anatomy*, *Lighting & Ambiance*, *Micro-Textures & Outfits*, etc.), and extracted trigger tags.
+- **Anatomical & Style Assembly Bay**:
+  - Modular visual assembly mapping human concepts directly to neural weight blocks:
     - 👤 **Chassis & Face**: Mid-block anatomical geometry, head shape, jawline, eye socket spacing (`MID00` / `double_blocks 6-12`).
     - 👁️ **Headlights & Eyes**: Iris pigmentation, catchlights, ocular reflections, pupil sharpness (`OUT09-OUT11` / `single_blocks 30-37`).
     - 💇 **Custom Paint & Hair**: Hairstyle flow, bangs, braid textures, and hair color projections.
@@ -339,14 +341,15 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
     - 🔤 **Steering & Triggers**: Text encoder layers dictating prompt responsiveness (`lora_te` / `lora_clip`).
   - Independent blend multiplier sliders (0.0x to 2.0x) per component.
 - **Advanced Block-by-Block Matrix Overrides**:
-  - Granular table allowing power users to route specific U-Net or DiT transformer blocks to explicit donors with custom weights.
-  - Individual block overrides take precedence over the high-level category assignments.
+  - Dedicated table allowing power users to route specific U-Net or DiT transformer blocks to explicit donors with custom weights.
+  - Overrides take precedence over high-level category cards.
 - **Smart Auto-Craft Recipe**:
-  - 1-click intelligent analysis: automatically evaluates the energy profiles of all loaded donors and routes the optimal donor to each anatomical and aesthetic part.
-- **SVD Matrix Re-Compression & Compilation**:
-  - Factorizes reconstructed delta tensors back into compact target ranks (Rank 8, 16, 32, or 64).
-  - Optional TIES consensus denoising to eliminate multi-vector interference and parameter fighting.
-  - 1-click promotion of the baked Franken-LoRA directly into the active Studio Session for immediate testing in Stage 4.
+  - 1-click intelligent analysis: automatically evaluates donor Frobenius norms and assigns the optimal donor to each anatomical and aesthetic part.
+- **SVD Matrix Re-Compression, TIES Denoising & ComfyUI Launch**:
+  - Zero-training algebraic synthesis compiling delta weight matrices into clean, target-rank `.safetensors` files (Rank 8, 16, 32, or 64).
+  - TIES consensus denoising to eliminate multi-vector interference and artifact bleed.
+  - Real-time compilation console with progress tracking.
+  - 1-click direct promotion to the active session and 1-click **Test in ComfyUI Studio** button.
 
 
 

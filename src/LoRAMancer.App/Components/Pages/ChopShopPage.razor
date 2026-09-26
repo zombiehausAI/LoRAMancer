@@ -1,0 +1,465 @@
+@page "/chop-shop"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject LoraChopShopService ChopShop
+@inject StudioSessionService StudioSession
+@inject NativeFileDialogService FileDialogService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+    <div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small" Style="font-weight: 700;">STUDIO WORKSHOP</MudChip>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Vehicle Chop-Shop</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Multi-model anatomical &amp; aesthetic grafting: harvest face, eyes, hair, clothing, lighting, and textures into a single unified LoRA.
+        </MudText>
+    </div>
+
+    <div class="d-flex align-center gap-2 flex-wrap">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="AddDonorLoRAAsync" Disabled="_isInspectingDonor || _isAssembling">
+            @(_isInspectingDonor ? "Analyzing Donor..." : "Add Donor LoRA")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="AutoCraftRecipe" Disabled="_donors.Count < 2 || _isAssembling">
+            Auto-Craft Recipe
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ResetGarage" Disabled="_donors.Count == 0 || _isAssembling">
+            Reset Garage
+        </MudButton>
+    </div>
+</div>
+
+<!-- Chop-Shop Workspace Tabs -->
+<MudTabs @bind-ActivePanelIndex="_activeTabIndex" Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4" Color="Color.Dark" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid #313244; border-radius: 8px;">
+    <!-- Tab 1: The Garage & Donors -->
+    <MudTabPanel Text="The Garage &amp; Donors" Icon="@Icons.Material.Filled.Garage">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 mt-1">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">The Garage: Loaded Donor Models (@_donors.Count)</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Add any number of donor models. LoRAMancer analyzes each model's energy footprint and dominant visual features.
+                </MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="AddDonorLoRAAsync" Disabled="_isInspectingDonor || _isAssembling">
+                Browse Model...
+            </MudButton>
+        </div>
+
+        @if (_donors.Count == 0) {
+            <MudCard Elevation="0" Class="pa-8 text-center my-4" Style="background-color: #11111b; border: 1px dashed #313244; border-radius: 8px;">
+                <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Color="Color.Secondary" Size="Size.Large" Class="mb-2" />
+                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">Garage is Empty</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-4" Style="max-width: 500px; margin: 0 auto;">
+                    Load 2 or more LoRAs to begin cross-model component grafting. Pick a character model, a style/lighting model, an outfit model, or detail enhancements.
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="AddDonorLoRAAsync">
+                    Add First Donor LoRA...
+                </MudButton>
+            </MudCard>
+        } else {
+            <MudGrid Spacing="3">
+                @foreach (var (donor, idx) in _donors.Select((d, i) => (d, i))) {
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudCard Elevation="0" Class="pa-4 h-100 position-relative" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <div class="d-flex align-center justify-space-between mb-2">
+                                <MudChip T="string" Size="Size.Small" Color="@(idx == 0 ? Color.Primary : Color.Secondary)" Variant="Variant.Filled" Style="font-weight: 700; font-size: 0.7rem;">
+                                    @(idx == 0 ? "DONOR #1 (BASE CHASSIS)" : $"DONOR #{idx + 1}")
+                                </MudChip>
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" Size="Size.Small" OnClick="@(() => RemoveDonor(donor.Id))" Disabled="_isAssembling" />
+                            </div>
+
+                            <MudText Typo="Typo.subtitle2" Style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: #89b4fa; word-break: break-all;" title="@donor.FileName">
+                                @donor.FileName
+                            </MudText>
+
+                            <div class="d-flex align-center gap-1 my-2 flex-wrap">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled" Style="font-size: 0.65rem;">@donor.Architecture</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Filled" Style="font-size: 0.65rem;">Rank @donor.Rank</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Outlined" Style="font-size: 0.65rem;">@donor.DominantFeature</MudChip>
+                            </div>
+
+                            @if (donor.InferredTags.Count > 0) {
+                                <div class="mt-2">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-1">Inferred Trigger Tokens:</MudText>
+                                    <div class="d-flex gap-1 flex-wrap">
+                                        @foreach (var tag in donor.InferredTags) {
+                                            <span style="font-size: 0.65rem; background: #181825; border: 1px solid #313244; color: #cdd6f4; padding: 2px 6px; border-radius: 4px;">@tag</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudTabPanel>
+
+    <!-- Tab 2: Anatomical Assembly -->
+    <MudTabPanel Text="Anatomical Assembly" Icon="@Icons.Material.Filled.Build">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 mt-1">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">The Assembly Bay: High-Level Visual Parts</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Assign which donor model provides each anatomical or aesthetic part, and calibrate the blend multiplier.
+                </MudText>
+            </div>
+            @if (_donors.Count >= 2) {
+                <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="AutoCraftRecipe">
+                    Smart Auto-Assign
+                </MudButton>
+            }
+        </div>
+
+        @if (_donors.Count < 2) {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="my-3">
+                Please add at least 2 donor models in the Garage tab to configure component grafting.
+            </MudAlert>
+        } else if (_recipe != null) {
+            <MudGrid Spacing="3">
+                @foreach (var part in _recipe.PartAssignments) {
+                    <MudItem xs="12" md="6">
+                        <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <div class="d-flex align-center justify-space-between mb-1">
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@GetPartIcon(part.Category)" Color="Color.Info" Size="Size.Small" />
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">@part.PartName</MudText>
+                                </div>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Style="font-size: 0.65rem;">
+                                    @part.TargetBlocksDescription
+                                </MudChip>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">
+                                @part.Description
+                            </MudText>
+
+                            <MudSelect T="string" @bind-Value="part.SelectedDonorId" Label="Donor LoRA Source" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="mb-3">
+                                <MudSelectItem Value="@((string?)null)">None (Bypass / Base Foundation)</MudSelectItem>
+                                @foreach (var d in _donors) {
+                                    <MudSelectItem Value="@d.Id">
+                                        <div class="d-flex align-center justify-space-between gap-2">
+                                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">@d.FileName</span>
+                                            <span style="font-size: 0.7rem; color: #a6adc8;">(@d.DominantFeature)</span>
+                                        </div>
+                                    </MudSelectItem>
+                                }
+                            </MudSelect>
+
+                            <div class="d-flex justify-space-between align-center">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Grafting Multiplier</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89b4fa;">@part.Weight.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="part.Weight" Min="0.0" Max="2.0" Step="0.05" Color="Color.Primary" />
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudTabPanel>
+
+    <!-- Tab 3: Block Matrix Overrides -->
+    <MudTabPanel Text="Block Matrix Overrides" Icon="@Icons.Material.Filled.Tune">
+        <div class="mb-3 mt-1">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">Granular Block-by-Block Routing (Power Users)</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Explicitly route individual U-Net or DiT transformer blocks to specific donors. Individual block overrides take precedence over the high-level category cards.
+            </MudText>
+        </div>
+
+        @if (_donors.Count < 2) {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="my-3">
+                Load 2 or more donors to unlock block-level matrix overrides.
+            </MudAlert>
+        } else if (_recipe != null) {
+            <MudGrid Spacing="2">
+                @foreach (var block in GetPresetBlocksForArchitecture()) {
+                    var existingOverride = _recipe.AdvancedOverrides.FirstOrDefault(o => o.BlockName == block.name);
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudCard Elevation="0" Class="pa-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                            <div class="d-flex justify-space-between align-center mb-1">
+                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; font-weight: 700; color: #cdd6f4;">@block.name</span>
+                                <span style="font-size: 0.65rem; color: #a6adc8;">@block.role</span>
+                            </div>
+                            <MudSelect T="string" Value="@(existingOverride?.SelectedDonorId)" ValueChanged="@(id => SetBlockOverride(block.name, block.role, id))" Label="Block Donor" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                <MudSelectItem Value="@((string?)null)">Default Category Rule</MudSelectItem>
+                                @foreach (var d in _donors) {
+                                    <MudSelectItem Value="@d.Id">@d.FileName</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudTabPanel>
+
+    <!-- Tab 4: Bake & Synthesis -->
+    <MudTabPanel Text="Bake &amp; Synthesis" Icon="@Icons.Material.Filled.Whatshot">
+        <div class="mb-3 mt-1">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">Bake Station: Matrix Synthesis &amp; SVD Re-Compression</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Synthesize and SVD-compress the assembled tensors into a clean, ready-to-render .safetensors file with zero training required.
+            </MudText>
+        </div>
+
+        @if (_donors.Count < 2) {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="my-3">
+                At least 2 donor models must be present in the garage before baking.
+            </MudAlert>
+        } else if (_recipe != null) {
+            <MudCard Elevation="0" Class="pa-4 mb-4" Style="background-color: #11111b; border: 1px solid #fab387; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Whatshot" Color="Color.Warning" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">Compilation Settings</MudText>
+                    </div>
+                    <MudSwitch @bind-Value="_recipe.UseDenoisingTies" Color="Color.Primary">
+                        <span style="font-size: 0.8rem; color: #cdd6f4;">Resolve Vector Interference (TIES Denoising)</span>
+                    </MudSwitch>
+                </div>
+
+                <MudGrid Spacing="2" Class="mb-3">
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="_recipe.RecipeName" Label="Franken-LoRA Model Name" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSelect T="int" @bind-Value="_recipe.TargetRank" Label="Output SVD Rank Compression" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                            <MudSelectItem Value="8">Rank 8 (~16MB Ultra-Compact)</MudSelectItem>
+                            <MudSelectItem Value="16">Rank 16 (~32MB Standard Production)</MudSelectItem>
+                            <MudSelectItem Value="32">Rank 32 (~64MB High Fidelity)</MudSelectItem>
+                            <MudSelectItem Value="64">Rank 64 (~128MB Full Capacity)</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+
+                <div class="d-flex align-center justify-space-between flex-wrap gap-3 pt-2" style="border-top: 1px solid #313244;">
+                    <div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Destination Path:</MudText>
+                        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #89b4fa;">@_recipe.OutputPath</span>
+                    </div>
+                    <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Large" StartIcon="@Icons.Material.Filled.BuildCircle" OnClick="BakeLoraAsync" Disabled="_isAssembling">
+                        @(_isAssembling ? "Assembling Franken-LoRA..." : "Bake Assembled Franken-LoRA")
+                    </MudButton>
+                </div>
+
+                @if (_result != null) {
+                    <MudAlert Severity="@(_result.Success ? Severity.Success : Severity.Error)" Variant="Variant.Filled" Dense="true" Class="mt-3">
+                        <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                            <span>@_result.Message (Duration: @_result.Duration.TotalSeconds.ToString("F1")s)</span>
+                            @if (_result.Success) {
+                                <div class="d-flex gap-2">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Dark" Size="Size.Small" OnClick="SetAsActiveAndNavigateTest">
+                                        Test in ComfyUI Studio
+                                    </MudButton>
+                                </div>
+                            }
+                        </div>
+                    </MudAlert>
+                }
+            </MudCard>
+
+            @if (_logs.Count > 0) {
+                <MudCard Elevation="0" Class="pa-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-1">Compilation Logs</MudText>
+                    <div style="max-height: 180px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #a6adc8;">
+                        @foreach (var log in _logs) {
+                            <div>@log</div>
+                        }
+                    </div>
+                </MudCard>
+            }
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private int _activeTabIndex;
+    private readonly List<ChopDonorModel> _donors = new();
+    private ChopShopRecipe? _recipe;
+    private bool _isInspectingDonor;
+    private bool _isAssembling;
+    private ChopShopResult? _result;
+    private readonly List<string> _logs = new();
+
+    protected override async Task OnInitializedAsync() {
+        InitRecipe();
+        // If an active LoRA is present in the Studio session, seed it as Donor #1 automatically
+        if (!string.IsNullOrWhiteSpace(StudioSession.ActiveLoraPath) && File.Exists(StudioSession.ActiveLoraPath)) {
+            await AddDonorByPathAsync(StudioSession.ActiveLoraPath);
+        }
+    }
+
+    private void InitRecipe() {
+        if (_recipe == null) {
+            string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "chopshop");
+            if (!Directory.Exists(outDir)) {
+                try { Directory.CreateDirectory(outDir); } catch { }
+            }
+            _recipe = new ChopShopRecipe {
+                RecipeName = "ChopShop_FrankenLoRA",
+                OutputPath = Path.Combine(outDir, "ChopShop_FrankenLoRA.safetensors"),
+                PartAssignments = LoraChopShopService.CreateDefaultPartAssignments()
+            };
+        }
+    }
+
+    private async Task AddDonorLoRAAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (string.IsNullOrWhiteSpace(file) || !File.Exists(file)) return;
+        await AddDonorByPathAsync(file);
+    }
+
+    private async Task AddDonorByPathAsync(string path) {
+        if (_donors.Any(d => d.FilePath == path)) {
+            Snackbar.Add("This LoRA is already loaded in the garage!", Severity.Info);
+            return;
+        }
+
+        _isInspectingDonor = true;
+        StateHasChanged();
+        try {
+            var donor = await ChopShop.InspectDonorAsync(path);
+            _donors.Add(donor);
+            InitRecipe();
+            if (_recipe != null) {
+                _recipe.Donors = _donors.ToList();
+                if (_donors.Count == 2) {
+                    AutoCraftRecipe();
+                } else if (_donors.Count == 1) {
+                    string baseName = Path.GetFileNameWithoutExtension(donor.FilePath);
+                    _recipe.RecipeName = $"{baseName}_Franken";
+                    string dir = Path.GetDirectoryName(donor.FilePath) ?? "";
+                    _recipe.OutputPath = Path.Combine(dir, $"{_recipe.RecipeName}.safetensors");
+                    foreach (var p in _recipe.PartAssignments) {
+                        p.SelectedDonorId ??= donor.Id;
+                    }
+                }
+            }
+            Snackbar.Add($"Added donor #{_donors.Count}: {donor.FileName} ({donor.DominantFeature})", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Error loading donor: {ex.Message}", Severity.Error);
+        } finally {
+            _isInspectingDonor = false;
+            StateHasChanged();
+        }
+    }
+
+    private void RemoveDonor(string id) {
+        _donors.RemoveAll(d => d.Id == id);
+        if (_recipe != null) {
+            _recipe.Donors = _donors.ToList();
+            foreach (var p in _recipe.PartAssignments.Where(p => p.SelectedDonorId == id)) {
+                p.SelectedDonorId = _donors.FirstOrDefault()?.Id;
+            }
+            _recipe.AdvancedOverrides.RemoveAll(o => o.SelectedDonorId == id);
+        }
+    }
+
+    private void AutoCraftRecipe() {
+        if (_donors.Count < 2 || _recipe == null) return;
+        string outDir = Path.GetDirectoryName(_recipe.OutputPath) ?? "";
+        if (string.IsNullOrWhiteSpace(outDir)) {
+            outDir = Path.GetDirectoryName(_donors[0].FilePath) ?? "";
+        }
+        var newRecipe = ChopShop.GenerateSmartAutoGraftRecipe(_donors, outDir);
+        _recipe.PartAssignments = newRecipe.PartAssignments;
+        _recipe.RecipeName = newRecipe.RecipeName;
+        _recipe.OutputPath = newRecipe.OutputPath;
+        _recipe.TargetRank = newRecipe.TargetRank;
+        Snackbar.Add("Auto-crafted optimal anatomical & style grafting recipe!", Severity.Success);
+    }
+
+    private void ResetGarage() {
+        _donors.Clear();
+        _result = null;
+        InitRecipe();
+        if (_recipe != null) {
+            _recipe.Donors.Clear();
+            _recipe.AdvancedOverrides.Clear();
+            _recipe.PartAssignments = LoraChopShopService.CreateDefaultPartAssignments();
+        }
+        Snackbar.Add("Chop-Shop garage reset", Severity.Info);
+    }
+
+    private void SetBlockOverride(string blockName, string role, string? donorId) {
+        if (_recipe == null) return;
+        var existing = _recipe.AdvancedOverrides.FirstOrDefault(o => o.BlockName == blockName);
+        if (string.IsNullOrWhiteSpace(donorId)) {
+            if (existing != null) _recipe.AdvancedOverrides.Remove(existing);
+        } else {
+            if (existing != null) {
+                existing.SelectedDonorId = donorId;
+            } else {
+                _recipe.AdvancedOverrides.Add(new AdvancedBlockOverride {
+                    BlockName = blockName,
+                    FunctionalGroup = role,
+                    SelectedDonorId = donorId,
+                    Weight = 1.0
+                });
+            }
+        }
+    }
+
+    private async Task BakeLoraAsync() {
+        if (_recipe == null || _donors.Count == 0) return;
+        _isAssembling = true;
+        _result = null;
+        _logs.Clear();
+        StateHasChanged();
+        try {
+            _result = await ChopShop.AssembleChopShopLoraAsync(
+                _recipe,
+                onLog: line => {
+                    _logs.Add(line);
+                    StateHasChanged();
+                }
+            );
+            if (_result.Success) {
+                Snackbar.Add($"Franken-LoRA baked successfully: {Path.GetFileName(_result.OutputPath)}!", Severity.Success);
+            } else {
+                Snackbar.Add($"Assembly error: {_result.Message}", Severity.Error);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Assembly exception: {ex.Message}", Severity.Error);
+        } finally {
+            _isAssembling = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetAsActiveAndNavigateTest() {
+        if (_result == null || string.IsNullOrWhiteSpace(_result.OutputPath) || !File.Exists(_result.OutputPath)) return;
+        StudioSession.SetActiveLora(_result.OutputPath);
+        Navigation.NavigateTo("/test");
+    }
+
+    private static string GetPartIcon(ChopPartCategory category) {
+        return category switch {
+            ChopPartCategory.FaceAndAnatomy => Icons.Material.Filled.Face,
+            ChopPartCategory.EyesAndIris => Icons.Material.Filled.Visibility,
+            ChopPartCategory.HairAndHairstyle => Icons.Material.Filled.Brush,
+            ChopPartCategory.ClothingAndOutfit => Icons.Material.Filled.Checkroom,
+            ChopPartCategory.LightingAndAmbiance => Icons.Material.Filled.Lightbulb,
+            ChopPartCategory.SkinAndMicroDetails => Icons.Material.Filled.Grain,
+            ChopPartCategory.PromptTriggers => Icons.Material.Filled.Psychology,
+            _ => Icons.Material.Filled.Extension
+        };
+    }
+
+    private static List<(string name, string role)> GetPresetBlocksForArchitecture() {
+        return new List<(string, string)> {
+            ("input_blocks.1", "Lighting & Ambiance"),
+            ("input_blocks.2", "Atmospheric Tone"),
+            ("input_blocks.4", "Camera & Composition"),
+            ("input_blocks.7", "Pose & Silhouette"),
+            ("middle_block", "Face & Anatomy"),
+            ("output_blocks.3", "Clothing & Garments"),
+            ("output_blocks.5", "Costume Texture"),
+            ("output_blocks.7", "Hair Flow"),
+            ("output_blocks.10", "Iris & Micro-Pores"),
+            ("output_blocks.11", "Fine Detail Polish")
+        };
+    }
+}
