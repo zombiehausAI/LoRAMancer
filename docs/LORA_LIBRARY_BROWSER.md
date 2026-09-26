@@ -46,8 +46,10 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
   - **Local & SQLite Caching**: All retrieved Civitai model versions, trigger tags, descriptions, download URLs, and companion thumbnails are persisted to `~/.LoRAMancer/loras.db` and cached to `~/.LoRAMancer/lora_cache/`.
 - **Persistent SQLite Library (`~/.LoRAMancer/loras.db`)**: All indexed LoRA models, computed hashes, SafeTensors metadata, Civitai payloads, user favorites, and base model overrides are stored in an ACID SQLite database. When navigating to the LoRA Manager, the gallery loads instantly (0ms) from SQLite with zero background scan overhead.
 - **Multi-Library Manager**:
-  - Organize collections into multiple independent libraries (e.g. `FLUX Characters`, `Anime Styles`, `SDXL Concepts`, or specialized project folders).
+  - Organize collections into multiple independent libraries (e.g. `Main Library`, `Flux`, `Chroma`, `SDXL`, or specialized project folders).
   - All libraries reside within the same SQLite database (`~/.LoRAMancer/loras.db`) under the `Libraries` table.
+  - **Hierarchical Subfolder Model Inheritance**: Sub-libraries created from subfolders of an already-scanned root directory immediately inherit and display their models directly from the SQLite database. Switching between libraries or navigating away and back is instantaneous without requiring any rescan.
+  - **Dynamic Model Counts**: Dropdown selectors and library management cards continuously reflect live model counts retrieved from the database, automatically updating whenever libraries are added, folders are browsed, or scans finish.
   - Browse each library independently with instant switching from the top navigation dropdown or Library Manager modal.
   - **1-Click Subfolder Conversion**: Convert any active subfolder into its own independent library with a single click (`Make Subfolder a Library`), or bulk-convert all immediate subdirectories under a root path using **"Convert Subfolders"** in the Library Manager.
   - **Per-Library LoRA Updater**: The `LoraUpdater` plugin and dialog natively supports targeting a specific library from a dropdown selector, keeping each collection up to date with Civitai without scanning external directories.
@@ -270,4 +272,33 @@ All diagnostic tools and studio pipelines dynamically adapt to all detected base
 - **Cross-Studio Pipeline Handoff**:
   - Right-clicking any LoRA card or table row and choosing **Send to Diagnostic Lab**, **Test in ComfyUI Canvas**, or **Diagnostics** propagates the model's `EffectiveBaseModel` directly into `StudioSessionService`.
   - Diagnostic tools launch pre-configured with the exact architecture, eliminating manual re-selection.
+
+---
+
+## 8. LoRA Organizer & User-Defined Collections
+
+### Physical Organizer: "Move to Library..."
+- **Context Menu Integration**: Right-click any LoRA card (or table row) and select **Move to Library...** under the `📁 ORGANIZER & COLLECTIONS` section.
+- **Physical Relocation**:
+  - The model's `.safetensors` file is moved from its current location to the root directory of the selected destination library.
+  - Automatically moves all companion files sharing the base filename (`.png`, `.jpg`, `.preview.png`, `.preview.jpg`, `.webp`, `.preview.webp`, `.json`, `_metadata.json`).
+  - Safe collision detection: if a file with the same name already exists in the target directory, it automatically appends a numbered suffix (e.g. `model_name (1).safetensors`).
+- **Database Synchronization**:
+  - The SQLite database is updated atomically in a transaction: `FilePath`, `FileName`, `DirectoryPath`, `LibraryId`, and `ThumbnailPath` are updated in the `Loras` table.
+  - All virtual collection memberships in `CollectionItems` referencing the old path are updated to the new path, preserving collection memberships.
+
+### Virtual Buckets: User-Defined Collections
+- **Folder-Independent Grouping**:
+  - Collections allow users to group LoRAs into arbitrary named buckets (e.g., "Best Anime", "Cyberpunk Kit", "Portrait Specialists") without moving any physical files on disk.
+  - LoRAs can belong to zero, one, or multiple collections simultaneously (many-to-many relationship).
+- **Assigning Collections**:
+  - Right-click any LoRA card or table row and select **Add / Remove from Collections...**.
+  - Check or uncheck collections with instant live updates.
+  - Quickly create new collections inline directly from the assignment dialog.
+- **Viewing and Filtering Collections**:
+  - Top navigation bar features a **Collections** dropdown menu displaying all created collections and their model counts.
+  - Selecting a collection instantly filters the dashboard view to display only the models in that bucket, seamlessly supporting searching, sorting, and architecture filtering.
+  - An active collection chip allows one-click clearing to return to normal folder/library browsing.
+- **Managing Collections**:
+  - The **Manage Collections** modal lets users create collections with optional descriptions and custom colors, view contained model counts, jump directly to viewing a collection, or delete collections. Deleting a collection removes the virtual bucket without altering any files on disk.
 

@@ -117,6 +117,25 @@ public sealed class LoraDatabaseService : IDisposable {
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_categories_name ON Categories(Name);
+
+                CREATE TABLE IF NOT EXISTS Collections (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL COLLATE NOCASE,
+                    Description TEXT,
+                    Color TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_collections_name ON Collections(Name);
+
+                CREATE TABLE IF NOT EXISTS CollectionItems (
+                    CollectionId TEXT NOT NULL,
+                    FilePath TEXT NOT NULL,
+                    AddedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (CollectionId, FilePath)
+                );
+                CREATE INDEX IF NOT EXISTS idx_collection_items_path ON CollectionItems(FilePath);
+                CREATE INDEX IF NOT EXISTS idx_collection_items_col ON CollectionItems(CollectionId);
             ";
 
             using var cmd = connection.CreateCommand();
@@ -238,9 +257,19 @@ public sealed class LoraDatabaseService : IDisposable {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
                 SELECT l.Id, l.Name, l.FolderPath, l.Description, l.CreatedAtUtc, l.UpdatedAtUtc,
-                       COUNT(m.FilePath) as ModelCount
+                       COUNT(DISTINCT m.FilePath) as ModelCount
                 FROM Libraries l
-                LEFT JOIN Loras m ON m.LibraryId = l.Id OR (m.LibraryId IS NULL AND m.DirectoryPath LIKE l.FolderPath || '%')
+                LEFT JOIN Loras m ON (
+                    m.LibraryId = l.Id 
+                    OR (
+                        m.DirectoryPath IS NOT NULL 
+                        AND l.FolderPath IS NOT NULL 
+                        AND (
+                            REPLACE(RTRIM(m.DirectoryPath, '/\'), '\', '/') = REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/')
+                            OR REPLACE(RTRIM(m.DirectoryPath, '/\'), '\', '/') LIKE REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/') || '/%'
+                        )
+                    )
+                )
                 GROUP BY l.Id
                 ORDER BY l.Name COLLATE NOCASE ASC;
             ";
@@ -408,6 +437,165 @@ public sealed class LoraDatabaseService : IDisposable {
         }
     }
 
+    public async Task<List<LoraCollection>> GetCollectionsAsync() {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT c.Id, c.Name, c.Description, c.Color, c.CreatedAtUtc, c.UpdatedAtUtc,
+                       COUNT(ci.FilePath) as ModelCount
+                FROM Collections c
+                LEFT JOIN CollectionItems ci ON ci.CollectionId = c.Id
+                GROUP BY c.Id
+                ORDER BY c.Name COLLATE NOCASE ASC;
+            ";
+            var list = new List<LoraCollection>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                list.Add(new LoraCollection {
+                    Id = reader.GetString(0),
+                    Name = reader.GetString(1),
+                    Description = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    Color = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
+                    ModelCount = reader.GetInt32(6)
+                });
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task UpsertCollectionAsync(LoraCollection collection) {
+        ArgumentNullException.ThrowIfNull(collection);
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT OR REPLACE INTO Collections (Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc)
+                VALUES ($Id, $Name, $Description, $Color, $CreatedAtUtc, $UpdatedAtUtc);
+            ";
+            cmd.Parameters.AddWithValue("$Id", collection.Id);
+            cmd.Parameters.AddWithValue("$Name", collection.Name);
+            cmd.Parameters.AddWithValue("$Description", (object?)collection.Description ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$Color", (object?)collection.Color ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$CreatedAtUtc", collection.CreatedAtUtc.ToString("O"));
+            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task DeleteCollectionAsync(string id) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var trans = connection.BeginTransaction();
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = trans;
+            cmd.CommandText = @"
+                DELETE FROM CollectionItems WHERE CollectionId = $Id;
+                DELETE FROM Collections WHERE Id = $Id;
+            ";
+            cmd.Parameters.AddWithValue("$Id", id);
+            await cmd.ExecuteNonQueryAsync();
+            trans.Commit();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task AddToCollectionAsync(string collectionId, string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT OR IGNORE INTO CollectionItems (CollectionId, FilePath, AddedAtUtc)
+                VALUES ($CollectionId, $FilePath, $AddedAtUtc);
+            ";
+            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.Parameters.AddWithValue("$AddedAtUtc", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task RemoveFromCollectionAsync(string collectionId, string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM CollectionItems WHERE CollectionId = $CollectionId AND FilePath = $FilePath;";
+            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task<List<string>> GetCollectionsForLoraAsync(string filePath) {
+        if (string.IsNullOrWhiteSpace(filePath)) return new List<string>();
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT CollectionId FROM CollectionItems WHERE FilePath = $FilePath;";
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            var list = new List<string>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                list.Add(reader.GetString(0));
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task<List<LoraMetadata>> GetCollectionLorasAsync(string collectionId) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT m.* FROM Loras m
+                INNER JOIN CollectionItems ci ON ci.FilePath = m.FilePath
+                WHERE ci.CollectionId = $CollectionId
+                ORDER BY m.FileName COLLATE NOCASE ASC;
+            ";
+            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
+            var list = new List<LoraMetadata>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                list.Add(MapReaderToMetadata(reader));
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
     public async Task SetLoraCategoryAsync(string filePath, string? category) {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
@@ -467,15 +655,42 @@ public sealed class LoraDatabaseService : IDisposable {
 
             using var cmd = connection.CreateCommand();
             if (!string.IsNullOrWhiteSpace(libraryId) && !string.IsNullOrWhiteSpace(folderPath)) {
-                cmd.CommandText = "SELECT * FROM Loras WHERE LibraryId = $LibraryId OR (LibraryId IS NULL AND DirectoryPath LIKE $FolderPath) ORDER BY FileName COLLATE NOCASE ASC;";
+                string normFolder = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
+                cmd.CommandText = @"
+                    SELECT * FROM Loras 
+                    WHERE LibraryId = $LibraryId 
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix
+                    ORDER BY FileName COLLATE NOCASE ASC;
+                ";
                 cmd.Parameters.AddWithValue("$LibraryId", libraryId);
-                cmd.Parameters.AddWithValue("$FolderPath", folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "%");
+                cmd.Parameters.AddWithValue("$NormFolder", normFolder);
+                cmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
             } else if (!string.IsNullOrWhiteSpace(libraryId)) {
-                cmd.CommandText = "SELECT * FROM Loras WHERE LibraryId = $LibraryId ORDER BY FileName COLLATE NOCASE ASC;";
+                cmd.CommandText = @"
+                    SELECT * FROM Loras 
+                    WHERE LibraryId = $LibraryId 
+                       OR (DirectoryPath IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM Libraries l 
+                           WHERE l.Id = $LibraryId 
+                             AND (
+                                 REPLACE(RTRIM(Loras.DirectoryPath, '/\'), '\', '/') = REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/')
+                                 OR REPLACE(RTRIM(Loras.DirectoryPath, '/\'), '\', '/') LIKE REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/') || '/%'
+                             )
+                       ))
+                    ORDER BY FileName COLLATE NOCASE ASC;
+                ";
                 cmd.Parameters.AddWithValue("$LibraryId", libraryId);
             } else if (!string.IsNullOrWhiteSpace(folderPath)) {
-                cmd.CommandText = "SELECT * FROM Loras WHERE DirectoryPath LIKE $FolderPath ORDER BY FileName COLLATE NOCASE ASC;";
-                cmd.Parameters.AddWithValue("$FolderPath", folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "%");
+                string normFolder = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
+                cmd.CommandText = @"
+                    SELECT * FROM Loras 
+                    WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix
+                    ORDER BY FileName COLLATE NOCASE ASC;
+                ";
+                cmd.Parameters.AddWithValue("$NormFolder", normFolder);
+                cmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
             } else {
                 cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
             }
@@ -750,9 +965,15 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             var existingSet = new HashSet<string>(existingPaths, StringComparer.OrdinalIgnoreCase);
+            string normFolder = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
             using var selectCmd = connection.CreateCommand();
-            selectCmd.CommandText = "SELECT FilePath FROM Loras WHERE DirectoryPath LIKE $Prefix;";
-            selectCmd.Parameters.AddWithValue("$Prefix", folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "%");
+            selectCmd.CommandText = @"
+                SELECT FilePath FROM Loras 
+                WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
+                   OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix;
+            ";
+            selectCmd.Parameters.AddWithValue("$NormFolder", normFolder);
+            selectCmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
 
             var toDelete = new List<string>();
             using (var reader = await selectCmd.ExecuteReaderAsync()) {
@@ -779,6 +1000,100 @@ public sealed class LoraDatabaseService : IDisposable {
         } finally {
             _lock.Release();
         }
+    }
+
+    public async Task<string> MoveLoraFileAsync(string oldFilePath, string targetDirectoryPath, string? targetLibraryId = null) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(oldFilePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectoryPath);
+        if (!File.Exists(oldFilePath)) {
+            throw new FileNotFoundException("Source LoRA file does not exist.", oldFilePath);
+        }
+
+        Directory.CreateDirectory(targetDirectoryPath);
+        string fileName = Path.GetFileName(oldFilePath);
+        string newFilePath = Path.Combine(targetDirectoryPath, fileName);
+
+        // Handle collision
+        if (!string.Equals(oldFilePath, newFilePath, StringComparison.OrdinalIgnoreCase) && File.Exists(newFilePath)) {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+            string ext = Path.GetExtension(fileName);
+            int counter = 1;
+            do {
+                newFilePath = Path.Combine(targetDirectoryPath, $"{nameWithoutExt} ({counter}){ext}");
+                counter++;
+            } while (File.Exists(newFilePath));
+            fileName = Path.GetFileName(newFilePath);
+        }
+
+        // Move the safetensors file
+        if (!string.Equals(oldFilePath, newFilePath, StringComparison.OrdinalIgnoreCase)) {
+            File.Move(oldFilePath, newFilePath);
+        }
+
+        // Move companion files (thumbnail, json, etc.)
+        string? newThumbnailPath = null;
+        string oldDir = Path.GetDirectoryName(oldFilePath) ?? string.Empty;
+        string oldNameWithoutExt = Path.GetFileNameWithoutExtension(oldFilePath);
+        string newNameWithoutExt = Path.GetFileNameWithoutExtension(newFilePath);
+
+        string[] companionExts = { ".png", ".preview.png", ".jpg", ".preview.jpg", ".jpeg", ".webp", ".json", ".civitai.info" };
+        foreach (var cExt in companionExts) {
+            string candidateOld = Path.Combine(oldDir, oldNameWithoutExt + cExt);
+            if (File.Exists(candidateOld)) {
+                string candidateNew = Path.Combine(targetDirectoryPath, newNameWithoutExt + cExt);
+                try {
+                    if (!string.Equals(candidateOld, candidateNew, StringComparison.OrdinalIgnoreCase)) {
+                        File.Move(candidateOld, candidateNew, overwrite: true);
+                    }
+                    if (cExt != ".json" && cExt != ".civitai.info" && newThumbnailPath == null) {
+                        newThumbnailPath = candidateNew;
+                    }
+                } catch {
+                    // Non-critical companion move
+                }
+            }
+        }
+
+        string newDir = Path.GetDirectoryName(newFilePath) ?? targetDirectoryPath;
+
+        // Update database
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var trans = connection.BeginTransaction();
+
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = trans;
+            cmd.CommandText = @"
+                UPDATE Loras 
+                SET FilePath = $NewFilePath,
+                    FileName = $NewFileName,
+                    DirectoryPath = $NewDirectoryPath,
+                    LibraryId = COALESCE($TargetLibraryId, LibraryId),
+                    ThumbnailPath = COALESCE($NewThumbnailPath, ThumbnailPath),
+                    UpdatedAtUtc = $UpdatedAt
+                WHERE FilePath = $OldFilePath;
+
+                UPDATE CollectionItems
+                SET FilePath = $NewFilePath
+                WHERE FilePath = $OldFilePath;
+            ";
+            cmd.Parameters.AddWithValue("$NewFilePath", newFilePath);
+            cmd.Parameters.AddWithValue("$NewFileName", fileName);
+            cmd.Parameters.AddWithValue("$NewDirectoryPath", newDir);
+            cmd.Parameters.AddWithValue("$TargetLibraryId", (object?)targetLibraryId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$NewThumbnailPath", (object?)newThumbnailPath ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$OldFilePath", oldFilePath);
+
+            await cmd.ExecuteNonQueryAsync();
+            trans.Commit();
+        } finally {
+            _lock.Release();
+        }
+
+        return newFilePath;
     }
 
     private static LoraMetadata MapReaderToMetadata(DbDataReader reader) {

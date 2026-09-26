@@ -1,5 +1,9 @@
 # LoRAMancer 🪄
 
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4)](#requirements--quickstart)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![License](https://img.shields.io/badge/License-MIT-brightgreen)](LICENSE)
+
 **LoRAMancer** is a production-grade, highly responsive desktop LoRA Manager, Configuration Cloner, and Training Orchestrator application targeting **.NET 10 (Blazor Hybrid MAUI Desktop)** on Windows, with cross-platform **Remote Web UI** capabilities and universal hardware acceleration across **NVIDIA CUDA**, **AMD ROCm**, **Intel XPU**, and **CPU**.
 
 > [!NOTE]
@@ -14,7 +18,7 @@
 
 LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 
-1. **Multi-Library Management & Visual Browsing**: Index thousands of `.safetensors` models into an instant, SQLite-backed library (`~/.LoRAMancer/loras.db`). Organize models across independent named libraries, convert subfolders into libraries with one click, search globally, and view auto-discovered companion preview thumbnails with zero UI freezing.
+1. **Multi-Library Management, Organizer & Collections**: Index thousands of `.safetensors` models into an instant, SQLite-backed library (`~/.LoRAMancer/loras.db`). Organize models across independent named libraries, convert subfolders into libraries with one click, physically move LoRAs (and companion previews) across libraries with "Move to Library...", group models into arbitrary virtual user-defined Collections without moving files, search globally, and view auto-discovered companion preview thumbnails with zero UI freezing.
 2. **Hyperparameter Recipe Cloning**: Inspect and borrow proven mathematical settings (rank, alpha, learning rates, optimizer, epochs) from any donor LoRA to pre-seed your next training run while preserving your own unique dataset and identity.
 3. **Automated AI-Toolkit Orchestration & Training Queue**: Streamlined Easy Use wizard with built-in presets (Characters, Styles, Concepts, Clothing), dataset health auditing, live hardware estimators, sequential single-GPU training queue, and background execution with desktop-wide single-instance protection.
 4. **Permanent Training History & Vault**: Keep permanent records of all training runs, prompt triggers, loss curves, and configurations without cloud retention limits.

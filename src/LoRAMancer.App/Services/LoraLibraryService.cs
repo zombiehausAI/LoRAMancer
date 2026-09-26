@@ -55,9 +55,19 @@ public sealed class LoraLibraryService {
         }
     }
 
+    private readonly List<LoraCollection> _collections = new();
+    public IReadOnlyList<LoraCollection> Collections {
+        get {
+            lock (_lock) {
+                return _collections.ToList();
+            }
+        }
+    }
+
     public event Action? OnLibraryUpdated;
     public event Action? OnLibrariesChanged;
     public event Action? OnCategoriesChanged;
+    public event Action? OnCollectionsChanged;
     public event Action<string, int, int>? OnScanProgress;
     public event Action<bool>? OnScanStateChanged;
     public event Action<bool>? OnEnrichStateChanged;
@@ -101,13 +111,17 @@ public sealed class LoraLibraryService {
         try {
             var dbLibs = await _databaseService.GetLibrariesAsync();
             var dbCats = await _databaseService.GetCategoriesAsync();
+            var dbCols = await _databaseService.GetCollectionsAsync();
             lock (_lock) {
                 _libraries.Clear();
                 _libraries.AddRange(dbLibs);
                 _categories.Clear();
                 _categories.AddRange(dbCats);
+                _collections.Clear();
+                _collections.AddRange(dbCols);
             }
             OnCategoriesChanged?.Invoke();
+            OnCollectionsChanged?.Invoke();
 
             if (_libraries.Count == 0) {
                 string defaultPath = !string.IsNullOrWhiteSpace(RootFolder) && Directory.Exists(RootFolder)
@@ -127,6 +141,12 @@ public sealed class LoraLibraryService {
                 await _databaseService.UpsertLibraryAsync(defaultLib);
                 lock (_lock) {
                     _libraries.Add(defaultLib);
+                }
+            } else {
+                var defaultLib = _libraries.FirstOrDefault(l => string.Equals(l.Id, "default", StringComparison.OrdinalIgnoreCase));
+                if (defaultLib != null && (!Directory.Exists(defaultLib.FolderPath) || string.IsNullOrWhiteSpace(defaultLib.FolderPath)) && !string.IsNullOrWhiteSpace(_settingsService.Current.LoraStorageDirectory) && Directory.Exists(_settingsService.Current.LoraStorageDirectory)) {
+                    defaultLib.FolderPath = _settingsService.Current.LoraStorageDirectory;
+                    await _databaseService.UpsertLibraryAsync(defaultLib);
                 }
             }
 
@@ -159,7 +179,26 @@ public sealed class LoraLibraryService {
         _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
 
         await LoadFromDatabaseAsync();
-        OnLibrariesChanged?.Invoke();
+        await RefreshLibrariesAsync();
+    }
+
+    public async Task RefreshLibrariesAsync() {
+        try {
+            var dbLibs = await _databaseService.GetLibrariesAsync();
+            lock (_lock) {
+                _libraries.Clear();
+                _libraries.AddRange(dbLibs);
+                if (ActiveLibrary != null) {
+                    var updatedActive = _libraries.FirstOrDefault(l => string.Equals(l.Id, ActiveLibrary.Id, StringComparison.OrdinalIgnoreCase));
+                    if (updatedActive != null) {
+                        ActiveLibrary = updatedActive;
+                    }
+                }
+            }
+            OnLibrariesChanged?.Invoke();
+        } catch {
+            // Suppress background reload errors
+        }
     }
 
     public async Task<LoraLibrary> CreateLibraryAsync(string name, string folderPath, string? description = null) {
@@ -176,39 +215,24 @@ public sealed class LoraLibraryService {
         };
 
         await _databaseService.UpsertLibraryAsync(lib);
-        lock (_lock) {
-            _libraries.RemoveAll(l => string.Equals(l.Id, lib.Id, StringComparison.OrdinalIgnoreCase));
-            _libraries.Add(lib);
-        }
-
-        OnLibrariesChanged?.Invoke();
-        return lib;
+        await RefreshLibrariesAsync();
+        return _libraries.FirstOrDefault(l => string.Equals(l.Id, lib.Id, StringComparison.OrdinalIgnoreCase)) ?? lib;
     }
 
     public async Task UpdateLibraryAsync(LoraLibrary library) {
         ArgumentNullException.ThrowIfNull(library);
         library.UpdatedAtUtc = DateTime.UtcNow;
         await _databaseService.UpsertLibraryAsync(library);
-        lock (_lock) {
-            int idx = _libraries.FindIndex(l => string.Equals(l.Id, library.Id, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0) {
-                _libraries[idx] = library;
-            } else {
-                _libraries.Add(library);
-            }
-        }
         if (ActiveLibrary != null && string.Equals(ActiveLibrary.Id, library.Id, StringComparison.OrdinalIgnoreCase)) {
             ActiveLibrary = library;
             RootFolder = library.FolderPath;
         }
-        OnLibrariesChanged?.Invoke();
+        await RefreshLibrariesAsync();
     }
 
     public async Task DeleteLibraryAsync(string libraryId) {
         await _databaseService.DeleteLibraryAsync(libraryId);
-        lock (_lock) {
-            _libraries.RemoveAll(l => string.Equals(l.Id, libraryId, StringComparison.OrdinalIgnoreCase));
-        }
+        await RefreshLibrariesAsync();
 
         if (ActiveLibrary != null && string.Equals(ActiveLibrary.Id, libraryId, StringComparison.OrdinalIgnoreCase)) {
             var fallback = _libraries.FirstOrDefault();
@@ -219,7 +243,6 @@ public sealed class LoraLibraryService {
                 await LoadFromDatabaseAsync();
             }
         }
-        OnLibrariesChanged?.Invoke();
     }
 
     public async Task LoadFromDatabaseAsync() {
@@ -249,6 +272,18 @@ public sealed class LoraLibraryService {
         _settingsService.Current.LoraStorageDirectory = rootFolder;
         _settingsService.Current.LastSubfolderPath = CurrentFolder;
         _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
+
+        if (ActiveLibrary != null && !string.Equals(ActiveLibrary.FolderPath, rootFolder, StringComparison.OrdinalIgnoreCase)) {
+            ActiveLibrary.FolderPath = rootFolder;
+            _ = Task.Run(async () => {
+                try {
+                    await _databaseService.UpsertLibraryAsync(ActiveLibrary);
+                    await RefreshLibrariesAsync();
+                } catch {
+                    // Suppress background save errors
+                }
+            });
+        }
     }
 
     public void SetCurrentSubfolder(string currentFolder) {
@@ -328,6 +363,111 @@ public sealed class LoraLibraryService {
         await LoadCategoriesAsync();
         // Refresh currently loaded items from DB to reflect reassigned categories
         await LoadFromDatabaseAsync();
+    }
+
+    public async Task<List<LoraCollection>> LoadCollectionsAsync() {
+        var cols = await _databaseService.GetCollectionsAsync();
+        lock (_lock) {
+            _collections.Clear();
+            _collections.AddRange(cols);
+        }
+        OnCollectionsChanged?.Invoke();
+        return cols;
+    }
+
+    public async Task<LoraCollection> CreateCollectionAsync(string name, string? description = null, string? color = null) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var col = new LoraCollection {
+            Id = "col-" + Guid.NewGuid().ToString("N")[..8],
+            Name = name.Trim(),
+            Description = description?.Trim(),
+            Color = color?.Trim() ?? "#cba6f7",
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+        await _databaseService.UpsertCollectionAsync(col);
+        await LoadCollectionsAsync();
+        return col;
+    }
+
+    public async Task UpdateCollectionAsync(LoraCollection collection) {
+        ArgumentNullException.ThrowIfNull(collection);
+        collection.UpdatedAtUtc = DateTime.UtcNow;
+        await _databaseService.UpsertCollectionAsync(collection);
+        await LoadCollectionsAsync();
+    }
+
+    public async Task DeleteCollectionAsync(string id) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await _databaseService.DeleteCollectionAsync(id);
+        await LoadCollectionsAsync();
+    }
+
+    public async Task AddLoraToCollectionAsync(string collectionId, LoraMetadata lora) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentNullException.ThrowIfNull(lora);
+        await AddLoraToCollectionAsync(collectionId, lora.FilePath);
+    }
+
+    public async Task AddLoraToCollectionAsync(string collectionId, string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        await _databaseService.AddToCollectionAsync(collectionId, filePath);
+        await LoadCollectionsAsync();
+    }
+
+    public async Task RemoveLoraFromCollectionAsync(string collectionId, LoraMetadata lora) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentNullException.ThrowIfNull(lora);
+        await RemoveLoraFromCollectionAsync(collectionId, lora.FilePath);
+    }
+
+    public async Task RemoveLoraFromCollectionAsync(string collectionId, string filePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        await _databaseService.RemoveFromCollectionAsync(collectionId, filePath);
+        await LoadCollectionsAsync();
+    }
+
+    public async Task<List<string>> GetCollectionsForLoraAsync(LoraMetadata lora) {
+        if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return new List<string>();
+        return await GetCollectionsForLoraAsync(lora.FilePath);
+    }
+
+    public async Task<List<string>> GetCollectionsForLoraAsync(string filePath) {
+        if (string.IsNullOrWhiteSpace(filePath)) return new List<string>();
+        return await _databaseService.GetCollectionsForLoraAsync(filePath);
+    }
+
+    public async Task<List<LoraMetadata>> GetCollectionLorasAsync(string collectionId) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionId);
+        return await _databaseService.GetCollectionLorasAsync(collectionId);
+    }
+
+    public async Task<string> MoveLoraToLibraryAsync(LoraMetadata lora, LoraLibrary targetLibrary) {
+        ArgumentNullException.ThrowIfNull(lora);
+        ArgumentNullException.ThrowIfNull(targetLibrary);
+
+        string oldFilePath = lora.FilePath;
+        string targetFolder = targetLibrary.FolderPath;
+
+        string newFilePath = await _databaseService.MoveLoraFileAsync(oldFilePath, targetFolder, targetLibrary.Id);
+
+        lora.FilePath = newFilePath;
+        lora.FileName = Path.GetFileName(newFilePath);
+        lora.LibraryId = targetLibrary.Id;
+        FindLocalThumbnail(lora);
+
+        lock (_lock) {
+            int idx = _items.FindIndex(x => x.FilePath.Equals(oldFilePath, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) {
+                _items[idx] = lora;
+            }
+        }
+
+        await RefreshLibrariesAsync();
+        OnLibraryUpdated?.Invoke();
+        return newFilePath;
     }
 
     public async Task RefreshSingleLoraAsync(LoraMetadata meta) {
@@ -459,6 +599,7 @@ public sealed class LoraLibraryService {
                 // Clean up any files that were deleted from disk
                 await _databaseService.DeleteMissingInFolderAsync(directoryPath, files);
                 await LoadFromDatabaseAsync();
+                await RefreshLibrariesAsync();
             } catch (OperationCanceledException) {
                 // Background scan stopped
             } catch {

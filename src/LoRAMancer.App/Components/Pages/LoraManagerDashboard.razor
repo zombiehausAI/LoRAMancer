@@ -25,6 +25,11 @@
                     @LibraryService.ActiveLibrary.Name
                 </MudChip>
             }
+            @if (_selectedCollection != null) {
+                <MudChip T="string" Color="Color.Secondary" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Material.Filled.AutoAwesomeMotion" OnClose="ClearCollectionFilter">
+                    Collection: @_selectedCollection.Name
+                </MudChip>
+            }
         </div>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             Instant SQLite-backed model library with quick favorites, base model assignment, and Civitai metadata
@@ -40,6 +45,38 @@
             <MudDivider Class="my-1" />
             <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="OpenManageLibrariesAsync">
                 Manage Libraries...
+            </MudMenuItem>
+        </MudMenu>
+
+        <MudMenu Label="@(_selectedCollection != null ? $"Collection: {_selectedCollection.Name}" : "Collections")" 
+                 Variant="@(_selectedCollection != null ? Variant.Filled : Variant.Outlined)" 
+                 Color="@(_selectedCollection != null ? Color.Secondary : Color.Default)" 
+                 StartIcon="@Icons.Material.Filled.AutoAwesomeMotion">
+            @if (_selectedCollection != null) {
+                <MudMenuItem Icon="@Icons.Material.Filled.Close" IconColor="Color.Error" OnClick="ClearCollectionFilter">
+                    Clear Collection View (All Models)
+                </MudMenuItem>
+                <MudDivider Class="my-1" />
+            }
+            @if (LibraryService.Collections.Count == 0) {
+                <div class="px-4 py-2" style="font-size: 0.8rem; color: var(--text-secondary);">
+                    No collections created yet
+                </div>
+            } else {
+                @foreach (var col in LibraryService.Collections) {
+                    <MudMenuItem Icon="@(_selectedCollection?.Id == col.Id ? Icons.Material.Filled.Check : Icons.Material.Filled.FolderSpecial)" 
+                                 IconColor="@(_selectedCollection?.Id == col.Id ? Color.Secondary : Color.Default)" 
+                                 OnClick="@(() => SelectCollectionFilter(col))">
+                        @col.Name (@col.ModelCount)
+                    </MudMenuItem>
+                }
+            }
+            <MudDivider Class="my-1" />
+            <MudMenuItem Icon="@Icons.Material.Filled.Add" IconColor="Color.Success" OnClick="OpenCreateCollectionDialog">
+                New Collection...
+            </MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Filled.Tune" IconColor="Color.Info" OnClick="OpenManageCollectionsDialog">
+                Manage Collections...
             </MudMenuItem>
         </MudMenu>
 
@@ -182,11 +219,21 @@
                     </MudButton>
                 }
 
-                <MudTooltip Text="Turn this subfolder into a separate, independent library">
-                    <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.BookmarkAdd" Class="ml-2" OnClick="QuickConvertCurrentSubfolderToLibraryAsync">
-                        Make Subfolder a Library
-                    </MudButton>
-                </MudTooltip>
+                var crumbLib = GetRegisteredLibraryForSubfolder(LibraryService.CurrentFolder);
+                bool isCurrentFolderOtherLib = crumbLib != null && !string.Equals(crumbLib.Id, LibraryService.ActiveLibrary?.Id, StringComparison.OrdinalIgnoreCase);
+                if (isCurrentFolderOtherLib) {
+                    <MudTooltip Text="@($"Open '{crumbLib!.Name}' as your active library")">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CollectionsBookmark" Class="ml-2" OnClick="@(() => SwitchActiveLibraryAsync(crumbLib!.Id))">
+                            Switch to @crumbLib!.Name Library
+                        </MudButton>
+                    </MudTooltip>
+                } else if (crumbLib == null) {
+                    <MudTooltip Text="Turn this subfolder into a separate, independent library">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.BookmarkAdd" Class="ml-2" OnClick="QuickConvertCurrentSubfolderToLibraryAsync">
+                            Make Subfolder a Library
+                        </MudButton>
+                    </MudTooltip>
+                }
             }
         </div>
 
@@ -305,30 +352,60 @@
         <!-- Subfolder Cards -->
         @if (!_showAllFlat && string.IsNullOrWhiteSpace(_searchQuery) && CurrentSubfoldersSnapshot.Count > 0) {
             @foreach (var sub in CurrentSubfoldersSnapshot) {
+                var registeredLib = GetRegisteredLibraryForSubfolder(sub.FullPath);
+                bool isLib = registeredLib != null && !string.Equals(registeredLib.Id, LibraryService.ActiveLibrary?.Id, StringComparison.OrdinalIgnoreCase);
                 <MudItem xs="12" sm="6" md="4" lg="3">
-                    <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
+                    <MudCard Elevation="1" Style="@($"background-color: var(--bg-dark-surface); border: {(isLib ? "1px solid rgba(203, 166, 247, 0.45)" : "1px solid var(--border-dark)")}; border-radius: 10px; cursor: pointer; height: 100%; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between;")" Class="pa-4" @onclick="@(() => NavigateToFolder(sub.FullPath))">
                         <div class="d-flex align-center justify-space-between mb-2">
                             <div class="d-flex align-center gap-3">
-                                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" Color="Color.Tertiary" />
+                                @if (isLib) {
+                                    <MudBadge Icon="@Icons.Material.Filled.Bookmark" Color="Color.Primary" Overlap="true" Bordered="true">
+                                        <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Large" Color="Color.Primary" />
+                                    </MudBadge>
+                                } else {
+                                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" Color="Color.Tertiary" />
+                                }
                                 <div>
-                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); line-height: 1.2;">@sub.Name</MudText>
+                                    <div class="d-flex align-center gap-2 flex-wrap">
+                                        <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary); line-height: 1.2;">@sub.Name</MudText>
+                                        @if (isLib) {
+                                            <MudTooltip Text="@($"Registered as '{registeredLib!.Name}' library ({registeredLib.ModelCount} models)")">
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Style="font-size: 0.65rem; height: 18px; padding: 0 6px;">Library</MudChip>
+                                            </MudTooltip>
+                                        }
+                                    </div>
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.LoraCount LoRA@((sub.LoraCount == 1 ? "" : "s"))</MudText>
                                 </div>
                             </div>
-                            <div class="d-flex align-center gap-1">
-                                <MudTooltip Text="Turn this subfolder into a separate library">
-                                    <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small" Color="Color.Primary" OnClick="@((e) => ConvertFolderToLibraryAsync(sub.FullPath, sub.Name))" />
-                                </MudTooltip>
+                            <div class="d-flex align-center gap-1" @onclick:stopPropagation="true">
+                                @if (isLib) {
+                                    <MudTooltip Text="@($"Open '{registeredLib!.Name}' library")">
+                                        <MudIconButton Icon="@Icons.Material.Filled.CollectionsBookmark" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SwitchActiveLibraryAsync(registeredLib!.Id))" />
+                                    </MudTooltip>
+                                } else {
+                                    <MudTooltip Text="Turn this subfolder into a separate library">
+                                        <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small" Color="Color.Primary" OnClick="@(() => ConvertFolderToLibraryAsync(sub.FullPath, sub.Name))" />
+                                    </MudTooltip>
+                                }
                                 <MudTooltip Text="Rescan Subfolder">
-                                    <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Color="Color.Tertiary" OnClick="@((e) => RescanSubfolder(sub.FullPath))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Sync" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => RescanSubfolder(sub.FullPath))" />
                                 </MudTooltip>
                             </div>
                         </div>
                         <div class="d-flex align-center justify-space-between mt-3">
-                            <MudText Typo="Typo.caption" Style="color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">
+                            <MudText Typo="Typo.caption" Style="color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;">
                                 @sub.RelativePath
                             </MudText>
-                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">Browse</MudChip>
+                            <div class="d-flex align-center gap-1">
+                                @if (isLib) {
+                                    <span @onclick:stopPropagation="true">
+                                        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CollectionsBookmark" Style="font-size: 0.7rem; text-transform: none; height: 26px;" OnClick="@(() => SwitchActiveLibraryAsync(registeredLib!.Id))">
+                                            Go to Library
+                                        </MudButton>
+                                    </span>
+                                }
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" Style="height: 24px;">Browse</MudChip>
+                            </div>
                         </div>
                     </MudCard>
                 </MudItem>
@@ -639,7 +716,20 @@
 
                 <MudDivider Class="my-1" />
 
-                <!-- Section 5: Vault Actions -->
+                <!-- Section 5: Organizer & Collections -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #89dceb; letter-spacing: 0.5px;">
+                    📁 ORGANIZER &amp; COLLECTIONS
+                </div>
+                <MudMenuItem Icon="@Icons.Material.Filled.DriveFileMove" IconColor="Color.Info" OnClick="@(() => OpenMoveToLibraryDialog(lora))">
+                    Move to Library...
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesomeMotion" IconColor="Color.Secondary" OnClick="@(() => OpenAssignCollectionsDialogAsync(lora))">
+                    Add / Remove from Collections...
+                </MudMenuItem>
+
+                <MudDivider Class="my-1" />
+
+                <!-- Section 6: Vault Actions -->
                 <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #f9e2af; letter-spacing: 0.5px;">
                     🗄️ VAULT ACTIONS
                 </div>
@@ -686,9 +776,19 @@
         <div class="d-flex flex-wrap gap-2 mb-3 align-center">
             <MudText Typo="Typo.body2" Style="color: var(--text-secondary); font-weight: 600;">Subfolders:</MudText>
             @foreach (var sub in CurrentSubfoldersSnapshot) {
-                <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
-                    @sub.Name (@sub.LoraCount)
-                </MudChip>
+                var registeredLib = GetRegisteredLibraryForSubfolder(sub.FullPath);
+                bool isLib = registeredLib != null && !string.Equals(registeredLib.Id, LibraryService.ActiveLibrary?.Id, StringComparison.OrdinalIgnoreCase);
+                if (isLib) {
+                    <MudTooltip Text="@($"Library: '{registeredLib!.Name}' ({sub.LoraCount} models) - Click to switch library")">
+                        <MudChip T="string" Icon="@Icons.Material.Filled.CollectionsBookmark" Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => SwitchActiveLibraryAsync(registeredLib!.Id))" Style="cursor: pointer; font-weight: 600;">
+                            @sub.Name (@sub.LoraCount) [Library]
+                        </MudChip>
+                    </MudTooltip>
+                } else {
+                    <MudChip T="string" Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Variant="Variant.Outlined" OnClick="@(() => NavigateToFolder(sub.FullPath))" Style="cursor: pointer; font-weight: 600;">
+                        @sub.Name (@sub.LoraCount)
+                    </MudChip>
+                }
             }
         </div>
     }
@@ -800,6 +900,19 @@
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.Category" IconColor="Color.Warning" OnClick="OpenCategoryManagerAsync">
                             Manage Categories...
+                        </MudMenuItem>
+
+                        <MudDivider Class="my-1" />
+
+                        <!-- Section: Organizer & Collections -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #89dceb; letter-spacing: 0.5px;">
+                            📁 ORGANIZER &amp; COLLECTIONS
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.DriveFileMove" IconColor="Color.Info" OnClick="@(() => OpenMoveToLibraryDialog(context))">
+                            Move to Library...
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesomeMotion" IconColor="Color.Secondary" OnClick="@(() => OpenAssignCollectionsDialogAsync(context))">
+                            Add / Remove from Collections...
                         </MudMenuItem>
 
                         <MudDivider Class="my-1" />
@@ -948,9 +1061,166 @@
 <!-- Metadata Inspector Drawer -->
 <MetadataInspectorDrawer @bind-IsOpen="_drawerOpen" Metadata="_selectedLora" />
 
+<!-- Move to Library Dialog -->
+<MudDialog @bind-Visible="_moveDialogOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.DriveFileMove" Color="Color.Info" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">Move LoRA to Library</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_loraToMove != null) {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                Select a target library. The model file (<b>@_loraToMove.FileName</b>) and companion preview images will be physically moved to the destination library folder.
+            </MudText>
+
+            <MudSelect T="string" @bind-Value="_targetLibraryId" Label="Destination Library" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3">
+                @foreach (var lib in LibraryService.Libraries) {
+                    bool isCurrent = string.Equals(lib.Id, _loraToMove.LibraryId, StringComparison.OrdinalIgnoreCase);
+                    <MudSelectItem Value="@lib.Id">
+                        @lib.Name @(isCurrent ? " (Current)" : "")
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (TargetMoveLibrary != null) {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-2" Dense="true">
+                    Target Folder: <span style="font-family: monospace; font-size: 0.75rem;">@TargetMoveLibrary.FolderPath</span>
+                </MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => _moveDialogOpen = false)">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.DriveFileMove" Disabled="@(_isMoving || string.IsNullOrWhiteSpace(_targetLibraryId))" OnClick="ExecuteMoveLoraAsync">
+            @(_isMoving ? "Moving..." : "Move File")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<!-- Assign Collections Dialog -->
+<MudDialog @bind-Visible="_assignCollectionsDialogOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesomeMotion" Color="Color.Secondary" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">LoRA Collections</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_loraForCollections != null) {
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                Assign <b>@_loraForCollections.FileName</b> to virtual collections. Collections organize models without moving any physical files.
+            </MudText>
+
+            @if (LibraryService.Collections.Count == 0) {
+                <MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Class="mb-3">
+                    No collections created yet. Enter a name below to create your first collection.
+                </MudAlert>
+            } else {
+                <div class="d-flex flex-column gap-1 mb-3" style="max-height: 240px; overflow-y: auto;">
+                    @foreach (var col in LibraryService.Collections) {
+                        bool inCol = _loraCollectionIds.Contains(col.Id);
+                        <div class="d-flex align-center justify-space-between pa-2" style="background-color: rgba(255,255,255,0.03); border-radius: 6px;">
+                            <MudCheckBox T="bool" Value="@inCol" ValueChanged="@((val) => ToggleCollectionMembershipAsync(col.Id, val))" Color="Color.Primary" Dense="true">
+                                <span style="font-weight: 600;">@col.Name</span>
+                                <span style="color: var(--text-secondary); font-size: 0.75rem; margin-left: 6px;">(@col.ModelCount models)</span>
+                            </MudCheckBox>
+                        </div>
+                    }
+                </div>
+            }
+
+            <MudDivider Class="my-2" />
+            <div class="d-flex align-center gap-2 mt-2">
+                <MudTextField @bind-Value="_newCollectionInlineName" Placeholder="New collection name..." Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Disabled="@string.IsNullOrWhiteSpace(_newCollectionInlineName)" OnClick="CreateCollectionInlineAsync">
+                    Add
+                </MudButton>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="@(() => _assignCollectionsDialogOpen = false)">Done</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<!-- Manage Collections Dialog -->
+<MudDialog @bind-Visible="_manageCollectionsDialogOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Tune" Color="Color.Primary" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">Manage User Collections</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            Collections are user-defined virtual buckets for grouping models regardless of their physical folders.
+        </MudText>
+
+        <MudCard Elevation="1" Class="pa-3 mb-4" Style="background-color: rgba(255,255,255,0.03); border: 1px solid var(--border-dark); border-radius: 8px;">
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight: 600;">Create New Collection</MudText>
+            <div class="d-flex gap-2">
+                <MudTextField @bind-Value="_createColName" Label="Collection Name" Placeholder="e.g. Best Anime, Cyberpunk Kit, Character Favorites" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField @bind-Value="_createColDesc" Label="Description (Optional)" Placeholder="Notes about this collection" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Style="height: 40px; margin-top: 4px;" Disabled="@string.IsNullOrWhiteSpace(_createColName)" OnClick="CreateCollectionFromManagerAsync">
+                    Create
+                </MudButton>
+            </div>
+        </MudCard>
+
+        <div class="d-flex flex-column gap-2" style="max-height: 320px; overflow-y: auto;">
+            @if (LibraryService.Collections.Count == 0) {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">No collections created yet.</MudAlert>
+            } else {
+                @foreach (var col in LibraryService.Collections) {
+                    <div class="d-flex align-center justify-space-between pa-3" style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); border-radius: 8px;">
+                        <div>
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@col.Name</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@col.ModelCount models</MudChip>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(col.Description)) {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@col.Description</MudText>
+                            }
+                        </div>
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Visibility" OnClick="@(async () => { _manageCollectionsDialogOpen = false; await SelectCollectionFilter(col); })">
+                                View
+                            </MudButton>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeleteCollectionAsync(col.Id))" />
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => _manageCollectionsDialogOpen = false)">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
+
+    private LoraCollection? _selectedCollection;
+    private HashSet<string> _collectionItemPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool _moveDialogOpen;
+    private LoraMetadata? _loraToMove;
+    private string _targetLibraryId = string.Empty;
+    private bool _isMoving;
+    private LoraLibrary? TargetMoveLibrary => LibraryService.Libraries.FirstOrDefault(l => l.Id == _targetLibraryId);
+
+    private bool _assignCollectionsDialogOpen;
+    private LoraMetadata? _loraForCollections;
+    private HashSet<string> _loraCollectionIds = new(StringComparer.OrdinalIgnoreCase);
+    private string _newCollectionInlineName = string.Empty;
+
+    private bool _manageCollectionsDialogOpen;
+    private string _createColName = string.Empty;
+    private string _createColDesc = string.Empty;
 
     private bool _showAllFlat;
     private string _viewMode = "grid";
@@ -1095,13 +1365,20 @@
                     return false;
                 }
 
-                // Folder matching
-                if (!_showAllFlat && string.IsNullOrWhiteSpace(query) && !string.IsNullOrWhiteSpace(current)) {
-                    string dir = Path.GetDirectoryName(l.FilePath ?? string.Empty) ?? string.Empty;
-                    if (!string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                      current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                                      StringComparison.OrdinalIgnoreCase)) {
+                // If a collection is selected, filter by collection item paths instead of physical folder
+                if (_selectedCollection != null) {
+                    if (string.IsNullOrWhiteSpace(l.FilePath) || !_collectionItemPaths.Contains(l.FilePath)) {
                         return false;
+                    }
+                } else {
+                    // Folder matching
+                    if (!_showAllFlat && string.IsNullOrWhiteSpace(query) && !string.IsNullOrWhiteSpace(current)) {
+                        string dir = Path.GetDirectoryName(l.FilePath ?? string.Empty) ?? string.Empty;
+                        if (!string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                          current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                          StringComparison.OrdinalIgnoreCase)) {
+                            return false;
+                        }
                     }
                 }
 
@@ -1186,7 +1463,7 @@
     }
 
     private void UpdateSubfolders(string current, string root, IReadOnlyList<LoraMetadata> items) {
-        if (_showAllFlat || string.IsNullOrWhiteSpace(current)) {
+        if (_selectedCollection != null || _showAllFlat || string.IsNullOrWhiteSpace(current)) {
             _currentSubfolders = new List<SubfolderItem>();
             return;
         }
@@ -1459,12 +1736,14 @@
         LibraryService.OnEnrichProgress += HandleEnrichProgress;
         LibraryService.OnLoraEnriched += HandleLoraEnriched;
         LibraryService.OnCategoriesChanged += HandleCategoriesChanged;
+        LibraryService.OnCollectionsChanged += HandleCollectionsChanged;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
 
         // Directly sync from SQLite database if items are not yet in memory
         if (LibraryService.Items.Count == 0) {
             await LibraryService.LoadFromDatabaseAsync();
         }
+        await LibraryService.RefreshLibrariesAsync();
 
         UpdateFilteredList();
     }
@@ -1537,6 +1816,7 @@
         LibraryService.OnEnrichStateChanged -= HandleEnrichStateChanged;
         LibraryService.OnEnrichProgress -= HandleEnrichProgress;
         LibraryService.OnLoraEnriched -= HandleLoraEnriched;
+        LibraryService.OnCollectionsChanged -= HandleCollectionsChanged;
         UpdaterService.OnStateChanged -= HandleUpdaterStateChanged;
     }
 
@@ -1578,6 +1858,16 @@
         } catch (Exception ex) {
             Snackbar.Add($"Failed to create library: {ex.Message}", Severity.Error);
         }
+    }
+
+    private LoraLibrary? GetRegisteredLibraryForSubfolder(string? folderPath) {
+        if (string.IsNullOrWhiteSpace(folderPath)) {
+            return null;
+        }
+        string target = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
+        return LibraryService.Libraries.FirstOrDefault(l => 
+            !string.IsNullOrWhiteSpace(l.FolderPath) && 
+            string.Equals(l.FolderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/'), target, StringComparison.OrdinalIgnoreCase));
     }
 
     private void FetchSingleCivitaiAsync(LoraMetadata lora) {
@@ -2060,5 +2350,163 @@
         _currentPage = 1;
         UpdateFilteredList();
         StateHasChanged();
+    }
+
+    private async Task SelectCollectionFilter(LoraCollection col) {
+        _selectedCollection = col;
+        await ReloadSelectedCollectionPathsAsync();
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
+    }
+
+    private void ClearCollectionFilter() {
+        _selectedCollection = null;
+        _collectionItemPaths.Clear();
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
+    }
+
+    private async Task ReloadSelectedCollectionPathsAsync() {
+        if (_selectedCollection == null) {
+            _collectionItemPaths.Clear();
+            return;
+        }
+        var loras = await LibraryService.GetCollectionLorasAsync(_selectedCollection.Id);
+        _collectionItemPaths = new HashSet<string>(loras.Where(l => !string.IsNullOrWhiteSpace(l.FilePath)).Select(l => l.FilePath!), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void HandleCollectionsChanged() {
+        _ = SafeInvokeAsync(async () => {
+            if (_selectedCollection != null) {
+                await ReloadSelectedCollectionPathsAsync();
+            }
+            UpdateFilteredList();
+            StateHasChanged();
+        });
+    }
+
+    private void OpenMoveToLibraryDialog(LoraMetadata lora) {
+        _loraToMove = lora;
+        _targetLibraryId = lora.LibraryId ?? LibraryService.ActiveLibrary?.Id ?? string.Empty;
+        _moveDialogOpen = true;
+    }
+
+    private async Task ExecuteMoveLoraAsync() {
+        if (_loraToMove == null || string.IsNullOrWhiteSpace(_targetLibraryId)) {
+            return;
+        }
+        var targetLib = LibraryService.Libraries.FirstOrDefault(l => l.Id == _targetLibraryId);
+        if (targetLib == null) {
+            Snackbar.Add("Selected library not found.", Severity.Error);
+            return;
+        }
+
+        _isMoving = true;
+        try {
+            string oldName = _loraToMove.FileName ?? Path.GetFileName(_loraToMove.FilePath ?? "");
+            string newPath = await LibraryService.MoveLoraToLibraryAsync(_loraToMove, targetLib);
+            if (!string.IsNullOrWhiteSpace(newPath)) {
+                _moveDialogOpen = false;
+                Snackbar.Add($"Moved '{oldName}' to library '{targetLib.Name}' successfully.", Severity.Success);
+                UpdateFilteredList();
+            } else {
+                Snackbar.Add("Failed to move LoRA. Check log for details.", Severity.Error);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Move error: {ex.Message}", Severity.Error);
+        } finally {
+            _isMoving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenAssignCollectionsDialogAsync(LoraMetadata lora) {
+        _loraForCollections = lora;
+        _newCollectionInlineName = string.Empty;
+        if (!string.IsNullOrWhiteSpace(lora.FilePath)) {
+            var colIds = await LibraryService.GetCollectionsForLoraAsync(lora.FilePath);
+            _loraCollectionIds = new HashSet<string>(colIds, StringComparer.OrdinalIgnoreCase);
+        } else {
+            _loraCollectionIds.Clear();
+        }
+        _assignCollectionsDialogOpen = true;
+    }
+
+    private async Task ToggleCollectionMembershipAsync(string collectionId, bool shouldBeMember) {
+        if (_loraForCollections == null || string.IsNullOrWhiteSpace(_loraForCollections.FilePath)) {
+            return;
+        }
+        if (shouldBeMember) {
+            await LibraryService.AddLoraToCollectionAsync(collectionId, _loraForCollections.FilePath);
+            _loraCollectionIds.Add(collectionId);
+        } else {
+            await LibraryService.RemoveLoraFromCollectionAsync(collectionId, _loraForCollections.FilePath);
+            _loraCollectionIds.Remove(collectionId);
+        }
+        if (_selectedCollection != null && _selectedCollection.Id == collectionId) {
+            await ReloadSelectedCollectionPathsAsync();
+            UpdateFilteredList();
+        }
+        StateHasChanged();
+    }
+
+    private async Task CreateCollectionInlineAsync() {
+        string name = _newCollectionInlineName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        try {
+            var col = await LibraryService.CreateCollectionAsync(name);
+            _newCollectionInlineName = string.Empty;
+            if (_loraForCollections != null && !string.IsNullOrWhiteSpace(_loraForCollections.FilePath)) {
+                await LibraryService.AddLoraToCollectionAsync(col.Id, _loraForCollections.FilePath);
+                _loraCollectionIds.Add(col.Id);
+            }
+            Snackbar.Add($"Created collection '{col.Name}'", Severity.Success);
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to create collection: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void OpenCreateCollectionDialog() {
+        _createColName = string.Empty;
+        _createColDesc = string.Empty;
+        _manageCollectionsDialogOpen = true;
+    }
+
+    private void OpenManageCollectionsDialog() {
+        _createColName = string.Empty;
+        _createColDesc = string.Empty;
+        _manageCollectionsDialogOpen = true;
+    }
+
+    private async Task CreateCollectionFromManagerAsync() {
+        string name = _createColName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        try {
+            var col = await LibraryService.CreateCollectionAsync(name, _createColDesc?.Trim());
+            _createColName = string.Empty;
+            _createColDesc = string.Empty;
+            Snackbar.Add($"Created collection '{col.Name}'", Severity.Success);
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to create collection: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteCollectionAsync(string collectionId) {
+        try {
+            await LibraryService.DeleteCollectionAsync(collectionId);
+            if (_selectedCollection?.Id == collectionId) {
+                ClearCollectionFilter();
+            }
+            Snackbar.Add("Collection deleted", Severity.Info);
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to delete collection: {ex.Message}", Severity.Error);
+        }
     }
 }
