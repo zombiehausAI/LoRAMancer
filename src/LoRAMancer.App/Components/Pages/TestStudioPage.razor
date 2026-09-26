@@ -95,27 +95,71 @@
 
     <!-- Right Column: Rendered Output Canvas -->
     <MudItem xs="12" md="6">
-        <MudCard Elevation="1" Class="pa-4 h-100 d-flex flex-column align-center justify-center text-center" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px; min-height: 440px;">
+        <MudCard Elevation="1" Class="pa-4 h-100 d-flex flex-column text-center" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px; min-height: 440px;">
             @if (!string.IsNullOrWhiteSpace(_renderedImageBase64)) {
-                <img src="@_renderedImageBase64" alt="ComfyUI Test Render" style="max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
-                <div class="d-flex align-center gap-2 mt-3">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Rendered in @_renderDuration.TotalSeconds.ToString("F1")s</MudChip>
-                    <MudChip T="string" Size="Size.Small" Color="Color.Primary">Weight @_loraWeight.ToString("F2")</MudChip>
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2 pb-2" style="border-bottom: 1px solid var(--border-dark, #313244);">
+                    <div class="d-flex align-center gap-2">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Rendered in @_renderDuration.TotalSeconds.ToString("F1")s</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">Weight @_loraWeight.ToString("F2")</MudChip>
+                    </div>
+                    <div class="d-flex align-center gap-1">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Info" StartIcon="@Icons.Material.Filled.Fullscreen" OnClick="@(() => _isLightboxOpen = true)">
+                            Fullscreen
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.SaveAlt" OnClick="SaveRenderedImageAsync">
+                            Save
+                        </MudButton>
+                    </div>
+                </div>
+
+                <!-- Letterboxed Viewport with strict aspect ratio preservation -->
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: #08090d; border-radius: 6px; padding: 12px; min-height: 340px; max-height: 520px; overflow: hidden;">
+                    <img src="@_renderedImageBase64" 
+                         alt="ComfyUI Test Render" 
+                         style="display: block; margin: 0 auto; width: auto; height: auto; max-width: 100%; max-height: 500px; object-fit: contain; aspect-ratio: auto; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); cursor: zoom-in;" 
+                         @onclick="@(() => _isLightboxOpen = true)"
+                         title="Click to view full screen" />
                 </div>
             } else if (_isRendering) {
-                <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" Class="mb-3" />
-                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Sending to ComfyUI Engine...</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Generating latent diffusion sample via WebSocket</MudText>
+                <div class="d-flex flex-column align-center justify-center h-100" style="min-height: 380px;">
+                    <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" Class="mb-3" />
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Sending to ComfyUI Engine...</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Generating latent diffusion sample via WebSocket</MudText>
+                </div>
             } else {
-                <MudIcon Icon="@Icons.Material.Filled.Image" Color="Color.Secondary" Size="Size.Large" Class="mb-2" Style="font-size: 3rem;" />
-                <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #a6adc8;">No Test Image Rendered</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Style="max-width: 320px;">
-                    Ensure ComfyUI is running, enter your prompt, and click Render Test Image to test your LoRA in real time.
-                </MudText>
+                <div class="d-flex flex-column align-center justify-center h-100" style="min-height: 380px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Image" Color="Color.Secondary" Size="Size.Large" Class="mb-2" Style="font-size: 3rem;" />
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #a6adc8;">No Test Image Rendered</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="max-width: 320px;">
+                        Ensure ComfyUI is running, enter your prompt, and click Render Test Image to test your LoRA in real time.
+                    </MudText>
+                </div>
             }
         </MudCard>
     </MudItem>
 </MudGrid>
+
+@if (_isLightboxOpen && !string.IsNullOrWhiteSpace(_renderedImageBase64)) {
+    <div style="position: fixed; inset: 0; z-index: 99999; background: rgba(5, 6, 10, 0.95); display: flex; flex-direction: column; backdrop-filter: blur(8px);">
+        <div class="d-flex align-center justify-space-between px-4 py-3" style="border-bottom: 1px solid #313244; background: #11111b;">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.ZoomIn" Color="Color.Primary" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cba6f7;">ComfyUI Render Inspection</MudText>
+            </div>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.SaveAlt" OnClick="SaveRenderedImageAsync">
+                    Save Image
+                </MudButton>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Medium" Color="Color.Error" OnClick="@(() => _isLightboxOpen = false)" />
+            </div>
+        </div>
+        <div style="flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 24px;">
+            <img src="@_renderedImageBase64" 
+                 alt="Full Inspection" 
+                 style="display: block; margin: 0 auto; width: auto; height: auto; max-width: 90vw; max-height: 85vh; object-fit: contain; aspect-ratio: auto; border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,0.8);" />
+        </div>
+    </div>
+}
 
 @code {
     private string _activeLoraPath = "";
@@ -126,6 +170,7 @@
     private bool _isRendering;
     private string? _renderedImageBase64;
     private TimeSpan _renderDuration;
+    private bool _isLightboxOpen;
 
     protected override async Task OnInitializedAsync() {
         StudioSession.SetStage(StudioStage.Test);
@@ -223,6 +268,29 @@
             return arch?.DisplayName ?? "FLUX.1-dev";
         }
         return "FLUX.1-dev";
+    }
+
+    private async Task SaveRenderedImageAsync() {
+        if (string.IsNullOrWhiteSpace(_renderedImageBase64)) {
+            return;
+        }
+
+        try {
+            string base64Data = _renderedImageBase64;
+            int commaIdx = base64Data.IndexOf(',');
+            if (commaIdx >= 0) {
+                base64Data = base64Data[(commaIdx + 1)..];
+            }
+
+            byte[] bytes = Convert.FromBase64String(base64Data);
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            string safeName = string.Join("_", (Path.GetFileNameWithoutExtension(_activeLoraPath) ?? "render").Split(Path.GetInvalidFileNameChars()));
+            string path = Path.Combine(desktop, $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+            await File.WriteAllBytesAsync(path, bytes);
+            Snackbar.Add($"Saved render to {path}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save image: {ex.Message}", Severity.Error);
+        }
     }
 
     public void Dispose() { }
