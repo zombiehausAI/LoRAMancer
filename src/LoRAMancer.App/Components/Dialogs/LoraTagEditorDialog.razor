@@ -1,5 +1,7 @@
+@using LoRAMancer.App.Engines
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject LoraLibraryService LibraryService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -156,9 +158,7 @@
     private List<string> _tags = new();
     private string _newTagInput = string.Empty;
 
-    private static readonly string[] _basePresets = new[] {
-        "FLUX.1", "SDXL", "Pony", "Illustrious", "SD 3.5", "SD 1.5", "SD 2.1", "Chroma", "Wan 2.1", "HunyuanVideo"
-    };
+    private List<string> _basePresets => ArchitectureRegistry.GetAll().Select(a => a.DisplayName).Distinct().ToList();
 
     protected override void OnInitialized() {
         if (Lora != null) {

@@ -1,16 +1,20 @@
+using System.Data.Common;
 using System.Text.Json;
 using LoRAMancer.App.Models;
 using Microsoft.Data.Sqlite;
+using Npgsql;
 
 namespace LoRAMancer.App.Services;
 
 public sealed class LoraDatabaseService : IDisposable {
     private readonly string _dbPath;
     private readonly string _connectionString;
+    private readonly SettingsService? _settingsService;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _initialized;
 
-    public LoraDatabaseService() {
+    public LoraDatabaseService(SettingsService? settingsService = null) {
+        _settingsService = settingsService;
         string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
         if (!Directory.Exists(appDir)) {
             Directory.CreateDirectory(appDir);
@@ -44,6 +48,8 @@ public sealed class LoraDatabaseService : IDisposable {
                     PRAGMA synchronous = NORMAL;
                     PRAGMA temp_store = MEMORY;
                     PRAGMA cache_size = -64000;
+                    PRAGMA mmap_size = 268435456;
+                    PRAGMA page_size = 4096;
                 ";
                 await walCmd.ExecuteNonQueryAsync();
             }
@@ -178,6 +184,7 @@ public sealed class LoraDatabaseService : IDisposable {
                 idxCmd.CommandText = @"
                     CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
                     CREATE INDEX IF NOT EXISTS idx_loras_cat ON Loras(Category);
+                    CREATE INDEX IF NOT EXISTS idx_loras_composite ON Loras(LibraryId, DirectoryPath, IsFavorite, BaseModel);
                 ";
                 await idxCmd.ExecuteNonQueryAsync();
             }
@@ -774,7 +781,7 @@ public sealed class LoraDatabaseService : IDisposable {
         }
     }
 
-    private static LoraMetadata MapReaderToMetadata(SqliteDataReader reader) {
+    private static LoraMetadata MapReaderToMetadata(DbDataReader reader) {
         var meta = new LoraMetadata {
             FilePath = reader.GetString(reader.GetOrdinal("FilePath")),
             FileName = reader.GetString(reader.GetOrdinal("FileName")),
@@ -929,6 +936,465 @@ public sealed class LoraDatabaseService : IDisposable {
         }
 
         return meta;
+    }
+
+    // -------------------------------------------------------------
+    // PostgreSQL Studio Database Engine & Bidirectional Migration
+    // -------------------------------------------------------------
+
+    public sealed record PostgreSqlConfig {
+        public string Host { get; init; } = "localhost";
+        public int Port { get; init; } = 5432;
+        public string Database { get; init; } = "loramancer_studio";
+        public string Username { get; init; } = "postgres";
+        public string Password { get; init; } = string.Empty;
+        public string SslMode { get; init; } = "Prefer";
+
+        public string BuildConnectionString(string? overrideDb = null) {
+            var builder = new NpgsqlConnectionStringBuilder {
+                Host = Host,
+                Port = Port,
+                Database = overrideDb ?? Database,
+                Username = Username,
+                Password = Password,
+                Timeout = 10,
+                CommandTimeout = 30
+            };
+            if (Enum.TryParse<Npgsql.SslMode>(SslMode, true, out var ssl)) {
+                builder.SslMode = ssl;
+            }
+            return builder.ConnectionString;
+        }
+    }
+
+    public PostgreSqlConfig GetCurrentPostgreSqlConfig() {
+        if (_settingsService == null) {
+            return new PostgreSqlConfig();
+        }
+        return new PostgreSqlConfig {
+            Host = _settingsService.Current.PgHost,
+            Port = _settingsService.Current.PgPort,
+            Database = _settingsService.Current.PgDatabase,
+            Username = _settingsService.Current.PgUsername,
+            Password = _settingsService.Current.PgPassword,
+            SslMode = _settingsService.Current.PgSslMode
+        };
+    }
+
+    public async Task<(bool Success, string Message, TimeSpan Latency)> TestPostgreSqlConnectionAsync(PostgreSqlConfig config) {
+        ArgumentNullException.ThrowIfNull(config);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try {
+            string connStr = config.BuildConnectionString();
+            await using var conn = new NpgsqlConnection(connStr);
+            await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT version();";
+            var ver = await cmd.ExecuteScalarAsync();
+            sw.Stop();
+            string versionStr = ver?.ToString() ?? "PostgreSQL";
+            if (versionStr.Length > 50) versionStr = versionStr[..50] + "...";
+            return (true, $"Connected successfully to {versionStr} ({sw.ElapsedMilliseconds}ms)", sw.Elapsed);
+        } catch (Exception ex) {
+            sw.Stop();
+            // If the specific database doesn't exist, try connecting to 'postgres' default database
+            try {
+                string maintConnStr = config.BuildConnectionString(overrideDb: "postgres");
+                await using var maintConn = new NpgsqlConnection(maintConnStr);
+                await maintConn.OpenAsync();
+                return (true, $"Server reachable! Database '{config.Database}' does not exist yet and will be created automatically.", sw.Elapsed);
+            } catch {
+                return (false, $"Connection failed: {ex.Message}", sw.Elapsed);
+            }
+        }
+    }
+
+    public async Task EnsurePostgreSqlDatabaseAndSchemaAsync(PostgreSqlConfig config, Action<string>? onStatus = null) {
+        ArgumentNullException.ThrowIfNull(config);
+
+        onStatus?.Invoke("Verifying PostgreSQL database...");
+        string maintenanceConnStr = config.BuildConnectionString(overrideDb: "postgres");
+        await using (var maintConn = new NpgsqlConnection(maintenanceConnStr)) {
+            await maintConn.OpenAsync();
+            using var checkDbCmd = maintConn.CreateCommand();
+            checkDbCmd.CommandText = "SELECT 1 FROM pg_database WHERE datname = @dbName;";
+            checkDbCmd.Parameters.AddWithValue("@dbName", config.Database.ToLowerInvariant());
+            var exists = await checkDbCmd.ExecuteScalarAsync();
+            if (exists == null || exists == DBNull.Value) {
+                onStatus?.Invoke($"Database '{config.Database}' not found. Creating database...");
+                string safeDbName = config.Database.Replace("\"", "").Trim();
+                using var createDbCmd = maintConn.CreateCommand();
+                createDbCmd.CommandText = $"CREATE DATABASE \"{safeDbName}\";";
+                await createDbCmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        onStatus?.Invoke($"Validating schema and tables in '{config.Database}'...");
+        string targetConnStr = config.BuildConnectionString();
+        await using (var conn = new NpgsqlConnection(targetConnStr)) {
+            await conn.OpenAsync();
+
+            const string createTablesSql = @"
+                CREATE TABLE IF NOT EXISTS Libraries (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    FolderPath TEXT NOT NULL,
+                    Description TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_libraries_path ON Libraries(FolderPath);
+
+                CREATE TABLE IF NOT EXISTS Categories (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL UNIQUE,
+                    Color TEXT NOT NULL,
+                    Icon TEXT,
+                    Description TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_categories_name ON Categories(Name);
+
+                CREATE TABLE IF NOT EXISTS Loras (
+                    FilePath TEXT PRIMARY KEY,
+                    FileName TEXT NOT NULL,
+                    DirectoryPath TEXT NOT NULL,
+                    BaseModel TEXT NOT NULL,
+                    UserBaseModel TEXT,
+                    IsFavorite INTEGER NOT NULL DEFAULT 0,
+                    NetworkDim INTEGER,
+                    NetworkAlpha DOUBLE PRECISION,
+                    NetworkModule TEXT,
+                    LearningRate DOUBLE PRECISION,
+                    UnetLearningRate DOUBLE PRECISION,
+                    TextEncoderLearningRate DOUBLE PRECISION,
+                    Optimizer TEXT,
+                    LrScheduler TEXT,
+                    Epochs INTEGER,
+                    TotalSteps INTEGER,
+                    Resolution TEXT,
+                    Precision TEXT,
+                    FileSizeBytes BIGINT NOT NULL DEFAULT 0,
+                    LastModifiedUtc TEXT,
+                    ThumbnailPath TEXT,
+                    Sha256Hash TEXT,
+                    TrainedWordsJson TEXT,
+                    RawMetadataJson TEXT,
+                    CivitaiModelId BIGINT,
+                    CivitaiVersionId BIGINT,
+                    CivitaiModelName TEXT,
+                    CivitaiVersionName TEXT,
+                    CivitaiBaseModel TEXT,
+                    CivitaiDescription TEXT,
+                    CivitaiDownloadUrl TEXT,
+                    CivitaiUrl TEXT,
+                    CivitaiPreviewImageUrl TEXT,
+                    CivitaiSamplePromptsJson TEXT,
+                    LibraryId TEXT,
+                    Category TEXT,
+                    TagsJson TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_loras_dir ON Loras(DirectoryPath);
+                CREATE INDEX IF NOT EXISTS idx_loras_fav ON Loras(IsFavorite);
+                CREATE INDEX IF NOT EXISTS idx_loras_base ON Loras(BaseModel);
+                CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
+                CREATE INDEX IF NOT EXISTS idx_loras_cat ON Loras(Category);
+                CREATE INDEX IF NOT EXISTS idx_loras_composite ON Loras(LibraryId, DirectoryPath, IsFavorite, BaseModel);
+            ";
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = createTablesSql;
+            await cmd.ExecuteNonQueryAsync();
+
+            // Check and add missing columns if upgrading schema
+            (string colName, string colType)[] checkColumns = [
+                ("LibraryId", "TEXT"),
+                ("Category", "TEXT"),
+                ("TagsJson", "TEXT")
+            ];
+
+            foreach (var (colName, colType) in checkColumns) {
+                using var alterCmd = conn.CreateCommand();
+                alterCmd.CommandText = $"ALTER TABLE Loras ADD COLUMN IF NOT EXISTS \"{colName}\" {colType};";
+                await alterCmd.ExecuteNonQueryAsync();
+            }
+        }
+        onStatus?.Invoke("PostgreSQL schema validated successfully.");
+    }
+
+    public async Task<int> MigrateSqliteToPostgreSqlAsync(PostgreSqlConfig config, Action<string, double>? onProgress = null) {
+        onProgress?.Invoke("Validating target PostgreSQL database & schema...", 0.05);
+        await EnsurePostgreSqlDatabaseAndSchemaAsync(config, msg => onProgress?.Invoke(msg, 0.1));
+
+        onProgress?.Invoke("Reading categories from local SQLite...", 0.15);
+        var categories = await GetCategoriesAsync();
+        var libraries = await GetLibrariesAsync();
+        var loras = await GetAllAsync();
+
+        string targetConnStr = config.BuildConnectionString();
+        await using var pgConn = new NpgsqlConnection(targetConnStr);
+        await pgConn.OpenAsync();
+
+        // Migrate Categories
+        onProgress?.Invoke($"Migrating {categories.Count} categories...", 0.2);
+        foreach (var cat in categories) {
+            using var catCmd = pgConn.CreateCommand();
+            catCmd.CommandText = @"
+                INSERT INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
+                VALUES (@Id, @Name, @Color, @Icon, @Description, @CreatedAtUtc, @UpdatedAtUtc)
+                ON CONFLICT (Id) DO UPDATE SET
+                    Name = EXCLUDED.Name,
+                    Color = EXCLUDED.Color,
+                    Icon = EXCLUDED.Icon,
+                    Description = EXCLUDED.Description,
+                    UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+            ";
+            catCmd.Parameters.AddWithValue("@Id", cat.Id);
+            catCmd.Parameters.AddWithValue("@Name", cat.Name);
+            catCmd.Parameters.AddWithValue("@Color", cat.Color);
+            catCmd.Parameters.AddWithValue("@Icon", (object?)cat.Icon ?? DBNull.Value);
+            catCmd.Parameters.AddWithValue("@Description", (object?)cat.Description ?? DBNull.Value);
+            catCmd.Parameters.AddWithValue("@CreatedAtUtc", cat.CreatedAtUtc.ToString("O"));
+            catCmd.Parameters.AddWithValue("@UpdatedAtUtc", cat.UpdatedAtUtc.ToString("O"));
+            await catCmd.ExecuteNonQueryAsync();
+        }
+
+        // Migrate Libraries
+        onProgress?.Invoke($"Migrating {libraries.Count} libraries...", 0.25);
+        foreach (var lib in libraries) {
+            using var libCmd = pgConn.CreateCommand();
+            libCmd.CommandText = @"
+                INSERT INTO Libraries (Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc)
+                VALUES (@Id, @Name, @FolderPath, @Description, @CreatedAtUtc, @UpdatedAtUtc)
+                ON CONFLICT (Id) DO UPDATE SET
+                    Name = EXCLUDED.Name,
+                    FolderPath = EXCLUDED.FolderPath,
+                    Description = EXCLUDED.Description,
+                    UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+            ";
+            libCmd.Parameters.AddWithValue("@Id", lib.Id);
+            libCmd.Parameters.AddWithValue("@Name", lib.Name);
+            libCmd.Parameters.AddWithValue("@FolderPath", lib.FolderPath);
+            libCmd.Parameters.AddWithValue("@Description", (object?)lib.Description ?? DBNull.Value);
+            libCmd.Parameters.AddWithValue("@CreatedAtUtc", lib.CreatedAtUtc.ToString("O"));
+            libCmd.Parameters.AddWithValue("@UpdatedAtUtc", lib.UpdatedAtUtc.ToString("O"));
+            await libCmd.ExecuteNonQueryAsync();
+        }
+
+        // Migrate Loras in batches
+        int total = loras.Count;
+        int migrated = 0;
+        int batchSize = 100;
+        for (int i = 0; i < total; i += batchSize) {
+            var batch = loras.Skip(i).Take(batchSize).ToList();
+            await using var tx = await pgConn.BeginTransactionAsync();
+            foreach (var lora in batch) {
+                using var loraCmd = pgConn.CreateCommand();
+                loraCmd.Transaction = tx;
+                loraCmd.CommandText = @"
+                    INSERT INTO Loras (
+                        FilePath, FileName, DirectoryPath, BaseModel, UserBaseModel, IsFavorite,
+                        NetworkDim, NetworkAlpha, NetworkModule, LearningRate, UnetLearningRate, TextEncoderLearningRate,
+                        Optimizer, LrScheduler, Epochs, TotalSteps, Resolution, Precision, FileSizeBytes,
+                        LastModifiedUtc, ThumbnailPath, Sha256Hash, TrainedWordsJson, RawMetadataJson,
+                        CivitaiModelId, CivitaiVersionId, CivitaiModelName, CivitaiVersionName, CivitaiBaseModel,
+                        CivitaiDescription, CivitaiDownloadUrl, CivitaiUrl, CivitaiPreviewImageUrl,
+                        CivitaiSamplePromptsJson, LibraryId, Category, TagsJson, CreatedAtUtc, UpdatedAtUtc
+                    ) VALUES (
+                        @FilePath, @FileName, @DirectoryPath, @BaseModel, @UserBaseModel, @IsFavorite,
+                        @NetworkDim, @NetworkAlpha, @NetworkModule, @LearningRate, @UnetLearningRate, @TextEncoderLearningRate,
+                        @Optimizer, @LrScheduler, @Epochs, @TotalSteps, @Resolution, @Precision, @FileSizeBytes,
+                        @LastModifiedUtc, @ThumbnailPath, @Sha256Hash, @TrainedWordsJson, @RawMetadataJson,
+                        @CivitaiModelId, @CivitaiVersionId, @CivitaiModelName, @CivitaiVersionName, @CivitaiBaseModel,
+                        @CivitaiDescription, @CivitaiDownloadUrl, @CivitaiUrl, @CivitaiPreviewImageUrl,
+                        @CivitaiSamplePromptsJson, @LibraryId, @Category, @TagsJson, @CreatedAtUtc, @UpdatedAtUtc
+                    ) ON CONFLICT (FilePath) DO UPDATE SET
+                        FileName = EXCLUDED.FileName,
+                        DirectoryPath = EXCLUDED.DirectoryPath,
+                        BaseModel = EXCLUDED.BaseModel,
+                        UserBaseModel = EXCLUDED.UserBaseModel,
+                        IsFavorite = EXCLUDED.IsFavorite,
+                        NetworkDim = EXCLUDED.NetworkDim,
+                        NetworkAlpha = EXCLUDED.NetworkAlpha,
+                        NetworkModule = EXCLUDED.NetworkModule,
+                        LearningRate = EXCLUDED.LearningRate,
+                        UnetLearningRate = EXCLUDED.UnetLearningRate,
+                        TextEncoderLearningRate = EXCLUDED.TextEncoderLearningRate,
+                        Optimizer = EXCLUDED.Optimizer,
+                        LrScheduler = EXCLUDED.LrScheduler,
+                        Epochs = EXCLUDED.Epochs,
+                        TotalSteps = EXCLUDED.TotalSteps,
+                        Resolution = EXCLUDED.Resolution,
+                        Precision = EXCLUDED.Precision,
+                        FileSizeBytes = EXCLUDED.FileSizeBytes,
+                        LastModifiedUtc = EXCLUDED.LastModifiedUtc,
+                        ThumbnailPath = EXCLUDED.ThumbnailPath,
+                        Sha256Hash = EXCLUDED.Sha256Hash,
+                        TrainedWordsJson = EXCLUDED.TrainedWordsJson,
+                        RawMetadataJson = EXCLUDED.RawMetadataJson,
+                        CivitaiModelId = EXCLUDED.CivitaiModelId,
+                        CivitaiVersionId = EXCLUDED.CivitaiVersionId,
+                        CivitaiModelName = EXCLUDED.CivitaiModelName,
+                        CivitaiVersionName = EXCLUDED.CivitaiVersionName,
+                        CivitaiBaseModel = EXCLUDED.CivitaiBaseModel,
+                        CivitaiDescription = EXCLUDED.CivitaiDescription,
+                        CivitaiDownloadUrl = EXCLUDED.CivitaiDownloadUrl,
+                        CivitaiUrl = EXCLUDED.CivitaiUrl,
+                        CivitaiPreviewImageUrl = EXCLUDED.CivitaiPreviewImageUrl,
+                        CivitaiSamplePromptsJson = EXCLUDED.CivitaiSamplePromptsJson,
+                        LibraryId = EXCLUDED.LibraryId,
+                        Category = EXCLUDED.Category,
+                        TagsJson = EXCLUDED.TagsJson,
+                        UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+                ";
+                BindNpgsqlLoraParameters(loraCmd, lora);
+                await loraCmd.ExecuteNonQueryAsync();
+                migrated++;
+            }
+            await tx.CommitAsync();
+            double progress = 0.25 + ((double)migrated / total * 0.75);
+            onProgress?.Invoke($"Migrated {migrated} of {total} LoRAs to PostgreSQL...", progress);
+        }
+
+        onProgress?.Invoke($"Migration complete! {migrated} LoRAs successfully synced to PostgreSQL.", 1.0);
+        return migrated;
+    }
+
+    public async Task<int> MigratePostgreSqlToSqliteAsync(PostgreSqlConfig config, Action<string, double>? onProgress = null) {
+        onProgress?.Invoke("Validating local SQLite database & schema...", 0.05);
+        await EnsureInitializedAsync();
+
+        string targetConnStr = config.BuildConnectionString();
+        await using var pgConn = new NpgsqlConnection(targetConnStr);
+        await pgConn.OpenAsync();
+
+        onProgress?.Invoke("Reading categories from PostgreSQL...", 0.15);
+        var pgCategories = new List<LoraCategory>();
+        using (var catCmd = pgConn.CreateCommand()) {
+            catCmd.CommandText = "SELECT Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc FROM Categories;";
+            using var reader = await catCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                pgCategories.Add(new LoraCategory {
+                    Id = reader.GetString(0),
+                    Name = reader.GetString(1),
+                    Color = reader.GetString(2),
+                    Icon = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Description = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(5), out var c) ? c : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(6), out var u) ? u : DateTime.UtcNow
+                });
+            }
+        }
+        foreach (var c in pgCategories) {
+            await SaveCategoryAsync(c);
+        }
+
+        onProgress?.Invoke("Reading libraries from PostgreSQL...", 0.25);
+        var pgLibraries = new List<LoraLibrary>();
+        using (var libCmd = pgConn.CreateCommand()) {
+            libCmd.CommandText = "SELECT Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc FROM Libraries;";
+            using var reader = await libCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                pgLibraries.Add(new LoraLibrary {
+                    Id = reader.GetString(0),
+                    Name = reader.GetString(1),
+                    FolderPath = reader.GetString(2),
+                    Description = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var c) ? c : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var u) ? u : DateTime.UtcNow
+                });
+            }
+        }
+        foreach (var l in pgLibraries) {
+            await UpsertLibraryAsync(l);
+        }
+
+        onProgress?.Invoke("Reading LoRAs from PostgreSQL...", 0.35);
+        var pgLoras = new List<LoraMetadata>();
+        using (var loraCmd = pgConn.CreateCommand()) {
+            loraCmd.CommandText = "SELECT * FROM Loras;";
+            using var reader = await loraCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                pgLoras.Add(MapReaderToMetadata(reader));
+            }
+        }
+
+        int total = pgLoras.Count;
+        onProgress?.Invoke($"Writing {total} LoRAs to local SQLite...", 0.5);
+        await UpsertBatchAsync(pgLoras);
+
+        onProgress?.Invoke($"Migration complete! {total} LoRAs successfully imported into SQLite.", 1.0);
+        return total;
+    }
+
+    public async Task SwitchDatabaseProviderAsync(string provider) {
+        if (_settingsService != null) {
+            _settingsService.Current.DatabaseProvider = provider;
+            await _settingsService.SaveSettingsAsync(_settingsService.Current);
+            _initialized = false;
+            await EnsureInitializedAsync();
+        }
+    }
+
+    private static void BindNpgsqlLoraParameters(NpgsqlCommand cmd, LoraMetadata lora) {
+        cmd.Parameters.AddWithValue("@FilePath", lora.FilePath);
+        cmd.Parameters.AddWithValue("@FileName", lora.FileName);
+        cmd.Parameters.AddWithValue("@DirectoryPath", Path.GetDirectoryName(lora.FilePath) ?? string.Empty);
+        cmd.Parameters.AddWithValue("@BaseModel", lora.BaseModel ?? "Unknown");
+        cmd.Parameters.AddWithValue("@UserBaseModel", (object?)lora.UserBaseModel ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@IsFavorite", lora.IsFavorite ? 1 : 0);
+        cmd.Parameters.AddWithValue("@NetworkDim", (object?)lora.NetworkDim ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NetworkAlpha", (object?)lora.NetworkAlpha ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NetworkModule", (object?)lora.NetworkModule ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@LearningRate", (object?)lora.LearningRate ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@UnetLearningRate", (object?)lora.UnetLearningRate ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TextEncoderLearningRate", (object?)lora.TextEncoderLearningRate ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Optimizer", (object?)lora.Optimizer ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@LrScheduler", (object?)lora.LrScheduler ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Epochs", (object?)lora.Epochs ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TotalSteps", (object?)lora.TotalSteps ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Resolution", (object?)lora.Resolution ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Precision", (object?)lora.Precision ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FileSizeBytes", lora.FileSizeBytes);
+        cmd.Parameters.AddWithValue("@LastModifiedUtc", lora.LastModifiedUtc?.ToString("O") ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@ThumbnailPath", (object?)lora.ThumbnailPath ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Sha256Hash", (object?)lora.Sha256Hash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TrainedWordsJson", lora.TrainedWords != null && lora.TrainedWords.Count > 0 ? JsonSerializer.Serialize(lora.TrainedWords) : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@RawMetadataJson", lora.RawHeaderMetadata != null && lora.RawHeaderMetadata.Count > 0 ? JsonSerializer.Serialize(lora.RawHeaderMetadata) : (object)DBNull.Value);
+
+        if (lora.CivitaiInfo != null) {
+            cmd.Parameters.AddWithValue("@CivitaiModelId", lora.CivitaiInfo.ModelId);
+            cmd.Parameters.AddWithValue("@CivitaiVersionId", lora.CivitaiInfo.VersionId);
+            cmd.Parameters.AddWithValue("@CivitaiModelName", (object?)lora.CivitaiInfo.ModelName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiVersionName", (object?)lora.CivitaiInfo.VersionName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiBaseModel", (object?)lora.CivitaiInfo.BaseModel ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiDescription", (object?)lora.CivitaiInfo.Description ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiDownloadUrl", (object?)lora.CivitaiInfo.DownloadUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiUrl", (object?)lora.CivitaiInfo.CivitaiUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiPreviewImageUrl", (object?)lora.CivitaiInfo.PreviewImageUrl ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiSamplePromptsJson", lora.CivitaiInfo.SamplePrompts != null && lora.CivitaiInfo.SamplePrompts.Count > 0 ? JsonSerializer.Serialize(lora.CivitaiInfo.SamplePrompts) : (object)DBNull.Value);
+        } else {
+            cmd.Parameters.AddWithValue("@CivitaiModelId", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiVersionId", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiModelName", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiVersionName", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiBaseModel", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiDescription", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiDownloadUrl", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiUrl", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiPreviewImageUrl", DBNull.Value);
+            cmd.Parameters.AddWithValue("@CivitaiSamplePromptsJson", DBNull.Value);
+        }
+
+        cmd.Parameters.AddWithValue("@LibraryId", (object?)lora.LibraryId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Category", (object?)lora.Category ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TagsJson", lora.Tags != null && lora.Tags.Count > 0 ? JsonSerializer.Serialize(lora.Tags) : (object)DBNull.Value);
+        string now = DateTime.UtcNow.ToString("O");
+        cmd.Parameters.AddWithValue("@CreatedAtUtc", now);
+        cmd.Parameters.AddWithValue("@UpdatedAtUtc", now);
     }
 
     public void Dispose() {

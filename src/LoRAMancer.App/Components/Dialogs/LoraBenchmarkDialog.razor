@@ -1,6 +1,8 @@
+@using LoRAMancer.App.Engines
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject LoraBenchmarkService BenchmarkService
 @inject NativeFileDialogService FileDialogService
 @inject ISnackbar Snackbar
@@ -35,9 +37,9 @@
                     <MudItem xs="12" md="5">
                         <div class="d-flex align-center gap-2">
                             <MudSelect T="string" @bind-Value="_baseArch" Label="Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isBenchmarking">
-                                <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
-                                <MudSelectItem Value="@("SDXL")">SDXL / Pony</MudSelectItem>
-                                <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
+                                @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                                    <MudSelectItem Value="@arch.DisplayName">@arch.DisplayName (@arch.Family)</MudSelectItem>
+                                }
                             </MudSelect>
                             <MudTextField @bind-Value="_triggerWord" Label="Trigger Word" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. ohwx" Disabled="_isBenchmarking" />
                         </div>
@@ -175,7 +177,7 @@
     public string? InitialTriggerWord { get; set; }
 
     private string _checkpointFolder = "";
-    private string _baseArch = "FLUX.1";
+    private string _baseArch = "FLUX.1-dev";
     private string _triggerWord = "";
     private bool _renderViaComfyUi = false;
     private bool _isBenchmarking;
@@ -215,7 +217,11 @@
         if (_discoveredCheckpoints.Count == 0) {
             Snackbar.Add("No .safetensors checkpoints found in this directory.", Severity.Warning);
         } else {
-            Snackbar.Add($"Discovered {_discoveredCheckpoints.Count} epoch checkpoints.", Severity.Success);
+            var detected = ArchitectureRegistry.InferFromPathOrMetadata(_discoveredCheckpoints[0], new Dictionary<string, string>());
+            if (detected != null) {
+                _baseArch = detected.DisplayName;
+            }
+            Snackbar.Add($"Discovered {_discoveredCheckpoints.Count} epoch checkpoints. Detected architecture: {_baseArch}", Severity.Success);
         }
     }
 

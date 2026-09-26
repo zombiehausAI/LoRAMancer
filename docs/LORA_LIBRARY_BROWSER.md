@@ -199,3 +199,75 @@ To ensure complete stability across large model collections and rapid user inter
 - **Application & Dialog Error Boundaries**:
   - Modal dialogs (such as the Training Wizard and Config Cloner) are guarded by dedicated `<ErrorBoundary>` wrappers in `MainLayout.razor`, isolating any rendering or calculation issues and preventing global WebView2 circuit reload crashes.
   - The **"Use Settings"** action defensively validates donor files and model architectures, providing non-intrusive warning snackbars if metadata attributes are incomplete.
+
+---
+
+## 7. Studio Database Engines: Extreme-Performance SQLite & Multi-Seat PostgreSQL
+
+LoRAMancer provides enterprise-grade database options engineered for both individual power users with 100k+ LoRA collections and multi-seat studio environments.
+
+### Ultra-Fast SQLite Local Engine
+- **Memory-Mapped I/O (MMAP)**: Configured with `PRAGMA mmap_size = 268435456;` (256 MB) to allow direct memory mapping of the database file, minimizing disk read overhead and delivering instantaneous indexing and search response times.
+- **Optimized Page Architecture**: `PRAGMA page_size = 4096;` aligned with modern SSD/NVMe cluster blocks for maximum read/write throughput.
+- **Write-Ahead Logging (WAL)**: `PRAGMA journal_mode = WAL;` and `PRAGMA synchronous = NORMAL;` to allow simultaneous multi-threaded reads while background directory scans and Civitai updates write asynchronously without locking the UI.
+- **Covering 4-Key Composite Indexing**: `idx_loras_composite (LibraryId, DirectoryPath, IsFavorite, BaseModel)` guarantees zero-scan index-only lookups across complex filtered queries.
+
+### PostgreSQL Studio Engine (LAN & Team Multi-Seat)
+- **Centralized Studio Catalog**: Connect multiple LoRAMancer workstations across a local network to a shared PostgreSQL database, centralizing libraries, tags, categories, and civitai metadata across the entire team.
+- **Form-Based Connection Manager**: Clean, user-friendly form fields in **Settings ➔ Studio Database** (Host, Port, Database, Username, Password with show/hide toggle, SSL Mode). No manual connection strings required.
+- **1-Click Engine Switcher**: Toggle between local SQLite and studio PostgreSQL instantly with a single click.
+
+### Bidirectional 1-Click Migration & Schema Auto-Repair
+LoRAMancer features a zero-configuration migration pipeline that operates in both directions:
+- **Automatic Database Creation**: When migrating to PostgreSQL, LoRAMancer checks if the target database exists; if not, it automatically connects to the server and creates it (`CREATE DATABASE`).
+- **Schema Validation & Self-Healing**: Automatically verifies that all tables (`Loras`, `Libraries`, `Categories`) exist with correct schemas. If new schema columns are added in newer LoRAMancer updates, it automatically applies non-destructive `ALTER TABLE` patches.
+- **Bidirectional Transfer**:
+  - **SQLite ➔ PostgreSQL**: Syncs all local categories, libraries, and LoRAs to the studio server with real-time progress reporting.
+  - **PostgreSQL ➔ SQLite**: Imports the entire studio catalog to local workstation SQLite for high-speed offline workflows.
+
+---
+
+## 8. Universal Model Architecture Detection & Diagnostic Integration
+
+All diagnostic tools and studio pipelines dynamically adapt to all detected base model architectures via the centralized `ModelArchitectureRegistry`:
+
+- **Centralized Architecture Discovery**:
+  - Automatically indexes all standard and modern foundation architectures:
+    - **FLUX.1** (`FLUX.1-dev`, `FLUX.1-schnell`)
+    - **SDXL 1.0**
+    - **Pony Diffusion V6 XL**
+    - **Illustrious-XL / NoobAI**
+    - **ChromaHD-1**
+    - **Stable Diffusion 3.5**
+    - **Stable Diffusion 1.5** & **Stable Diffusion 2.1**
+    - **Wan 2.1** (Video Diffusion)
+    - **HunyuanVideo**
+    - **AuraFlow**
+  - **Dynamic AI-Toolkit Scanning**: Any new model supported by AI-Toolkit is auto-discovered and registered at runtime.
+  - **Custom User Architectures**: User-defined models added via library or category management are registered and immediately available across the entire studio.
+
+- **Lab Studio Architecture Synchronization**:
+  - The Diagnostic Lab Studio (`/lab`) features a prominent active architecture badge and dropdown selector in the header toolbar.
+  - Selecting or auto-detecting a model automatically configures tensor key patterns, dimension heuristics, and block topologies across all 6 diagnostic lab tabs (Layer Surgery, Weight Inspector, Ghost Hunter, SVD Radar, Gene Therapy, and Forensic De-Anonymizer).
+
+- **Forensic De-Anonymizer Reverse Engineering**:
+  - `LoraDeAnonymizerService` matches raw tensor key patterns, dimension rank signatures, and metadata against all registered architectures in `ModelArchitectureRegistry`.
+  - Accurately identifies stripped or mislabeled `.safetensors` files, calculating architecture confidence scores and extracting appropriate default trigger prompts.
+
+- **AI Benchmark & Sweet Spot Matrix**:
+  - The Benchmark modal dynamically loads its architecture list directly from `ModelArchitectureRegistry.GetAll()`.
+  - Automatically detects the target architecture when inspecting a model directory.
+  - Generates architecture-aware prompt suites, optimal native resolutions, and noise scheduler configurations for any detected model family.
+
+- **ComfyUI Interactive Test Studio**:
+  - Dynamically populates the Base Architecture selector from all registered models.
+  - Automatically infers the target model when sending LoRAs from the browser or lab.
+  - Matches installed ComfyUI checkpoints dynamically using each model's registered `DetectionKeywords` (e.g. matching `Chroma`, `Pony`, `Illustrious`, or `Wan` checkpoints in user checkpoint folders).
+
+- **Tag Editor Dynamic Presets**:
+  - The LoRA Tag Editor (`LoraTagEditorDialog.razor`) generates quick-filter preset chips directly from detected architectures in `ModelArchitectureRegistry`.
+
+- **Cross-Studio Pipeline Handoff**:
+  - Right-clicking any LoRA card or table row and choosing **Send to Diagnostic Lab**, **Test in ComfyUI Canvas**, or **Diagnostics** propagates the model's `EffectiveBaseModel` directly into `StudioSessionService`.
+  - Diagnostic tools launch pre-configured with the exact architecture, eliminating manual re-selection.
+

@@ -1,7 +1,9 @@
 @page "/test"
+@using LoRAMancer.App.Engines
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject StudioSessionService StudioSession
 @inject ComfyUiService ComfyUi
 @inject NativeFileDialogService FileDialogService
@@ -176,7 +178,7 @@
             var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog> {
                 { x => x.LoraFilePath, _activeLoraPath },
                 { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
-                { x => x.BaseArchitecture, "FLUX.1" },
+                { x => x.BaseArchitecture, GetEffectiveArchitecture() },
                 { x => x.TriggerWords, StudioSession.TriggerWord }
             };
             var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
@@ -200,7 +202,7 @@
         var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog> {
             { x => x.LoraFilePath, _activeLoraPath },
             { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
-            { x => x.BaseArchitecture, "FLUX.1" },
+            { x => x.BaseArchitecture, GetEffectiveArchitecture() },
             { x => x.TriggerWords, StudioSession.TriggerWord }
         };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
@@ -210,6 +212,17 @@
     private async Task OpenBenchmarkDialogAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
         await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraBenchmarkDialog>("AI Benchmark Matrix & Sweet Spot Finder", options);
+    }
+
+    private string GetEffectiveArchitecture() {
+        if (!string.IsNullOrWhiteSpace(StudioSession.BaseModel)) {
+            return StudioSession.BaseModel;
+        }
+        if (!string.IsNullOrWhiteSpace(_activeLoraPath)) {
+            var arch = ArchitectureRegistry.InferFromPathOrMetadata(_activeLoraPath, new Dictionary<string, string>());
+            return arch?.DisplayName ?? "FLUX.1-dev";
+        }
+        return "FLUX.1-dev";
     }
 
     public void Dispose() { }

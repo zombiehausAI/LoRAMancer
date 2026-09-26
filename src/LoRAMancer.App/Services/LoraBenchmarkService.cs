@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using LoRAMancer.App.Engines;
 using LoRAMancer.App.Models;
 
 namespace LoRAMancer.App.Services;
@@ -43,15 +44,18 @@ public sealed class LoraBenchmarkService {
     private readonly ComfyUiService _comfyUi;
     private readonly HttpClient _httpClient;
     private readonly SettingsService _settingsService;
+    private readonly ModelArchitectureRegistry? _architectureRegistry;
 
     public LoraBenchmarkService(
         ComfyUiService comfyUi,
         HttpClient httpClient,
-        SettingsService settingsService
+        SettingsService settingsService,
+        ModelArchitectureRegistry? architectureRegistry = null
     ) {
         _comfyUi = comfyUi ?? throw new ArgumentNullException(nameof(comfyUi));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+        _architectureRegistry = architectureRegistry;
     }
 
     public List<BenchmarkPrompt> GenerateDefaultPrompts(string triggerWord) {
@@ -126,9 +130,16 @@ public sealed class LoraBenchmarkService {
 
                     foreach (var p in prompts) {
                         cancellationToken.ThrowIfCancellationRequested();
-                        var graph = baseArchitecture.StartsWith("SDXL", StringComparison.OrdinalIgnoreCase) || baseArchitecture.Equals("Pony", StringComparison.OrdinalIgnoreCase)
-                            ? _comfyUi.GenerateSdxlPromptGraph("sd_xl_base_1.0.safetensors", effectiveName, 1.0f, p.Prompt)
-                            : _comfyUi.GenerateFluxPromptGraph("flux1-dev.safetensors", effectiveName, 1.0f, p.Prompt);
+                        ModelArchitectureInfo? archInfo = _architectureRegistry?.GetAll()
+                            .FirstOrDefault(a => a.DisplayName.Equals(baseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                                                 a.Id.Equals(baseArchitecture, StringComparison.OrdinalIgnoreCase));
+
+                        bool isFlux = archInfo?.IsFlux == true || baseArchitecture.Contains("Flux", StringComparison.OrdinalIgnoreCase);
+                        int resolution = archInfo?.DefaultResolution ?? 1024;
+
+                        var graph = isFlux
+                            ? _comfyUi.GenerateFluxPromptGraph("flux1-dev.safetensors", effectiveName, 1.0f, p.Prompt, width: resolution, height: resolution)
+                            : _comfyUi.GenerateSdxlPromptGraph("sd_xl_base_1.0.safetensors", effectiveName, 1.0f, p.Prompt, width: resolution, height: resolution);
 
                         byte[]? imgBytes = await _comfyUi.QueuePromptAndRenderAsync(graph, cancellationToken: cancellationToken);
                         if (imgBytes != null && imgBytes.Length > 0) {

@@ -91,9 +91,20 @@ public sealed class StudioSessionService {
         OnSessionChanged?.Invoke();
     }
 
-    public void SetActiveLora(string loraPath) {
+    public void SetActiveLora(string loraPath, string? baseModel = null) {
         lock (_lock) {
             _currentProject.ActiveLoraPath = loraPath;
+            if (!string.IsNullOrWhiteSpace(baseModel)) {
+                _currentProject.BaseModel = baseModel;
+            }
+            SaveSession();
+        }
+        OnSessionChanged?.Invoke();
+    }
+
+    public void SetBaseModel(string baseModel) {
+        lock (_lock) {
+            _currentProject.BaseModel = baseModel;
             SaveSession();
         }
         OnSessionChanged?.Invoke();

@@ -43,6 +43,15 @@ public sealed class AppSettings {
     public string? CustomPrimaryColor { get; set; }
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
+    // Studio Database & PostgreSQL Configuration
+    public string DatabaseProvider { get; set; } = "SQLite"; // "SQLite" or "PostgreSQL"
+    public string PgHost { get; set; } = "localhost";
+    public int PgPort { get; set; } = 5432;
+    public string PgDatabase { get; set; } = "loramancer_studio";
+    public string PgUsername { get; set; } = "postgres";
+    public string PgPassword { get; set; } = string.Empty;
+    public string PgSslMode { get; set; } = "Prefer";
+
     // AI-Toolkit & Training Environment
     public string AiToolkitRepoUrl { get; set; } = "https://github.com/ostris/ai-toolkit.git";
     public string AiToolkitPath { get; set; } = string.Empty;

@@ -1920,7 +1920,7 @@
 
     private void SendToStudioLab(LoraMetadata lora) {
         if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
-        StudioSession.SetActiveLora(lora.FilePath);
+        StudioSession.SetActiveLora(lora.FilePath, lora.EffectiveBaseModel);
         string? trigger = GetPrimaryTrigger(lora);
         if (!string.IsNullOrWhiteSpace(trigger)) {
             StudioSession.SetTriggerWord(trigger);
@@ -1930,7 +1930,7 @@
 
     private void SendToStudioTest(LoraMetadata lora) {
         if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
-        StudioSession.SetActiveLora(lora.FilePath);
+        StudioSession.SetActiveLora(lora.FilePath, lora.EffectiveBaseModel);
         string? trigger = GetPrimaryTrigger(lora);
         if (!string.IsNullOrWhiteSpace(trigger)) {
             StudioSession.SetTriggerWord(trigger);
@@ -1940,7 +1940,7 @@
 
     private void RouteToDiagnostic(LoraMetadata lora, int tabIndex, bool autoRun = false) {
         if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
-        StudioSession.SetActiveLora(lora.FilePath);
+        StudioSession.SetActiveLora(lora.FilePath, lora.EffectiveBaseModel);
         string? trigger = GetPrimaryTrigger(lora);
         if (!string.IsNullOrWhiteSpace(trigger)) {
             StudioSession.SetTriggerWord(trigger);

@@ -354,4 +354,90 @@ public sealed class RevolutionaryFeaturesTests {
         var inferred = registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = "animagine_3_1" });
         Assert.Equal("Animagine 3.1", inferred.DisplayName);
     }
+
+    [Fact]
+    public void PostgreSqlConfig_BuildConnectionString_FormatsProperly() {
+        var config = new LoRAMancer.App.Services.LoraDatabaseService.PostgreSqlConfig {
+            Host = "192.168.1.50",
+            Port = 5433,
+            Database = "studio_loras",
+            Username = "studio_user",
+            Password = "SuperSecretPassword123!",
+            SslMode = "Require"
+        };
+
+        string connStr = config.BuildConnectionString();
+        Assert.Contains("Host=192.168.1.50", connStr);
+        Assert.Contains("Port=5433", connStr);
+        Assert.Contains("Database=studio_loras", connStr);
+        Assert.Contains("Username=studio_user", connStr);
+        Assert.Contains("Password=SuperSecretPassword123!", connStr);
+        Assert.Contains("Require", connStr, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PostgreSqlConfig_Defaults_MatchStandardStudioProfile() {
+        var config = new LoRAMancer.App.Services.LoraDatabaseService.PostgreSqlConfig();
+        Assert.Equal("localhost", config.Host);
+        Assert.Equal(5432, config.Port);
+        Assert.Equal("loramancer_studio", config.Database);
+        Assert.Equal("postgres", config.Username);
+        Assert.Equal("Prefer", config.SslMode);
+        Assert.Empty(config.Password);
+    }
+
+    [Fact]
+    public void AppSettings_DatabaseProvider_DefaultsToSqlite_AndSupportsToggle() {
+        var settings = new LoRAMancer.App.Models.AppSettings();
+        Assert.Equal("SQLite", settings.DatabaseProvider);
+        Assert.Equal("localhost", settings.PgHost);
+        Assert.Equal(5432, settings.PgPort);
+        Assert.Equal("loramancer_studio", settings.PgDatabase);
+
+        settings.DatabaseProvider = "PostgreSQL";
+        Assert.Equal("PostgreSQL", settings.DatabaseProvider);
+    }
+
+    [Fact]
+    public void StudioSessionService_SetBaseModel_And_SetActiveLora_PersistsAccurately() {
+        string tempDir = Path.Combine(Path.GetTempPath(), "loramancer_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string sessionFile = Path.Combine(tempDir, "session.json");
+
+        try {
+            var session = new LoRAMancer.App.Services.StudioSessionService(sessionFile);
+            session.SetActiveLora(@"D:\Models\Chroma\my_lora.safetensors", "ChromaHD-1");
+            Assert.Equal(@"D:\Models\Chroma\my_lora.safetensors", session.ActiveLoraPath);
+            Assert.Equal("ChromaHD-1", session.BaseModel);
+
+            session.SetBaseModel("FLUX.1-dev");
+            Assert.Equal("FLUX.1-dev", session.BaseModel);
+        } finally {
+            if (Directory.Exists(tempDir)) {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ModelArchitectureRegistry_InfersKnownAndCustomArchitecturesForDiagnostics() {
+        var registry = new LoRAMancer.App.Engines.ModelArchitectureRegistry();
+
+        // Check that all core architectures exist for diagnostics
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("FLUX")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("XL") || a.Family.Contains("SDXL")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("Pony")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("Illustrious")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("Chroma")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("Wan")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("Hunyuan")));
+        Assert.NotNull(registry.GetAll().FirstOrDefault(a => a.DisplayName.Contains("3.5")));
+
+        // Inference from file path
+        var inferredPony = registry.InferFromPathOrMetadata(@"D:\LoRAs\Pony\anime_character.safetensors", new Dictionary<string, string>());
+        Assert.Contains("Pony", inferredPony.DisplayName);
+
+        var inferredChroma = registry.InferFromPathOrMetadata(@"D:\LoRAs\Chroma\lighting.safetensors", new Dictionary<string, string>());
+        Assert.Contains("Chroma", inferredChroma.DisplayName);
+    }
 }

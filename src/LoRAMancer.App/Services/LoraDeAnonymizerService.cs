@@ -33,9 +33,14 @@ public sealed record LoraForensicReport {
 
 public sealed class LoraDeAnonymizerService {
     private readonly SafeTensorsMetadataReader? _metadataReader;
+    private readonly ModelArchitectureRegistry? _architectureRegistry;
 
-    public LoraDeAnonymizerService(SafeTensorsMetadataReader? metadataReader = null) {
+    public LoraDeAnonymizerService(
+        SafeTensorsMetadataReader? metadataReader = null,
+        ModelArchitectureRegistry? architectureRegistry = null
+    ) {
         _metadataReader = metadataReader;
+        _architectureRegistry = architectureRegistry;
     }
 
     public async Task<LoraForensicReport> ReverseEngineerLoraAsync(
@@ -60,7 +65,7 @@ public sealed class LoraDeAnonymizerService {
         var rawMeta = metadata?.RawHeaderMetadata ?? new Dictionary<string, string>();
 
         // 1. Architecture Fingerprinting
-        var (arch, conf) = FingerprintArchitecture(rawMeta, metadata?.BaseModel);
+        var (arch, conf) = FingerprintArchitecture(loraPath, rawMeta, metadata?.BaseModel);
 
         // 2. Rank & Alpha Reconstruction
         int rank = metadata?.NetworkDim ?? 16;
@@ -102,18 +107,30 @@ public sealed class LoraDeAnonymizerService {
         };
     }
 
-    private static (string Architecture, double Confidence) FingerprintArchitecture(
+    private (string Architecture, double Confidence) FingerprintArchitecture(
+        string loraPath,
         IReadOnlyDictionary<string, string> rawMeta,
         string? baseModelHint
     ) {
         if (!string.IsNullOrWhiteSpace(baseModelHint) && baseModelHint != "Unknown") {
+            if (_architectureRegistry != null && _architectureRegistry.TryGet(baseModelHint, out var known)) {
+                return (known!.DisplayName, 98.0);
+            }
             return (baseModelHint, 95.0);
         }
 
+        // Check using ModelArchitectureRegistry if available
+        if (_architectureRegistry != null) {
+            var inferred = _architectureRegistry.InferFromPathOrMetadata(loraPath, rawMeta);
+            if (inferred != null && !inferred.Id.Equals("flux_1_dev", StringComparison.OrdinalIgnoreCase)) {
+                return (inferred.DisplayName, 96.0);
+            }
+        }
+
         if (rawMeta.TryGetValue("ss_base_model_version", out var baseVer) && !string.IsNullOrWhiteSpace(baseVer)) {
-            if (baseVer.Contains("flux", StringComparison.OrdinalIgnoreCase)) return ("FLUX.1-Dev / Schnell", 98.0);
-            if (baseVer.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return ("SDXL 1.0 / Pony", 98.0);
-            if (baseVer.Contains("v1", StringComparison.OrdinalIgnoreCase) || baseVer.Contains("1.5", StringComparison.OrdinalIgnoreCase)) return ("SD 1.5", 98.0);
+            if (baseVer.Contains("flux", StringComparison.OrdinalIgnoreCase)) return ("FLUX.1-dev", 98.0);
+            if (baseVer.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return ("Stable Diffusion XL 1.0", 98.0);
+            if (baseVer.Contains("v1", StringComparison.OrdinalIgnoreCase) || baseVer.Contains("1.5", StringComparison.OrdinalIgnoreCase)) return ("Stable Diffusion 1.5", 98.0);
         }
 
         // Structural key fingerprinting
@@ -123,16 +140,21 @@ public sealed class LoraDeAnonymizerService {
         int hunyuanKeys = keys.Count(k => k.Contains("hunyuan") || k.Contains("double_stream_blocks"));
         int wanKeys = keys.Count(k => k.Contains("wan") || k.Contains("cross_attn_norm"));
 
-        if (fluxKeys > 5) return ("FLUX.1-Dev / Schnell", 95.0);
+        if (fluxKeys > 5) return ("FLUX.1-dev", 95.0);
         if (hunyuanKeys > 2) return ("HunyuanVideo", 92.0);
-        if (wanKeys > 2) return ("Wan 2.1 Video Diffusion", 92.0);
+        if (wanKeys > 2) return ("Wan 2.1", 92.0);
         if (sdxlKeys > 5) {
             bool hasClipG = keys.Any(k => k.Contains("lora_te2") || k.Contains("clip_g"));
-            return (hasClipG ? "SDXL 1.0 / Pony Diffusion" : "SDXL Architecture", 90.0);
+            return (hasClipG ? "Pony Diffusion V6 XL" : "Stable Diffusion XL 1.0", 90.0);
         }
 
         if (keys.Any(k => k.Contains("lora_unet") || k.Contains("to_k") || k.Contains("to_v"))) {
             return ("Stable Diffusion 1.5", 85.0);
+        }
+
+        if (_architectureRegistry != null) {
+            var fallback = _architectureRegistry.GetOrDefault("flux_1_dev");
+            return (fallback.DisplayName, 70.0);
         }
 
         return ("Generic Diffusion LoRA", 65.0);

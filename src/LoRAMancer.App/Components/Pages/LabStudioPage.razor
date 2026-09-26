@@ -1,7 +1,9 @@
 @page "/lab"
+@using LoRAMancer.App.Engines
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject StudioSessionService StudioSession
 @inject LoraSurgeryService SurgeryService
 @inject LoraDiffService DiffService
@@ -43,8 +45,26 @@
             </MudText>
         </div>
         @if (!string.IsNullOrWhiteSpace(_primaryLoraPath) && File.Exists(_primaryLoraPath)) {
-            <div class="d-flex align-center gap-2">
+            <div class="d-flex align-center gap-2 flex-wrap">
                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@GetFileSize(_primaryLoraPath)</MudChip>
+                <!-- Detected Base Model Badge & Dropdown Selector -->
+                <MudMenu Dense="true" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+                    <ActivatorContent>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Memory" Style="cursor: pointer;">
+                            @(_detectedArchitecture?.DisplayName ?? "Detecting Model...")
+                        </MudChip>
+                    </ActivatorContent>
+                    <ChildContent>
+                        @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                            <MudMenuItem OnClick="@(() => SetActiveArchitecture(arch))">
+                                <div class="d-flex align-center justify-space-between gap-3">
+                                    <span>@arch.DisplayName</span>
+                                    <span style="font-size:0.75rem; color:#a6adc8;">@arch.Family</span>
+                                </div>
+                            </MudMenuItem>
+                        }
+                    </ChildContent>
+                </MudMenu>
                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">Ready for Surgery</MudChip>
             </div>
         }
@@ -482,6 +502,7 @@
     private OverbakeModelReport? _overbakeReport;
     private EpochSequenceRadarReport? _sequenceReport;
     private LoraForensicReport? _forensicReport;
+    private ModelArchitectureInfo? _detectedArchitecture;
 
     [SupplyParameterFromQuery(Name = "tab")]
     public int? InitialTab { get; set; }
@@ -494,10 +515,27 @@
     protected override void OnInitialized() {
         StudioSession.SetStage(StudioStage.Lab);
         _primaryLoraPath = StudioSession.ActiveLoraPath;
+        DetectModelArchitecture();
 
         if (InitialTab.HasValue && InitialTab.Value >= 0 && InitialTab.Value <= 5) {
             _activeTabIndex = InitialTab.Value;
         }
+    }
+
+    private void DetectModelArchitecture() {
+        if (!string.IsNullOrWhiteSpace(_primaryLoraPath) && File.Exists(_primaryLoraPath)) {
+            if (!string.IsNullOrWhiteSpace(StudioSession.BaseModel) && ArchitectureRegistry.TryGet(StudioSession.BaseModel, out var sessionArch)) {
+                _detectedArchitecture = sessionArch;
+                return;
+            }
+            _detectedArchitecture = ArchitectureRegistry.InferFromPathOrMetadata(_primaryLoraPath, new Dictionary<string, string>());
+        }
+    }
+
+    private void SetActiveArchitecture(ModelArchitectureInfo arch) {
+        _detectedArchitecture = arch;
+        StudioSession.SetBaseModel(arch.DisplayName);
+        Snackbar.Add($"Target architecture set to {arch.DisplayName} ({arch.Family})", Severity.Info);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender) {
@@ -514,7 +552,8 @@
         string? file = await FileDialogService.PickSafeTensorsFileAsync();
         if (!string.IsNullOrWhiteSpace(file) && File.Exists(file)) {
             _primaryLoraPath = file;
-            StudioSession.SetActiveLora(file);
+            DetectModelArchitecture();
+            StudioSession.SetActiveLora(file, _detectedArchitecture?.DisplayName);
             Snackbar.Add($"Loaded LoRA: {Path.GetFileName(file)}", Severity.Success);
         }
     }

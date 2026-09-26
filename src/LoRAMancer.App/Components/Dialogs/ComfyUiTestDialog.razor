@@ -1,6 +1,8 @@
+@using LoRAMancer.App.Engines
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @inject ComfyUiService ComfyService
 @inject SettingsService Settings
 @inject ISnackbar Snackbar
@@ -78,10 +80,10 @@
             <MudGrid Spacing="2">
                 <!-- Checkpoint Selection & Architecture -->
                 <MudItem xs="12" md="6">
-                    <MudSelect T="string" @bind-Value="_selectedArchitecture" Label="Base Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering">
-                        <MudSelectItem Value="@("FLUX.1-dev")">FLUX.1 (Dev / Schnell)</MudSelectItem>
-                        <MudSelectItem Value="@("SDXL")">SDXL 1.0 / Pony</MudSelectItem>
-                        <MudSelectItem Value="@("SD1.5")">Stable Diffusion 1.5</MudSelectItem>
+                    <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Base Architecture" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering">
+                        @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                            <MudSelectItem Value="@arch.DisplayName">@arch.DisplayName (@arch.Family)</MudSelectItem>
+                        }
                     </MudSelect>
                 </MudItem>
 
@@ -102,7 +104,7 @@
                     <MudTextField @bind-Value="_prompt" Label="Positive Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" HelperText="Trigger words will activate the trained features" Disabled="_isRendering" />
                 </MudItem>
 
-                @if (_selectedArchitecture != "FLUX.1-dev") {
+                @if (!_selectedArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
                     <!-- Negative Prompt -->
                     <MudItem xs="12">
                         <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Disabled="_isRendering" />
@@ -214,20 +216,16 @@
     protected override async Task OnInitializedAsync() {
         _endpoint = ComfyService.GetEffectiveEndpoint();
         if (!string.IsNullOrWhiteSpace(BaseArchitecture)) {
-            _selectedArchitecture = BaseArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase)
-                ? "FLUX.1-dev"
-                : BaseArchitecture.Contains("sdxl", StringComparison.OrdinalIgnoreCase) || BaseArchitecture.Contains("pony", StringComparison.OrdinalIgnoreCase)
-                    ? "SDXL"
-                    : "SD1.5";
+            var matched = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
+                a.DisplayName.Equals(BaseArchitecture, StringComparison.OrdinalIgnoreCase) ||
+                a.Id.Equals(BaseArchitecture, StringComparison.OrdinalIgnoreCase));
+            _selectedArchitecture = matched?.DisplayName ?? BaseArchitecture;
+        } else if (!string.IsNullOrWhiteSpace(LoraFilePath)) {
+            var detected = ArchitectureRegistry.InferFromPathOrMetadata(LoraFilePath, new Dictionary<string, string>());
+            _selectedArchitecture = detected?.DisplayName ?? "FLUX.1-dev";
         }
 
-        if (_selectedArchitecture == "FLUX.1-dev") {
-            _steps = 20;
-            _cfg = 3.5;
-        } else {
-            _steps = 30;
-            _cfg = 7.0;
-        }
+        ApplyArchitectureSettings(_selectedArchitecture);
 
         string loraTag = !string.IsNullOrWhiteSpace(TriggerWords) ? TriggerWords.Trim() : (LoraName ?? "subject");
         _prompt = $"A high quality photo of {loraTag}, detailed, professional lighting";
@@ -259,10 +257,11 @@
 
                 // Pick a default checkpoint if none selected
                 if (string.IsNullOrWhiteSpace(_selectedCheckpoint) && _connStatus.AvailableCheckpoints.Count > 0) {
+                    var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName.Equals(_selectedArchitecture, StringComparison.OrdinalIgnoreCase));
+                    IEnumerable<string> keywords = arch?.DetectionKeywords ?? new[] { "flux", "xl", "1.5" };
+
                     _selectedCheckpoint = _connStatus.AvailableCheckpoints.FirstOrDefault(c =>
-                        _selectedArchitecture == "FLUX.1-dev" ? c.Contains("flux", StringComparison.OrdinalIgnoreCase) :
-                        _selectedArchitecture == "SDXL" ? c.Contains("xl", StringComparison.OrdinalIgnoreCase) || c.Contains("pony", StringComparison.OrdinalIgnoreCase) :
-                        c.Contains("1.5", StringComparison.OrdinalIgnoreCase) || c.Contains("v1-5", StringComparison.OrdinalIgnoreCase))
+                        keywords.Any(kw => c.Contains(kw, StringComparison.OrdinalIgnoreCase)))
                         ?? _connStatus.AvailableCheckpoints.First();
                 }
             }
@@ -329,12 +328,13 @@
         }
 
         string loraRef = _deployedLoraName ?? Path.GetFileName(LoraFilePath ?? "lora.safetensors");
+        bool isFlux = _selectedArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase);
         string ckptRef = !string.IsNullOrWhiteSpace(_selectedCheckpoint)
             ? _selectedCheckpoint
-            : (_selectedArchitecture == "FLUX.1-dev" ? "flux1-dev.safetensors" : "sd_xl_base_1.0.safetensors");
+            : (isFlux ? "flux1-dev.safetensors" : "sd_xl_base_1.0.safetensors");
 
         System.Text.Json.Nodes.JsonObject promptGraph;
-        if (_selectedArchitecture == "FLUX.1-dev") {
+        if (isFlux) {
             promptGraph = ComfyService.GenerateFluxPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _width, _height, _steps);
         } else {
             promptGraph = ComfyService.GenerateSdxlPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _negativePrompt, _width, _height, _steps, (float)_cfg);
@@ -403,5 +403,25 @@
     public void Dispose() {
         _renderCts?.Cancel();
         _renderCts?.Dispose();
+    }
+    private void OnArchitectureChanged(string archName) {
+        _selectedArchitecture = archName;
+        ApplyArchitectureSettings(archName);
+    }
+
+    private void ApplyArchitectureSettings(string archName) {
+        var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName.Equals(archName, StringComparison.OrdinalIgnoreCase));
+        if (arch != null) {
+            _width = arch.DefaultResolution;
+            _height = arch.DefaultResolution;
+            _selectedResolution = $"{_width}x{_height}";
+            if (arch.IsFlux) {
+                _steps = 20;
+                _cfg = 3.5;
+            } else {
+                _steps = 30;
+                _cfg = 7.0;
+            }
+        }
     }
 }

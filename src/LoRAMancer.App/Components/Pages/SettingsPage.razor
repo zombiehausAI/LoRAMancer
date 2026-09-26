@@ -9,6 +9,7 @@
 @inject RemoteTrainingClientService RemoteClient
 @inject AuthTokenManagerService TokenManager
 @inject ThemeService ThemeManager
+@inject LoraDatabaseService DatabaseService
 @inject ISnackbar Snackbar
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
@@ -848,6 +849,201 @@
             </MudTable>
         </div>
     </MudTabPanel>
+
+    <!-- Studio Database & Storage Tab -->
+    <MudTabPanel Text="Studio Database" Icon="@Icons.Material.Filled.Storage">
+        <div class="px-4 pb-4">
+            <!-- Active Engine Banner & 1-Click Engine Switcher -->
+            <MudCard Elevation="0" Class="pa-4 mb-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+                    <div class="d-flex align-center gap-3">
+                        <MudIcon Icon="@Icons.Material.Filled.Storage" Color="Color.Primary" Size="Size.Large" />
+                        <div>
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">Catalog Storage Engine</MudText>
+                                @if (string.Equals(_settings.DatabaseProvider, "PostgreSQL", StringComparison.OrdinalIgnoreCase)) {
+                                    <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled">PostgreSQL (Studio Multi-Seat LAN)</MudChip>
+                                } else {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">SQLite (Local Ultra-Fast)</MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                Switch instantly between lightning-fast local SQLite and multi-seat studio PostgreSQL.
+                            </MudText>
+                        </div>
+                    </div>
+                    <div>
+                        @if (string.Equals(_settings.DatabaseProvider, "PostgreSQL", StringComparison.OrdinalIgnoreCase)) {
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="@(() => SwitchEngineAsync("SQLite"))">
+                                Switch Engine to SQLite (Local)
+                            </MudButton>
+                        } else {
+                            <MudButton Variant="Variant.Filled" Color="Color.Info" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="@(() => SwitchEngineAsync("PostgreSQL"))">
+                                Switch Engine to PostgreSQL (Studio)
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+            </MudCard>
+
+            <MudGrid>
+                <!-- PostgreSQL Connection Manager (Easy Form-Based) -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Dns" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">PostgreSQL Connection Manager</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Connect LoRAMancer to your dedicated PostgreSQL studio server. Clean form configuration — no raw connection strings needed.
+                        </MudText>
+
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="8">
+                                <MudTextField @bind-Value="_settings.PgHost" Label="Server Host / IP" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="localhost or 192.168.1.100" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Dns" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField @bind-Value="_settings.PgPort" Label="Port" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="65535" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_settings.PgDatabase" Label="Database Name" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="Auto-created if it does not exist" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSelect @bind-Value="_settings.PgSslMode" Label="SSL Mode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    <MudSelectItem Value="@("Prefer")">Prefer (Recommended)</MudSelectItem>
+                                    <MudSelectItem Value="@("Require")">Require (Enforce SSL)</MudSelectItem>
+                                    <MudSelectItem Value="@("Disable")">Disable (Local/LAN)</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_settings.PgUsername" Label="Username" Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_settings.PgPassword" Label="Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              InputType="@(_showPgPassword ? InputType.Text : InputType.Password)"
+                                              Adornment="Adornment.End"
+                                              AdornmentIcon="@(_showPgPassword ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)"
+                                              OnAdornmentClick="@(() => _showPgPassword = !_showPgPassword)" />
+                            </MudItem>
+                        </MudGrid>
+
+                        <div class="d-flex align-center gap-2 mt-4 flex-wrap">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.NetworkCheck" Disabled="_isTestingPg" OnClick="TestPgConnectionAsync">
+                                @(_isTestingPg ? "Testing Connection..." : "Test PostgreSQL Connection")
+                            </MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveSettingsAsync">
+                                Save Credentials
+                            </MudButton>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_pgStatusMessage)) {
+                            <MudAlert Severity="@(_pgStatusSuccess == true ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
+                                @_pgStatusMessage
+                            </MudAlert>
+                        }
+                    </MudCard>
+                </MudItem>
+
+                <!-- Bidirectional Migration & Schema Auto-Repair Station -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px; height: 100%;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.SyncAlt" Color="Color.Secondary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Bidirectional Migration & Auto-Repair</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3">
+                            Migrate your entire library, tags, categories, Civitai info, and hyperparameters seamlessly.
+                            If target database or tables/columns are missing, LoRAMancer auto-creates and repairs them automatically.
+                        </MudText>
+
+                        <div class="d-flex flex-column gap-3 mb-3">
+                            <!-- SQLite -> PostgreSQL -->
+                            <MudPaper Elevation="0" Class="pa-3" Style="background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 6px;">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <div class="d-flex align-center gap-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Info" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2" Style="font-weight: 600;">SQLite ➔ PostgreSQL</MudText>
+                                    </div>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudUpload" Disabled="_isMigrating" OnClick="MigrateSqliteToPgAsync">
+                                        Sync to PostgreSQL
+                                    </MudButton>
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Checks target DB, auto-creates if missing, verifies all columns, and streams local catalog to PostgreSQL.
+                                </MudText>
+                            </MudPaper>
+
+                            <!-- PostgreSQL -> SQLite -->
+                            <MudPaper Elevation="0" Class="pa-3" Style="background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 6px;">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <div class="d-flex align-center gap-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Success" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2" Style="font-weight: 600;">PostgreSQL ➔ SQLite</MudText>
+                                    </div>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="_isMigrating" OnClick="MigratePgToSqliteAsync">
+                                        Import to SQLite
+                                    </MudButton>
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Pulls studio server catalog into high-speed local workstation SQLite database.
+                                </MudText>
+                            </MudPaper>
+                        </div>
+
+                        @if (_isMigrating) {
+                            <div class="mt-3">
+                                <div class="d-flex justify-space-between align-center mb-1">
+                                    <MudText Typo="Typo.caption" Style="color: #cba6f7;">@_migrationStatus</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@((int)(_migrationProgress * 100))%</MudText>
+                                </div>
+                                <MudProgressLinear Color="Color.Primary" Value="@((int)(_migrationProgress * 100))" Rounded="true" Size="Size.Medium" />
+                            </div>
+                        } else if (!string.IsNullOrEmpty(_migrationStatus)) {
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                                @_migrationStatus
+                            </MudAlert>
+                        }
+                    </MudCard>
+                </MudItem>
+
+                <!-- SQLite Performance Optimization Specs -->
+                <MudItem xs="12">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Warning" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">SQLite High-Performance Engine Specs</MudText>
+                        </div>
+                        <MudGrid>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background-color: #1e1e2e; border: 1px solid #313244; border-radius: 6px;">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">MMAP Memory I/O</MudText>
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight:700; color:#a6e3a1;">256 MB</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background-color: #1e1e2e; border: 1px solid #313244; border-radius: 6px;">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Page Size</MudText>
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight:700; color:#89b4fa;">4096 Bytes</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background-color: #1e1e2e; border: 1px solid #313244; border-radius: 6px;">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Journal Mode</MudText>
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight:700; color:#cba6f7;">WAL Mode</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background-color: #1e1e2e; border: 1px solid #313244; border-radius: 6px;">
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Composite Indexing</MudText>
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight:700; color:#f9e2af;">Covering 4-Key</MudText>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </div>
+    </MudTabPanel>
 </MudTabs>
 
 @code {
@@ -1299,6 +1495,109 @@
         } finally {
             _isConfiguringFirewall = false;
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Studio Database & PostgreSQL State
+    private bool _showPgPassword = false;
+    private bool _isTestingPg = false;
+    private string _pgStatusMessage = string.Empty;
+    private bool? _pgStatusSuccess = null;
+    private bool _isMigrating = false;
+    private string _migrationStatus = string.Empty;
+    private double _migrationProgress = 0.0;
+
+    private LoraDatabaseService.PostgreSqlConfig GetPgConfig() {
+        return new LoraDatabaseService.PostgreSqlConfig {
+            Host = _settings.PgHost,
+            Port = _settings.PgPort,
+            Database = _settings.PgDatabase,
+            Username = _settings.PgUsername,
+            Password = _settings.PgPassword,
+            SslMode = _settings.PgSslMode
+        };
+    }
+
+    private async Task SwitchEngineAsync(string provider) {
+        _settings.DatabaseProvider = provider;
+        await Settings.SaveSettingsAsync(_settings);
+        await DatabaseService.SwitchDatabaseProviderAsync(provider);
+        Snackbar.Add($"Switched active database engine to {provider}!", Severity.Success);
+        StateHasChanged();
+    }
+
+    private async Task TestPgConnectionAsync() {
+        _isTestingPg = true;
+        _pgStatusMessage = "Testing PostgreSQL connection...";
+        _pgStatusSuccess = null;
+        StateHasChanged();
+
+        try {
+            var config = GetPgConfig();
+            var result = await DatabaseService.TestPostgreSqlConnectionAsync(config);
+            _pgStatusSuccess = result.Success;
+            if (result.Success) {
+                _pgStatusMessage = $"{result.Message} (Roundtrip latency: {result.Latency.TotalMilliseconds:F1}ms)";
+                Snackbar.Add("Connected to PostgreSQL successfully!", Severity.Success);
+            } else {
+                _pgStatusMessage = result.Message;
+                Snackbar.Add($"PostgreSQL connection failed: {result.Message}", Severity.Error);
+            }
+        } catch (Exception ex) {
+            _pgStatusSuccess = false;
+            _pgStatusMessage = ex.Message;
+            Snackbar.Add($"PostgreSQL error: {ex.Message}", Severity.Error);
+        } finally {
+            _isTestingPg = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task MigrateSqliteToPgAsync() {
+        _isMigrating = true;
+        _migrationStatus = "Starting SQLite to PostgreSQL migration...";
+        _migrationProgress = 0.05;
+        StateHasChanged();
+
+        try {
+            var config = GetPgConfig();
+            int count = await DatabaseService.MigrateSqliteToPostgreSqlAsync(config, (status, progress) => {
+                _migrationStatus = status;
+                _migrationProgress = progress;
+                InvokeAsync(StateHasChanged);
+            });
+            Snackbar.Add($"Successfully migrated {count} LoRAs to PostgreSQL!", Severity.Success);
+            _migrationStatus = $"Migration complete: {count} LoRAs synced to PostgreSQL.";
+        } catch (Exception ex) {
+            _migrationStatus = $"Migration failed: {ex.Message}";
+            Snackbar.Add($"Migration error: {ex.Message}", Severity.Error);
+        } finally {
+            _isMigrating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task MigratePgToSqliteAsync() {
+        _isMigrating = true;
+        _migrationStatus = "Starting PostgreSQL to SQLite import...";
+        _migrationProgress = 0.05;
+        StateHasChanged();
+
+        try {
+            var config = GetPgConfig();
+            int count = await DatabaseService.MigratePostgreSqlToSqliteAsync(config, (status, progress) => {
+                _migrationStatus = status;
+                _migrationProgress = progress;
+                InvokeAsync(StateHasChanged);
+            });
+            Snackbar.Add($"Successfully imported {count} LoRAs into SQLite!", Severity.Success);
+            _migrationStatus = $"Migration complete: {count} LoRAs imported into SQLite.";
+        } catch (Exception ex) {
+            _migrationStatus = $"Migration failed: {ex.Message}";
+            Snackbar.Add($"Import error: {ex.Message}", Severity.Error);
+        } finally {
+            _isMigrating = false;
+            StateHasChanged();
         }
     }
 }
