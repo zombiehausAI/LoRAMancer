@@ -1422,6 +1422,25 @@ public sealed class LoraDatabaseService : IDisposable {
                 CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
                 CREATE INDEX IF NOT EXISTS idx_loras_cat ON Loras(Category);
                 CREATE INDEX IF NOT EXISTS idx_loras_composite ON Loras(LibraryId, DirectoryPath, IsFavorite, BaseModel);
+
+                CREATE TABLE IF NOT EXISTS Collections (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    Description TEXT,
+                    Color TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_collections_name ON Collections(Name);
+
+                CREATE TABLE IF NOT EXISTS CollectionItems (
+                    CollectionId TEXT NOT NULL,
+                    FilePath TEXT NOT NULL,
+                    AddedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (CollectionId, FilePath)
+                );
+                CREATE INDEX IF NOT EXISTS idx_collection_items_path ON CollectionItems(FilePath);
+                CREATE INDEX IF NOT EXISTS idx_collection_items_col ON CollectionItems(CollectionId);
             ";
 
             using var cmd = conn.CreateCommand();
@@ -1501,6 +1520,44 @@ public sealed class LoraDatabaseService : IDisposable {
             libCmd.Parameters.AddWithValue("@CreatedAtUtc", lib.CreatedAtUtc.ToString("O"));
             libCmd.Parameters.AddWithValue("@UpdatedAtUtc", lib.UpdatedAtUtc.ToString("O"));
             await libCmd.ExecuteNonQueryAsync();
+        }
+
+        // Migrate Collections
+        var collections = await GetCollectionsAsync();
+        onProgress?.Invoke($"Migrating {collections.Count} collections...", 0.28);
+        foreach (var col in collections) {
+            using var colCmd = pgConn.CreateCommand();
+            colCmd.CommandText = @"
+                INSERT INTO Collections (Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc)
+                VALUES (@Id, @Name, @Description, @Color, @CreatedAtUtc, @UpdatedAtUtc)
+                ON CONFLICT (Id) DO UPDATE SET
+                    Name = EXCLUDED.Name,
+                    Description = EXCLUDED.Description,
+                    Color = EXCLUDED.Color,
+                    UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+            ";
+            colCmd.Parameters.AddWithValue("@Id", col.Id);
+            colCmd.Parameters.AddWithValue("@Name", col.Name);
+            colCmd.Parameters.AddWithValue("@Description", (object?)col.Description ?? DBNull.Value);
+            colCmd.Parameters.AddWithValue("@Color", (object?)col.Color ?? DBNull.Value);
+            colCmd.Parameters.AddWithValue("@CreatedAtUtc", col.CreatedAtUtc.ToString("O"));
+            colCmd.Parameters.AddWithValue("@UpdatedAtUtc", col.UpdatedAtUtc.ToString("O"));
+            await colCmd.ExecuteNonQueryAsync();
+
+            var colLoras = await GetCollectionLorasAsync(col.Id);
+            foreach (var item in colLoras) {
+                if (string.IsNullOrWhiteSpace(item.FilePath)) continue;
+                using var itemCmd = pgConn.CreateCommand();
+                itemCmd.CommandText = @"
+                    INSERT INTO CollectionItems (CollectionId, FilePath, AddedAtUtc)
+                    VALUES (@CollectionId, @FilePath, @AddedAtUtc)
+                    ON CONFLICT (CollectionId, FilePath) DO NOTHING;
+                ";
+                itemCmd.Parameters.AddWithValue("@CollectionId", col.Id);
+                itemCmd.Parameters.AddWithValue("@FilePath", item.FilePath);
+                itemCmd.Parameters.AddWithValue("@AddedAtUtc", DateTime.UtcNow.ToString("O"));
+                await itemCmd.ExecuteNonQueryAsync();
+            }
         }
 
         // Migrate Loras in batches
@@ -1629,6 +1686,36 @@ public sealed class LoraDatabaseService : IDisposable {
         }
         foreach (var l in pgLibraries) {
             await UpsertLibraryAsync(l);
+        }
+
+        onProgress?.Invoke("Reading collections from PostgreSQL...", 0.30);
+        var pgCollections = new List<LoraCollection>();
+        using (var colCmd = pgConn.CreateCommand()) {
+            colCmd.CommandText = "SELECT Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc FROM Collections;";
+            using var reader = await colCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                pgCollections.Add(new LoraCollection {
+                    Id = reader.GetString(0),
+                    Name = reader.GetString(1),
+                    Description = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    Color = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var c) ? c : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var u) ? u : DateTime.UtcNow
+                });
+            }
+        }
+        foreach (var col in pgCollections) {
+            await UpsertCollectionAsync(col);
+        }
+
+        using (var itemCmd = pgConn.CreateCommand()) {
+            itemCmd.CommandText = "SELECT CollectionId, FilePath FROM CollectionItems;";
+            using var reader = await itemCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                string colId = reader.GetString(0);
+                string path = reader.GetString(1);
+                await AddToCollectionAsync(colId, path);
+            }
         }
 
         onProgress?.Invoke("Reading LoRAs from PostgreSQL...", 0.35);
