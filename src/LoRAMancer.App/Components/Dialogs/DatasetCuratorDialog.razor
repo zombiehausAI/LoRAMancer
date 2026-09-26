@@ -7,7 +7,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 
-<MudDialog>
+<MudDialog Style="max-height: 92vh; display: flex; flex-direction: column;">
     <TitleContent>
         <div class="d-flex align-center gap-2">
             <MudIcon Icon="@Icons.Material.Filled.Collections" Color="Color.Tertiary" />
@@ -20,7 +20,7 @@
         </div>
     </TitleContent>
     <DialogContent>
-        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+        <div class="d-flex flex-column gap-3" style="max-height: 80vh; overflow-y: auto; overflow-x: hidden; padding-right: 4px;">
             <!-- Folder Selection Card -->
             <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
                 <div class="d-flex align-center gap-2">
@@ -84,7 +84,7 @@
                             </MudText>
                         </div>
 
-                        <MudTable Items="@FilteredTags" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true">
+                        <MudTable Items="@FilteredTags" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true" Height="420px" FixedHeader="true">
                             <HeaderContent>
                                 <MudTh>Tag</MudTh>
                                 <MudTh Style="width: 100px;">Count</MudTh>
@@ -113,6 +113,9 @@
                                     </MudTooltip>
                                 </MudTd>
                             </RowTemplate>
+                            <PagerContent>
+                                <MudTablePager PageSizeOptions="new int[] { 15, 30, 50, 100 }" />
+                            </PagerContent>
                         </MudTable>
                     </MudTabPanel>
 
@@ -302,13 +305,27 @@
                                     </MudText>
                                 </div>
                             } else {
-                                <MudTable Items="_datasetAudit.HighRiskTokens" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true">
+                                <div class="d-flex align-center justify-space-between gap-3 mb-2 flex-wrap">
+                                    <MudTextField @bind-Value="_radarFilter" Placeholder="Filter colliding tags, archetypes, or concepts..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" Style="max-width: 380px;" />
+                                    <div class="d-flex align-center gap-2">
+                                        <MudSelect T="string" @bind-Value="_radarSeverityFilter" Label="Severity" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 190px;">
+                                            <MudSelectItem Value="@("all")">All Severities (@_datasetAudit.HighRiskTokens.Count)</MudSelectItem>
+                                            <MudSelectItem Value="@("critical_high")">High &amp; Critical (@_datasetAudit.HighRiskTokens.Count(t => t.Severity is CollisionSeverity.CriticalBleed or CollisionSeverity.HighRisk))</MudSelectItem>
+                                            <MudSelectItem Value="@("moderate")">Moderate (@_datasetAudit.HighRiskTokens.Count(t => t.Severity == CollisionSeverity.ModerateRisk))</MudSelectItem>
+                                        </MudSelect>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-2">
+                                            Showing @FilteredAuditTokens.Count of @_datasetAudit.HighRiskTokens.Count
+                                        </MudText>
+                                    </div>
+                                </div>
+
+                                <MudTable Items="@FilteredAuditTokens" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true" Height="420px" FixedHeader="true">
                                     <HeaderContent>
                                         <MudTh>Colliding Tag</MudTh>
-                                        <MudTh>Severity</MudTh>
-                                        <MudTh>Risk Score</MudTh>
+                                        <MudTh Style="width: 140px;">Severity</MudTh>
+                                        <MudTh Style="width: 140px;">Risk Score</MudTh>
                                         <MudTh>Conflict Archetype</MudTh>
-                                        <MudTh Style="text-align: right;">Anti-Bleed Cleanse</MudTh>
+                                        <MudTh Style="text-align: right; width: 220px;">Anti-Bleed Cleanse</MudTh>
                                     </HeaderContent>
                                     <RowTemplate>
                                         <MudTd>
@@ -337,6 +354,9 @@
                                             }
                                         </MudTd>
                                     </RowTemplate>
+                                    <PagerContent>
+                                        <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
+                                    </PagerContent>
                                 </MudTable>
                             }
                         }
@@ -559,10 +579,37 @@
     }
 
     private string _radarTestToken = "";
+    private string _radarFilter = "";
+    private string _radarSeverityFilter = "all";
     private TokenCollisionReport? _singleTokenReport;
     private DatasetCollisionAudit? _datasetAudit;
     private bool _isAuditingDataset;
     private bool _isReplacingRadarToken;
+
+    private List<TokenCollisionReport> FilteredAuditTokens {
+        get {
+            if (_datasetAudit?.HighRiskTokens == null) {
+                return new();
+            }
+
+            var query = _datasetAudit.HighRiskTokens.AsEnumerable();
+
+            if (_radarSeverityFilter == "critical_high") {
+                query = query.Where(t => t.Severity is CollisionSeverity.CriticalBleed or CollisionSeverity.HighRisk);
+            } else if (_radarSeverityFilter == "moderate") {
+                query = query.Where(t => t.Severity == CollisionSeverity.ModerateRisk);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_radarFilter)) {
+                query = query.Where(t =>
+                    t.Token.Contains(_radarFilter, StringComparison.OrdinalIgnoreCase) ||
+                    t.Explanation.Contains(_radarFilter, StringComparison.OrdinalIgnoreCase) ||
+                    t.Category.Contains(_radarFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return query.ToList();
+        }
+    }
 
     private void AnalyzeProposedToken() {
         if (string.IsNullOrWhiteSpace(_radarTestToken)) return;
