@@ -571,68 +571,180 @@
     <!-- Appearance & Themes Tab -->
     <MudTabPanel Text="Appearance & Themes" Icon="@Icons.Material.Filled.Palette">
         <div class="px-4 pb-4">
-            <!-- Studio Highlight & Accent Color Picker Section -->
+            <!-- Studio Highlight & Accent Color Studio Section -->
             <MudCard Elevation="0" Class="pa-4 mb-4" Style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); border-radius: 8px;">
                 <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
                     <div>
                         <div class="d-flex align-center gap-2">
-                            <MudIcon Icon="@Icons.Material.Filled.Palette" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.5rem;")" />
-                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">Studio Highlight &amp; Accent Color</MudText>
+                            <MudIcon Icon="@Icons.Material.Filled.ColorLens" Style="@($"color: {_accentHex}; font-size: 1.6rem;")" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: var(--text-primary);">Custom Highlight &amp; Accent Color Studio</MudText>
                         </div>
                         <MudText Typo="Typo.caption" Color="Color.Secondary">
-                            Dynamically override the primary accent across buttons, chips, indicators, and active highlights studio-wide.
+                            Select any custom color using the visual spectrum picker, screen eyedropper, RGB sliders, or precise HEX input. Updates all buttons, tabs, and accents studio-wide in real time.
                         </MudText>
                     </div>
-                    @if (!string.IsNullOrWhiteSpace(ThemeManager.CustomPrimaryColor)) {
-                        <MudButton Variant="Variant.Outlined" 
-                                   Color="Color.Warning" 
-                                   Size="Size.Small" 
-                                   StartIcon="@Icons.Material.Filled.RestartAlt" 
-                                   OnClick="@(() => SetAccentColorAsync(null))">
-                            Reset to Theme Default (@ThemeManager.CurrentTheme.Primary)
-                        </MudButton>
-                    }
+                    <div class="d-flex align-center gap-2">
+                        @if (!string.IsNullOrWhiteSpace(ThemeManager.CustomPrimaryColor)) {
+                            <MudButton Variant="Variant.Outlined" 
+                                       Color="Color.Warning" 
+                                       Size="Size.Small" 
+                                       StartIcon="@Icons.Material.Filled.RestartAlt" 
+                                       OnClick="ResetHighlightColorAsync">
+                                Reset to Theme Default (@ThemeManager.CurrentTheme.Primary)
+                            </MudButton>
+                        }
+                    </div>
                 </div>
 
-                <MudGrid Class="align-center">
-                    <!-- Preset Swatches -->
-                    <MudItem xs="12" md="6">
-                        <MudText Typo="Typo.caption" Style="font-weight: 600; color: var(--text-secondary);" Class="mb-2 d-block">
-                            QUICK SWATCHES
-                        </MudText>
-                        <div class="d-flex flex-wrap gap-2">
-                            @foreach (var swatch in ThemeService.CuratedAccentSwatches) {
-                                bool isSelected = string.Equals(ThemeManager.EffectivePrimaryColor, swatch.Hex, StringComparison.OrdinalIgnoreCase);
-                                <MudTooltip Text="@swatch.Name">
-                                    <div @onclick="@(() => SetAccentColorAsync(swatch.Hex))"
-                                         style="@($"width: 32px; height: 32px; border-radius: 8px; background-color: {swatch.Hex}; cursor: pointer; border: {(isSelected ? "3px solid #fff" : "1px solid rgba(255,255,255,0.2)")}; box-shadow: {(isSelected ? $"0 0 10px {swatch.Hex}88" : "0 2px 4px rgba(0,0,0,0.3)")}; transition: transform 0.15s ease;")"
-                                         class="d-flex align-center justify-center">
-                                        @if (isSelected) {
-                                            <MudIcon Icon="@Icons.Material.Filled.Check" Style="color: #fff; font-size: 1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));" />
-                                        }
+                <MudGrid>
+                    <!-- Left Column: Visual Color Swatch & Native Spectrum / Eyedropper -->
+                    <MudItem xs="12" md="4">
+                        <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+                            <div>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-secondary); text-transform: uppercase;" Class="mb-2 d-block">
+                                    Visual Color Picker &amp; Eyedropper
+                                </MudText>
+
+                                <div class="d-flex align-center gap-3 mb-3">
+                                    <!-- Clickable Color Canvas Swatch (Native Spectrum & Eyedropper Trigger) -->
+                                    <div style="position: relative; width: 64px; height: 64px; border-radius: 12px; overflow: hidden; border: 2px solid #fff; box-shadow: 0 0 16px @(_accentHex)66; cursor: pointer;">
+                                        <input type="color" 
+                                               value="@_accentHex" 
+                                               @onchange="OnNativeColorPickedAsync"
+                                               style="position: absolute; top: -10px; left: -10px; width: 84px; height: 84px; opacity: 0; cursor: pointer;" 
+                                               title="Click to open full color spectrum &amp; eyedropper" />
+                                        <div style="width: 100%; height: 100%; background-color: @_accentHex; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                                            <MudIcon Icon="@Icons.Material.Filled.Colorize" Style="color: #fff; font-size: 1.5rem; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));" />
+                                        </div>
                                     </div>
-                                </MudTooltip>
-                            }
+
+                                    <div>
+                                        <MudText Typo="Typo.body2" Style="font-weight: 700; color: var(--text-primary);">
+                                            Click Swatch to Open Picker
+                                        </MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-1">
+                                            Full spectrum canvas, hue bar, and screen eyedropper.
+                                        </MudText>
+                                        <code style="@($"font-size: 0.95rem; font-weight: 800; color: {_accentHex}; background-color: rgba(0,0,0,0.4); padding: 3px 8px; border-radius: 4px; border: 1px solid {_accentHex}44;")">
+                                            @_accentHex
+                                        </code>
+                                    </div>
+                                </div>
+
+                                <MudTextField Value="@_accentHex" 
+                                              ValueChanged="@((string val) => OnHexInputChangedAsync(val))" 
+                                              Label="Custom HEX Code" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Placeholder="#RRGGBB" 
+                                              Adornment="Adornment.Start" 
+                                              AdornmentIcon="@Icons.Material.Filled.Tag"
+                                              Class="mb-2" />
+                            </div>
+
+                            <!-- Quick Swatches -->
+                            <div class="mt-2">
+                                <MudText Typo="Typo.caption" Style="font-weight: 600; color: var(--text-secondary);" Class="mb-1 d-block">
+                                    Popular Studio Swatches
+                                </MudText>
+                                <div class="d-flex flex-wrap gap-2">
+                                    @foreach (var swatch in ThemeService.CuratedAccentSwatches) {
+                                        bool isSelected = string.Equals(_accentHex, swatch.Hex, StringComparison.OrdinalIgnoreCase);
+                                        <MudTooltip Text="@swatch.Name">
+                                            <div @onclick="@(() => ApplySwatchAsync(swatch.Hex))"
+                                                 style="@($"width: 26px; height: 26px; border-radius: 6px; background-color: {swatch.Hex}; cursor: pointer; border: {(isSelected ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)")}; box-shadow: {(isSelected ? $"0 0 8px {swatch.Hex}aa" : "none")};")"
+                                                 class="d-flex align-center justify-center">
+                                                @if (isSelected) {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Check" Style="color: #fff; font-size: 0.85rem;" />
+                                                }
+                                            </div>
+                                        </MudTooltip>
+                                    }
+                                </div>
+                            </div>
                         </div>
                     </MudItem>
 
-                    <!-- Custom Color Picker -->
-                    <MudItem xs="12" md="6">
-                        <div class="d-flex align-center gap-3">
-                            <MudColorPicker Label="Custom Highlight Color"
-                                            Value="@(new MudBlazor.Utilities.MudColor(ThemeManager.EffectivePrimaryColor))"
-                                            ValueChanged="@(c => SetAccentColorAsync(c.Value))"
-                                            ColorPickerMode="ColorPickerMode.HEX"
-                                            ShowAlpha="false"
-                                            ShowInputs="true"
-                                            Margin="Margin.Dense"
-                                            Variant="Variant.Outlined"
-                                            Style="max-width: 280px;" />
-                            <div class="d-flex flex-column">
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">Active HEX</MudText>
-                                <code style="@($"font-size: 0.9rem; font-weight: 700; color: {ThemeManager.EffectivePrimaryColor}; background-color: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px;")">
-                                    @ThemeManager.EffectivePrimaryColor
-                                </code>
+                    <!-- Middle Column: RGB Precision Sliders -->
+                    <MudItem xs="12" md="4">
+                        <div class="pa-3 h-100" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-secondary); text-transform: uppercase;" Class="mb-3 d-block">
+                                RGB Color Channels
+                            </MudText>
+
+                            <!-- Red Channel -->
+                            <div class="mb-3">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <MudText Typo="Typo.caption" Style="font-weight: 600; color: #f87171;">RED</MudText>
+                                    <MudText Typo="Typo.caption" Style="font-weight: 700; color: #f87171;">@_accentR</MudText>
+                                </div>
+                                <input type="range" min="0" max="255" value="@_accentR" 
+                                       @onchange="@((ChangeEventArgs e) => OnRgbSliderChangedAsync("R", e.Value))"
+                                       style="width: 100%; accent-color: #f87171; cursor: pointer;" />
+                            </div>
+
+                            <!-- Green Channel -->
+                            <div class="mb-3">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <MudText Typo="Typo.caption" Style="font-weight: 600; color: #4ade80;">GREEN</MudText>
+                                    <MudText Typo="Typo.caption" Style="font-weight: 700; color: #4ade80;">@_accentG</MudText>
+                                </div>
+                                <input type="range" min="0" max="255" value="@_accentG" 
+                                       @onchange="@((ChangeEventArgs e) => OnRgbSliderChangedAsync("G", e.Value))"
+                                       style="width: 100%; accent-color: #4ade80; cursor: pointer;" />
+                            </div>
+
+                            <!-- Blue Channel -->
+                            <div class="mb-2">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <MudText Typo="Typo.caption" Style="font-weight: 600; color: #60a5fa;">BLUE</MudText>
+                                    <MudText Typo="Typo.caption" Style="font-weight: 700; color: #60a5fa;">@_accentB</MudText>
+                                </div>
+                                <input type="range" min="0" max="255" value="@_accentB" 
+                                       @onchange="@((ChangeEventArgs e) => OnRgbSliderChangedAsync("B", e.Value))"
+                                       style="width: 100%; accent-color: #60a5fa; cursor: pointer;" />
+                            </div>
+
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem;">
+                                Fine-tune any of the 16.7 million 24-bit TrueColor hues with instant feedback.
+                            </MudText>
+                        </div>
+                    </MudItem>
+
+                    <!-- Right Column: Live Studio Preview -->
+                    <MudItem xs="12" md="4">
+                        <div class="pa-3 h-100 d-flex flex-column justify-space-between" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 8px;">
+                            <div>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-secondary); text-transform: uppercase;" Class="mb-3 d-block">
+                                    Live Studio Element Preview
+                                </MudText>
+
+                                <div class="d-flex flex-column gap-2 mb-3">
+                                    <button type="button" 
+                                            style="@($"background-color: {_accentHex}; color: #ffffff; border: none; border-radius: 6px; padding: 6px 14px; font-weight: 600; font-size: 0.85rem; box-shadow: 0 2px 8px {_accentHex}66; cursor: default;")">
+                                        Primary Action Button
+                                    </button>
+
+                                    <div class="d-flex align-center gap-2">
+                                        <span style="@($"display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; background-color: {_accentHex}25; color: {_accentHex}; border: 1px solid {_accentHex};")">
+                                            Active Filter Badge
+                                        </span>
+                                        <span style="@($"display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; color: #fff; background-color: {_accentHex};")">
+                                            Selected
+                                        </span>
+                                    </div>
+
+                                    <div style="@($"padding: 8px; border-radius: 6px; background-color: rgba(0,0,0,0.2); border-left: 3px solid {_accentHex};")">
+                                        <span style="@($"font-size: 0.75rem; color: {_accentHex}; font-weight: 600;")">Active Tab Indicator Preview</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-center justify-space-between gap-2 pt-2" style="border-top: 1px solid var(--border-dark);">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Applied globally across all views
+                                </MudText>
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="@($"color: {_accentHex}; font-size: 1.2rem;")" />
                             </div>
                         </div>
                     </MudItem>
@@ -1162,11 +1274,14 @@
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
         }
 
+        SyncRgbFromHex(ThemeManager.EffectivePrimaryColor);
+        ThemeManager.OnThemeChanged += OnThemeChangedHandler;
         LoadTokensFromService();
         TokenManager.OnTokensChanged += OnTokensChangedHandler;
     }
 
     public void Dispose() {
+        ThemeManager.OnThemeChanged -= OnThemeChangedHandler;
         TokenManager.OnTokensChanged -= OnTokensChangedHandler;
     }
 
@@ -1334,6 +1449,80 @@
         ThemeManager.SetTheme(themeId);
         _settings.ThemePreset = themeId;
         Snackbar.Add($"Theme switched to '{ThemeManager.CurrentTheme.Name}'!", Severity.Success);
+    }
+
+    // Custom Accent Color Studio State
+    private int _accentR = 203;
+    private int _accentG = 166;
+    private int _accentB = 247;
+    private string _accentHex = "#cba6f7";
+
+    private void SyncRgbFromHex(string? hex) {
+        if (string.IsNullOrWhiteSpace(hex)) {
+            hex = ThemeManager.EffectivePrimaryColor;
+        }
+        string clean = hex.Trim().TrimStart('#');
+        if (clean.Length == 6 &&
+            int.TryParse(clean.Substring(0, 2), System.Globalization.NumberStyles.HexNumber, null, out int r) &&
+            int.TryParse(clean.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, null, out int g) &&
+            int.TryParse(clean.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, null, out int b)) {
+            _accentR = r;
+            _accentG = g;
+            _accentB = b;
+            _accentHex = $"#{clean.ToUpperInvariant()}";
+        }
+    }
+
+    private async Task OnRgbSliderChangedAsync(string channel, object? val) {
+        if (val != null && int.TryParse(val.ToString(), out int intVal)) {
+            intVal = Math.Clamp(intVal, 0, 255);
+            if (channel == "R") {
+                _accentR = intVal;
+            } else if (channel == "G") {
+                _accentG = intVal;
+            } else if (channel == "B") {
+                _accentB = intVal;
+            }
+
+            _accentHex = $"#{_accentR:X2}{_accentG:X2}{_accentB:X2}";
+            await SetAccentColorAsync(_accentHex);
+        }
+    }
+
+    private async Task OnNativeColorPickedAsync(ChangeEventArgs e) {
+        string? val = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(val)) {
+            SyncRgbFromHex(val);
+            await SetAccentColorAsync(_accentHex);
+        }
+    }
+
+    private async Task OnHexInputChangedAsync(string val) {
+        _accentHex = val;
+        if (!val.StartsWith("#")) {
+            val = "#" + val;
+        }
+        if (val.Length == 7) {
+            SyncRgbFromHex(val);
+            await SetAccentColorAsync(_accentHex);
+        }
+    }
+
+    private async Task ApplySwatchAsync(string hex) {
+        SyncRgbFromHex(hex);
+        await SetAccentColorAsync(hex);
+    }
+
+    private async Task ResetHighlightColorAsync() {
+        await SetAccentColorAsync(null);
+        SyncRgbFromHex(ThemeManager.CurrentTheme.Primary);
+    }
+
+    private void OnThemeChangedHandler() {
+        _ = InvokeAsync(() => {
+            SyncRgbFromHex(ThemeManager.EffectivePrimaryColor);
+            StateHasChanged();
+        });
     }
 
     private async Task SetAccentColorAsync(string? hex) {
