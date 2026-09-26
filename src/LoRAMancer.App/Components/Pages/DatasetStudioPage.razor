@@ -9,6 +9,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
+@inject ThemeService ThemeManager
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
@@ -99,49 +100,181 @@
         <!-- Tab 1: Image & Caption Gallery -->
         <MudTabPanel Text="Image Gallery &amp; Captions" Icon="@Icons.Material.Filled.GridView">
             <div class="d-flex align-center justify-space-between mb-3 mt-1 flex-wrap gap-2">
-                <div class="d-flex align-center gap-2">
-                    <MudSelect T="string" @bind-Value="_galleryFilter" Label="Filter View" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 220px;">
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <MudSelect T="string" @bind-Value="_galleryFilter" Label="Filter View" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 200px;">
                         <MudSelectItem Value="@("all")">All Images (@_report.TotalImages)</MudSelectItem>
                         <MudSelectItem Value="@("missing")">Missing Captions (@_report.MissingCaptions)</MudSelectItem>
                         <MudSelectItem Value="@("corrupt")">Corrupt / Errors (@_report.CorruptCount)</MudSelectItem>
                     </MudSelect>
+
+                    @if (_isGridView) {
+                        <div class="d-flex align-center gap-1 px-2 py-1" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem;">Card Size:</MudText>
+                            <MudChip T="int" Size="Size.Small" Variant="@(_cardMinWidth == 220 ? Variant.Filled : Variant.Text)" Color="Color.Primary" OnClick="@(() => _cardMinWidth = 220)">S</MudChip>
+                            <MudChip T="int" Size="Size.Small" Variant="@(_cardMinWidth == 270 ? Variant.Filled : Variant.Text)" Color="Color.Primary" OnClick="@(() => _cardMinWidth = 270)">M</MudChip>
+                            <MudChip T="int" Size="Size.Small" Variant="@(_cardMinWidth == 350 ? Variant.Filled : Variant.Text)" Color="Color.Primary" OnClick="@(() => _cardMinWidth = 350)">L</MudChip>
+                        </div>
+                    }
                 </div>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                    Showing @FilteredGalleryItems.Count items
-                </MudText>
+
+                <div class="d-flex align-center gap-3">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Showing @FilteredGalleryItems.Count items
+                    </MudText>
+
+                    <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                        <MudTooltip Text="Grid View (Cards)">
+                            <MudIconButton Icon="@Icons.Material.Filled.GridView" 
+                                           Color="@(_isGridView ? Color.Primary : Color.Default)" 
+                                           OnClick="@(() => _isGridView = true)" 
+                                           aria-label="Grid View (Cards)" />
+                        </MudTooltip>
+                        <MudTooltip Text="List View (Rows)">
+                            <MudIconButton Icon="@Icons.Material.Filled.ViewList" 
+                                           Color="@(!_isGridView ? Color.Primary : Color.Default)" 
+                                           OnClick="@(() => _isGridView = false)" 
+                                           aria-label="List View (Rows)" />
+                        </MudTooltip>
+                    </MudButtonGroup>
+                </div>
             </div>
 
-            <div class="d-flex flex-column gap-3" style="max-height: 560px; overflow-y: auto; padding-right: 4px;">
-                @foreach (var item in FilteredGalleryItems) {
-                    <MudCard Elevation="0" Class="pa-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
-                        <div class="d-flex gap-3 align-start">
-                            <div style="width: 84px; height: 84px; flex-shrink: 0; background-color: #181825; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #313244;">
+            @if (_isGridView) {
+                <!-- Dynamically Resizing CSS Grid of Cards -->
+                <div style="@($"display: grid; grid-template-columns: repeat(auto-fill, minmax({_cardMinWidth}px, 1fr)); gap: 14px; max-height: 640px; overflow-y: auto; padding-right: 6px;")">
+                    @foreach (var item in FilteredGalleryItems) {
+                        <div class="dataset-image-card d-flex flex-column justify-space-between h-100 pa-3"
+                             style="background-color: #11111b; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
+                            
+                            <!-- Thumbnail & Overlay Badges -->
+                            <div class="cursor-pointer mb-2 position-relative" 
+                                 @onclick="@(() => OpenCaptionEditor(item))"
+                                 style="width: 100%; height: 180px; border-radius: 8px; overflow: hidden; background-color: #181825; border: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: center;">
                                 @if (item.IsCorrupt) {
-                                    <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" />
+                                    <div class="text-center pa-3">
+                                        <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" Size="Size.Large" />
+                                        <MudText Typo="Typo.caption" Color="Color.Error" Class="d-block mt-1">Corrupt Image</MudText>
+                                    </div>
                                 } else {
-                                    <img src="@GetImageSrc(item.ImagePath)" alt="thumb" style="width: 100%; height: 100%; object-fit: cover;" />
+                                    <img src="@GetImageSrc(item.ImagePath)" 
+                                         alt="@Path.GetFileName(item.ImagePath)" 
+                                         style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.25s ease;" 
+                                         class="dataset-card-thumb" />
                                 }
+
+                                <div class="card-hover-overlay position-absolute d-flex align-center justify-center gap-1"
+                                     style="inset: 0; background: rgba(0,0,0,0.55); opacity: 0; transition: opacity 0.2s ease;">
+                                    <MudIcon Icon="@Icons.Material.Filled.ZoomIn" Style="color: #fff; font-size: 1.5rem;" />
+                                    <span style="color: #fff; font-weight: 700; font-size: 0.8rem;">Inspect &amp; Edit</span>
+                                </div>
+
+                                <div class="position-absolute d-flex align-center gap-1 px-2 py-1"
+                                     style="bottom: 6px; left: 6px; right: 6px; justify-content: space-between; pointer-events: none;">
+                                    <span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #89b4fa; backdrop-filter: blur(4px);">
+                                        @item.FormattedDimensions
+                                    </span>
+                                    <span style="font-size: 0.68rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.75); color: #cdd6f4; backdrop-filter: blur(4px);">
+                                        @item.BucketName
+                                    </span>
+                                </div>
                             </div>
 
-                            <div class="d-flex flex-column flex-grow-1">
-                                <div class="d-flex align-center justify-space-between mb-2">
-                                    <span style="font-weight: 600; font-size: 0.9rem; color: #cdd6f4;">@Path.GetFileName(item.ImagePath)</span>
-                                    <div class="d-flex gap-1 align-center">
-                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@item.FormattedDimensions</MudChip>
-                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">@item.BucketName</MudChip>
-                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">@item.FormattedSize</MudChip>
-                                    </div>
-                                </div>
+                            <!-- Header: Filename & Size -->
+                            <div class="d-flex align-center justify-space-between mb-2">
+                                <span class="text-truncate" style="font-weight: 700; font-size: 0.85rem; color: #cdd6f4; max-width: 160px;" title="@Path.GetFileName(item.ImagePath)">
+                                    @Path.GetFileName(item.ImagePath)
+                                </span>
+                                <span style="font-size: 0.7rem; color: #a6adc8;">
+                                    @item.FormattedSize
+                                </span>
+                            </div>
 
-                                <div class="d-flex gap-2 align-center">
-                                    <MudTextField @bind-Value="item.CaptionText" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Enter tags separated by commas..." FullWidth="true" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Primary" OnClick="@(() => SaveSingleCaptionAsync(item))" />
+                            <!-- Scrollable Multi-line Caption Text Area -->
+                            <div class="flex-grow-1 mb-2">
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <span style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">
+                                        Caption (@(string.IsNullOrWhiteSpace(item.CaptionText) ? "Empty" : $"{item.CaptionText.Split(',', StringSplitOptions.RemoveEmptyEntries).Length} tags"))
+                                    </span>
+                                    @if (string.IsNullOrWhiteSpace(item.CaptionText)) {
+                                        <span style="font-size: 0.65rem; color: #f9e2af; font-weight: 600; background: rgba(249,226,175,0.15); padding: 1px 6px; border-radius: 4px;">
+                                            Missing .txt
+                                        </span>
+                                    }
                                 </div>
+                                
+                                <textarea @bind="item.CaptionText"
+                                          @bind:event="oninput"
+                                          placeholder="Enter comma-separated caption tags..."
+                                          style="width: 100%; height: 75px; max-height: 120px; overflow-y: auto; background-color: rgba(24, 24, 37, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: #cdd6f4; font-size: 0.8rem; font-family: inherit; padding: 6px 8px; resize: vertical; outline: none; line-height: 1.35;"
+                                          class="custom-caption-textarea"></textarea>
+                            </div>
+
+                            <!-- Card Footer Actions -->
+                            <div class="d-flex align-center justify-space-between gap-1 pt-1" style="border-top: 1px solid rgba(255,255,255,0.06);">
+                                <MudButton Variant="Variant.Text" 
+                                           Size="Size.Small" 
+                                           StartIcon="@Icons.Material.Filled.OpenInFull" 
+                                           OnClick="@(() => OpenCaptionEditor(item))"
+                                           Style="font-size: 0.72rem; text-transform: none; color: #89b4fa; padding: 2px 6px;">
+                                    Inspect &amp; Edit
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" 
+                                           Size="Size.Small" 
+                                           Color="Color.Primary" 
+                                           StartIcon="@Icons.Material.Filled.Save" 
+                                           OnClick="@(() => SaveSingleCaptionAsync(item))"
+                                           Style="font-size: 0.72rem; padding: 2px 10px; border-radius: 6px;">
+                                    Save
+                                </MudButton>
                             </div>
                         </div>
-                    </MudCard>
-                }
-            </div>
+                    }
+                </div>
+            } else {
+                <!-- Compact List View with Scrollable Multi-line Textboxes -->
+                <div class="d-flex flex-column gap-3" style="max-height: 640px; overflow-y: auto; padding-right: 6px;">
+                    @foreach (var item in FilteredGalleryItems) {
+                        <MudCard Elevation="0" Class="pa-3" Style="background-color: #11111b; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
+                            <div class="d-flex gap-3 align-start">
+                                <div class="cursor-pointer" 
+                                     @onclick="@(() => OpenCaptionEditor(item))"
+                                     style="width: 100px; height: 100px; flex-shrink: 0; background-color: #181825; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); position: relative;">
+                                    @if (item.IsCorrupt) {
+                                        <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" />
+                                    } else {
+                                        <img src="@GetImageSrc(item.ImagePath)" alt="thumb" style="width: 100%; height: 100%; object-fit: cover;" />
+                                    }
+                                </div>
+
+                                <div class="d-flex flex-column flex-grow-1">
+                                    <div class="d-flex align-center justify-space-between mb-2 flex-wrap gap-1">
+                                        <span style="font-weight: 700; font-size: 0.9rem; color: #cdd6f4;">@Path.GetFileName(item.ImagePath)</span>
+                                        <div class="d-flex gap-1 align-center">
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@item.FormattedDimensions</MudChip>
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">@item.BucketName</MudChip>
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">@item.FormattedSize</MudChip>
+                                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull" OnClick="@(() => OpenCaptionEditor(item))" Style="font-size: 0.75rem; text-transform: none; color: #89b4fa;">
+                                                Full View
+                                            </MudButton>
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex gap-2 align-start">
+                                        <textarea @bind="item.CaptionText"
+                                                  @bind:event="oninput"
+                                                  placeholder="Enter tags separated by commas..."
+                                                  style="width: 100%; height: 60px; max-height: 100px; overflow-y: auto; background-color: rgba(24, 24, 37, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: #cdd6f4; font-size: 0.85rem; font-family: inherit; padding: 6px 10px; resize: vertical; outline: none; line-height: 1.4;"
+                                                  class="custom-caption-textarea"></textarea>
+                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => SaveSingleCaptionAsync(item))" Style="height: 60px; min-width: 80px; border-radius: 6px;">
+                                            Save
+                                        </MudButton>
+                                    </div>
+                                </div>
+                            </div>
+                        </MudCard>
+                    }
+                </div>
+            }
         </MudTabPanel>
 
         <!-- Tab 2: Tag Frequencies -->
@@ -399,6 +532,202 @@
     </MudCard>
 }
 
+<!-- Interactive Full-Resolution Image & Caption Editor Modal -->
+@if (_editingItem != null) {
+    <div class="caption-editor-modal-backdrop" 
+         style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 1.5rem;"
+         @onclick="CloseCaptionEditor">
+        <div class="caption-editor-modal-content" 
+             style="background: linear-gradient(180deg, #181825 0%, #11111b 100%); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 16px; width: 100%; max-width: 1120px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);"
+             @onclick:stopPropagation="true">
+            
+            <!-- Modal Header -->
+            <div class="d-flex align-center justify-space-between px-4 py-3" style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); background-color: rgba(24, 24, 37, 0.9);">
+                <div class="d-flex align-center gap-3">
+                    <div style="@($"width: 36px; height: 36px; border-radius: 8px; background: {ThemeManager.EffectivePrimaryColor}25; border: 1px solid {ThemeManager.EffectivePrimaryColor}55; display: flex; align-items: center; justify-content: center;")">
+                        <MudIcon Icon="@Icons.Material.Filled.PhotoLibrary" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.25rem;")" />
+                    </div>
+                    <div>
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #fff;">
+                                @Path.GetFileName(_editingItem.ImagePath)
+                            </MudText>
+                            <span style="font-size: 0.75rem; color: #a6adc8; background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 10px;">
+                                Item @(_editingIndex + 1) of @FilteredGalleryItems.Count
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation & Close Controls -->
+                <div class="d-flex align-center gap-2">
+                    <MudButton Variant="Variant.Outlined" 
+                               Size="Size.Small" 
+                               StartIcon="@Icons.Material.Filled.ArrowBack" 
+                               Disabled="@(_editingIndex <= 0)"
+                               OnClick="NavigatePreviousImage"
+                               Style="border-radius: 8px;">
+                        Previous
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" 
+                               Size="Size.Small" 
+                               EndIcon="@Icons.Material.Filled.ArrowForward" 
+                               Disabled="@(_editingIndex >= FilteredGalleryItems.Count - 1)"
+                               OnClick="NavigateNextImage"
+                               Style="border-radius: 8px;">
+                        Next
+                    </MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseCaptionEditor" />
+                </div>
+            </div>
+
+            <!-- Modal Body (Two-Column: High-Res Image Left, Scrollable Editor Right) -->
+            <div class="d-flex flex-grow-1 overflow-hidden" style="min-height: 480px;">
+                <!-- Left: Full Image Viewer -->
+                <div class="d-flex flex-column align-center justify-center pa-4" 
+                     style="width: 50%; min-width: 320px; background-color: #0c0c14; border-right: 1px solid rgba(255,255,255,0.08); overflow: hidden; position: relative;">
+                    <div style="max-width: 100%; max-height: 440px; display: flex; align-items: center; justify-content: center;">
+                        @if (_editingItem.IsCorrupt) {
+                            <div class="text-center pa-4">
+                                <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" Style="font-size: 4rem;" />
+                                <MudText Typo="Typo.body1" Color="Color.Error" Class="mt-2">Corrupt or Unreadable Image</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@_editingItem.ErrorMessage</MudText>
+                            </div>
+                        } else {
+                            <img src="@GetImageSrc(_editingItem.ImagePath)" 
+                                 alt="@Path.GetFileName(_editingItem.ImagePath)" 
+                                 style="max-width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);" />
+                        }
+                    </div>
+
+                    <!-- Image Specs Pill Bar -->
+                    <div class="d-flex flex-wrap gap-2 justify-center mt-3">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                            @_editingItem.FormattedDimensions
+                        </MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">
+                            @_editingItem.BucketName (@_editingItem.AspectRatioLabel)
+                        </MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary">
+                            @_editingItem.FormattedSize
+                        </MudChip>
+                    </div>
+                </div>
+
+                <!-- Right: Scrollable Caption Editor Studio -->
+                <div class="d-flex flex-column flex-grow-1 pa-4 overflow-y-auto" style="width: 50%; background-color: rgba(24, 24, 37, 0.5);">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Primary" Size="Size.Small" />
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #fff;">
+                                Caption Text (.txt)
+                            </MudText>
+                        </div>
+                        <div class="d-flex align-center gap-2">
+                            <span style="font-size: 0.75rem; color: #a6adc8;">
+                                @GetWordCount(_editingCaptionDraft) words | @_editingCaptionDraft.Length chars
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Scrollable Multiline Textarea -->
+                    <textarea @bind="_editingCaptionDraft"
+                              @bind:event="oninput"
+                              placeholder="Write detailed natural language captions or comma-separated tags..."
+                              style="width: 100%; height: 180px; max-height: 240px; overflow-y: auto; background-color: rgba(17, 17, 27, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; color: #cdd6f4; font-size: 0.9rem; font-family: inherit; padding: 12px; resize: vertical; outline: none; line-height: 1.5; margin-bottom: 12px;"
+                              class="custom-caption-textarea"></textarea>
+
+                    <!-- Tag Breakdown Chips -->
+                    <div class="mb-3">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-secondary); text-transform: uppercase;">
+                                Parsed Tag Chips (@GetParsedTags(_editingCaptionDraft).Count)
+                            </MudText>
+                            <span style="font-size: 0.7rem; color: #6c7086;">Click tag chip ✕ to remove</span>
+                        </div>
+                        <div class="d-flex flex-wrap gap-1" style="max-height: 90px; overflow-y: auto; padding: 6px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                            @foreach (var tag in GetParsedTags(_editingCaptionDraft)) {
+                                <MudChip T="string" 
+                                         Size="Size.Small" 
+                                         Variant="Variant.Filled" 
+                                         Color="Color.Dark" 
+                                         OnClose="@(() => RemoveTagFromDraft(tag))"
+                                         Style="font-size: 0.75rem; background-color: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);">
+                                    @tag
+                                </MudChip>
+                            }
+                        </div>
+                    </div>
+
+                    <!-- Quick Prepend Action -->
+                    @if (!string.IsNullOrWhiteSpace(_batchTagInput)) {
+                        <div class="d-flex align-center gap-2 mb-3 pa-2" style="background: rgba(203, 166, 247, 0.1); border: 1px dashed rgba(203, 166, 247, 0.3); border-radius: 8px;">
+                            <span style="font-size: 0.75rem; color: #cba6f7;">Prepend Trigger: <code>@_batchTagInput</code></span>
+                            <MudButton Variant="Variant.Text" Color="Color.Tertiary" Size="Size.Small" OnClick="PrependBatchTagToDraft" Style="font-size: 0.72rem; padding: 1px 6px;">
+                                Prepend
+                            </MudButton>
+                        </div>
+                    }
+
+                    <!-- Footer Action Buttons -->
+                    <div class="d-flex align-center justify-space-between gap-2 mt-auto pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
+                        <MudButton Variant="Variant.Outlined" 
+                                   Color="Color.Default" 
+                                   Size="Size.Small" 
+                                   StartIcon="@Icons.Material.Filled.Undo" 
+                                   OnClick="RevertCaptionDraft"
+                                   Style="border-radius: 8px;">
+                            Revert
+                        </MudButton>
+                        
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" 
+                                       Color="Color.Primary" 
+                                       Size="Size.Small" 
+                                       StartIcon="@Icons.Material.Filled.Save" 
+                                       OnClick="SaveCaptionDraftAsync"
+                                       Style="border-radius: 8px;">
+                                Save
+                            </MudButton>
+                            <MudButton Variant="Variant.Filled" 
+                                       Color="Color.Success" 
+                                       Size="Size.Small" 
+                                       EndIcon="@Icons.Material.Filled.ArrowForward" 
+                                       OnClick="SaveAndAdvanceNextAsync"
+                                       Style="border-radius: 8px; font-weight: 700;">
+                                Save &amp; Next
+                            </MudButton>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .dataset-image-card:hover {
+        border-color: rgba(255, 255, 255, 0.25) !important;
+        transform: translateY(-2px);
+    }
+    .dataset-image-card:hover .card-hover-overlay {
+        opacity: 1 !important;
+    }
+    .dataset-image-card:hover .dataset-card-thumb {
+        transform: scale(1.04);
+    }
+    .custom-caption-textarea::-webkit-scrollbar {
+        width: 6px;
+    }
+    .custom-caption-textarea::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 3px;
+    }
+    .custom-caption-textarea::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.35);
+    }
+</style>
+
 @code {
     private string _datasetFolder = "";
     private bool _isLoading;
@@ -412,6 +741,94 @@
     private bool _matchCase;
     private bool _useRegex;
     private string _galleryFilter = "all";
+
+    // Dynamic Card Grid & Full Caption Editor State
+    private bool _isGridView = true;
+    private int _cardMinWidth = 270;
+    private DatasetCuratorItem? _editingItem;
+    private int _editingIndex = -1;
+    private string _editingCaptionDraft = "";
+
+    private void OpenCaptionEditor(DatasetCuratorItem item) {
+        _editingItem = item;
+        _editingIndex = FilteredGalleryItems.IndexOf(item);
+        _editingCaptionDraft = item.CaptionText ?? "";
+    }
+
+    private void CloseCaptionEditor() {
+        _editingItem = null;
+        _editingIndex = -1;
+        _editingCaptionDraft = "";
+    }
+
+    private void NavigatePreviousImage() {
+        if (_editingIndex > 0 && _editingIndex - 1 < FilteredGalleryItems.Count) {
+            _editingIndex--;
+            _editingItem = FilteredGalleryItems[_editingIndex];
+            _editingCaptionDraft = _editingItem.CaptionText ?? "";
+        }
+    }
+
+    private void NavigateNextImage() {
+        if (_editingIndex >= 0 && _editingIndex + 1 < FilteredGalleryItems.Count) {
+            _editingIndex++;
+            _editingItem = FilteredGalleryItems[_editingIndex];
+            _editingCaptionDraft = _editingItem.CaptionText ?? "";
+        }
+    }
+
+    private void RevertCaptionDraft() {
+        if (_editingItem != null) {
+            _editingCaptionDraft = _editingItem.CaptionText ?? "";
+            Snackbar.Add("Reverted to saved caption.", Severity.Info);
+        }
+    }
+
+    private async Task SaveCaptionDraftAsync() {
+        if (_editingItem != null) {
+            _editingItem.CaptionText = _editingCaptionDraft;
+            await SaveSingleCaptionAsync(_editingItem);
+        }
+    }
+
+    private async Task SaveAndAdvanceNextAsync() {
+        await SaveCaptionDraftAsync();
+        if (_editingIndex + 1 < FilteredGalleryItems.Count) {
+            NavigateNextImage();
+        } else {
+            Snackbar.Add("Reached end of dataset.", Severity.Info);
+        }
+    }
+
+    private void RemoveTagFromDraft(string tagToRemove) {
+        var tags = GetParsedTags(_editingCaptionDraft);
+        tags.RemoveAll(t => string.Equals(t, tagToRemove, StringComparison.OrdinalIgnoreCase));
+        _editingCaptionDraft = string.Join(", ", tags);
+    }
+
+    private void PrependBatchTagToDraft() {
+        if (string.IsNullOrWhiteSpace(_batchTagInput)) return;
+        string tag = _batchTagInput.Trim().TrimEnd(',');
+        var tags = GetParsedTags(_editingCaptionDraft);
+        if (!tags.Any(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))) {
+            tags.Insert(0, tag);
+            _editingCaptionDraft = string.Join(", ", tags);
+        }
+    }
+
+    private static List<string> GetParsedTags(string? caption) {
+        if (string.IsNullOrWhiteSpace(caption)) return new();
+        return caption
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim())
+            .Where(t => !string.IsNullOrEmpty(t))
+            .ToList();
+    }
+
+    private static int GetWordCount(string? text) {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        return text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+    }
 
     private readonly Dictionary<string, string> _thumbnailCache = new();
     private readonly CancellationTokenSource _cts = new();
