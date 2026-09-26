@@ -84,12 +84,12 @@ import torch # calls _rocm_init.initialize() -> import rocm_sdk -> from ._dist_i
 The Windows port queries Unix shared libraries that do not exist on Windows, raising `ModuleNotFoundError: No module named 'libhipsparselt'` or indentation syntax errors.
 
 **The Patch:**
-Appends `optional=True` library entry stubs without leading indentation to `.venv/Lib/site-packages/rocm_sdk/_dist_info.py`:
+Appends 4-argument library entry stubs without leading indentation to `.venv/Lib/site-packages/rocm_sdk/_dist_info.py`:
 ```python
 # [loramancer] windows-missing-libs
-LibraryEntry("hipsparselt", "core", "libhipsparselt.so.0", "", optional=True)
-LibraryEntry("hipdnn", "core", "libhipdnn.so.0", "", optional=True)
-LibraryEntry("rocm-openblas", "core", "librocm-openblas.so.0", "", optional=True)
+LibraryEntry("hipsparselt", "core", "libhipsparselt.so.0", "")
+LibraryEntry("hipdnn", "core", "libhipdnn.so.0", "")
+LibraryEntry("rocm-openblas", "core", "librocm-openblas.so.0", "")
 ```
 
 ---

@@ -108,7 +108,14 @@ public sealed class AmdVenvProvisioner {
 
     public async Task DetectSystemPythonAsync(AmdEnvironmentInfo info, CancellationToken cancellationToken = default) {
         string preferred = _settingsService?.Current.PreferredPythonPath ?? "python.exe";
-        string[] candidates = new[] { preferred, "python3.12", "python", "py -3.12" };
+        string[] candidates = new[] {
+            preferred,
+            Path.Combine(AiToolkitSetupService.GetDefaultVenvPath(), "Scripts", "python.exe"),
+            @"D:\AI\LoRAMancer\.venv\Scripts\python.exe",
+            "python3.12",
+            "python",
+            "py -3.12"
+        };
 
         foreach (string cmd in candidates.Distinct(StringComparer.OrdinalIgnoreCase)) {
             try {
@@ -348,12 +355,23 @@ public sealed class AmdVenvProvisioner {
 
         string content = File.ReadAllText(distInfoPath);
 
+        bool modified = false;
         // Auto-repair any previously applied malformed patch with leading indentation
         if (content.Contains("    LibraryEntry(")) {
             content = content.Replace("    LibraryEntry(", "LibraryEntry(");
-            File.WriteAllText(distInfoPath, content);
+            modified = true;
             onProgress?.Invoke("[Patch] Corrected rocm_sdk _dist_info.py indentation.");
-            return;
+        }
+
+        // Auto-repair any invalid optional=True parameter that causes TypeError on import rocm_sdk
+        if (content.Contains(", optional=True")) {
+            content = content.Replace(", optional=True", "");
+            modified = true;
+            onProgress?.Invoke("[Patch] Removed invalid optional=True parameter from rocm_sdk _dist_info.py.");
+        }
+
+        if (modified) {
+            File.WriteAllText(distInfoPath, content);
         }
 
         if (content.Contains("# [loramancer] windows-missing-libs")) {
@@ -363,13 +381,13 @@ public sealed class AmdVenvProvisioner {
 
         List<string> missing = new();
         if (!content.Contains("\"hipsparselt\"")) {
-            missing.Add("LibraryEntry(\"hipsparselt\", \"core\", \"libhipsparselt.so.0\", \"\", optional=True)");
+            missing.Add("LibraryEntry(\"hipsparselt\", \"core\", \"libhipsparselt.so.0\", \"\")");
         }
         if (!content.Contains("\"hipdnn\"")) {
-            missing.Add("LibraryEntry(\"hipdnn\", \"core\", \"libhipdnn.so.0\", \"\", optional=True)");
+            missing.Add("LibraryEntry(\"hipdnn\", \"core\", \"libhipdnn.so.0\", \"\")");
         }
         if (!content.Contains("\"rocm-openblas\"")) {
-            missing.Add("LibraryEntry(\"rocm-openblas\", \"core\", \"librocm-openblas.so.0\", \"\", optional=True)");
+            missing.Add("LibraryEntry(\"rocm-openblas\", \"core\", \"librocm-openblas.so.0\", \"\")");
         }
 
         if (missing.Count > 0) {
@@ -558,11 +576,31 @@ public sealed class AmdVenvProvisioner {
         string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
 
         if (!File.Exists(pythonExe)) {
+            string[] fallbacks = new[] {
+                _settingsService?.Current.PreferredPythonPath ?? "",
+                AiToolkitSetupService.GetDefaultVenvPath() != null ? Path.Combine(AiToolkitSetupService.GetDefaultVenvPath(), "Scripts", "python.exe") : "",
+                @"D:\AI\LoRAMancer\.venv\Scripts\python.exe",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LoRAMancer", ".venv", "Scripts", "python.exe"),
+                Path.Combine(targetDirectory, "tools", "ai-toolkit", ".venv", "Scripts", "python.exe")
+            };
+            foreach (var cand in fallbacks) {
+                if (!string.IsNullOrWhiteSpace(cand) && File.Exists(cand)) {
+                    pythonExe = cand;
+                    venvPath = Path.GetDirectoryName(Path.GetDirectoryName(cand)!)!;
+                    break;
+                }
+            }
+        }
+
+        if (!File.Exists(pythonExe)) {
             status.IsVenvCreated = false;
             return status;
         }
 
         status.IsVenvCreated = true;
+
+        // Auto-repair rocm_sdk if it's an AMD venv
+        PatchRocmSdkDistInfo(venvPath, null);
 
         await _processRunner.RunAsync(
             pythonExe,
@@ -578,19 +616,29 @@ public sealed class AmdVenvProvisioner {
             cancellationToken
         );
 
-        await _processRunner.RunAsync(
-            pythonExe,
-            "-c \"import sys;\ntry:\n import torch\n print(f'TORCH:{torch.__version__} (CUDA/HIP: {torch.cuda.is_available()})')\nexcept Exception as e:\n print('TORCH:Not Installed')\"",
-            targetDirectory,
-            null,
-            line => {
-                if (line.StartsWith("TORCH:")) {
-                    status.TorchVersion = line.Substring(6).Trim();
-                }
-            },
-            _ => { },
-            cancellationToken
-        );
+        string checkScript = Path.Combine(Path.GetTempPath(), $"loramancer_torch_check_{Guid.NewGuid():N}.py");
+        string checkCode = "import sys\ntry:\n import torch\n print(f'TORCH:{torch.__version__} (CUDA/HIP: {torch.cuda.is_available()})')\nexcept Exception as e:\n print(f'TORCH:Error: {e}')\n";
+        await File.WriteAllTextAsync(checkScript, checkCode, System.Text.Encoding.UTF8, cancellationToken);
+
+        try {
+            await _processRunner.RunAsync(
+                pythonExe,
+                $"\"{checkScript}\"",
+                targetDirectory,
+                null,
+                line => {
+                    if (line.StartsWith("TORCH:")) {
+                        status.TorchVersion = line.Substring(6).Trim();
+                    }
+                },
+                _ => { },
+                cancellationToken
+            );
+        } finally {
+            try {
+                if (File.Exists(checkScript)) File.Delete(checkScript);
+            } catch { }
+        }
 
         return status;
     }

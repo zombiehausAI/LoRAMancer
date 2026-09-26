@@ -8,10 +8,19 @@
         <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Compute Environment & Hardware Acceleration</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">Provision dedicated Python 3.12 .venv, install optimized PyTorch wheels (AMD ROCm / NVIDIA CUDA / Intel XPU), and ingest ComfyUI settings</MudText>
     </div>
-    <div>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Build" Disabled="_isProvisioning" OnClick="StartProvisioningAsync">
-            @(_isProvisioning ? "Provisioning..." : "Provision .venv")
-        </MudButton>
+    <div class="d-flex align-center gap-2">
+        @if (_packageStatus.IsVenvCreated) {
+            <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle" Style="font-weight: 600;">
+                .venv Active &amp; Ready
+            </MudChip>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" Disabled="_isProvisioning" OnClick="StartProvisioningAsync">
+                @(_isProvisioning ? "Re-provisioning..." : "Re-provision .venv")
+            </MudButton>
+        } else {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Build" Disabled="_isProvisioning" OnClick="StartProvisioningAsync">
+                @(_isProvisioning ? "Provisioning..." : "Provision .venv")
+            </MudButton>
+        }
     </div>
 </div>
 
@@ -252,10 +261,11 @@
     }
 
     private async Task StartProvisioningAsync() {
+        bool isReprovision = _packageStatus.IsVenvCreated;
         _isProvisioning = true;
         _provisioningLogs.Clear();
         HardwareVendor effectiveVendor = _selectedVendor ?? _envInfo.DetectedVendor;
-        _provisioningLogs.Add($"[LoRAMancer] Starting {effectiveVendor} virtual environment provisioning...");
+        _provisioningLogs.Add($"[LoRAMancer] Starting {effectiveVendor} virtual environment {(isReprovision ? "re-provisioning" : "provisioning")}...");
 
         try {
             string targetDir = AiToolkitSetupService.GetApplicationRoot();
@@ -265,7 +275,7 @@
                     StateHasChanged();
                 });
             }, _selectedVendor);
-            Snackbar.Add($".venv provisioned successfully for {effectiveVendor}!", Severity.Success);
+            Snackbar.Add($".venv {(isReprovision ? "re-provisioned" : "provisioned")} successfully for {effectiveVendor}!", Severity.Success);
             await RefreshPackageStatusAsync();
         } catch (Exception ex) {
             _provisioningLogs.Add($"[ERROR] {ex.Message}");

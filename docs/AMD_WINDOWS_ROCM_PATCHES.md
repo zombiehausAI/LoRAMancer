@@ -35,13 +35,13 @@ The Windows port of `rocm_sdk` queries for Unix shared objects that do not exist
 2. Ad-hoc file appending often introduces indentation errors into `_dist_info.py`.
 
 ### The Patch
-`AmdVenvProvisioner.PatchRocmSdkDistInfo` appends `optional=True` library entry stubs without leading indentation to:
+`AmdVenvProvisioner.PatchRocmSdkDistInfo` appends 4-argument library entry stubs (`shortname, package_name, so_pattern, dll_pattern`) without leading indentation to:
 `.venv/Lib/site-packages/rocm_sdk/_dist_info.py`:
 ```python
 # [loramancer] windows-missing-libs
-LibraryEntry("hipsparselt", "core", "libhipsparselt.so.0", "", optional=True)
-LibraryEntry("hipdnn", "core", "libhipdnn.so.0", "", optional=True)
-LibraryEntry("rocm-openblas", "core", "librocm-openblas.so.0", "", optional=True)
+LibraryEntry("hipsparselt", "core", "libhipsparselt.so.0", "")
+LibraryEntry("hipdnn", "core", "libhipdnn.so.0", "")
+LibraryEntry("rocm-openblas", "core", "librocm-openblas.so.0", "")
 ```
 
 ---
