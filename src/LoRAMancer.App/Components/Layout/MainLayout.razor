@@ -6,6 +6,7 @@
 @inject StudioSessionService StudioSession
 @inject SettingsService Settings
 @inject NetworkServerService NetworkServer
+@inject AutoUpdateService UpdateService
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
@@ -105,6 +106,15 @@
     .mud-input-outlined-border {
         border-color: var(--border-dark) !important;
     }
+
+    @@keyframes updatePulse {
+        0% { box-shadow: 0 0 0 0 rgba(249, 226, 175, 0.5); }
+        70% { box-shadow: 0 0 0 6px rgba(249, 226, 175, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(249, 226, 175, 0); }
+    }
+    .update-chip-pulse {
+        animation: updatePulse 2.5s infinite;
+    }
 </style>
 
 <MudLayout>
@@ -176,6 +186,47 @@
 
         <!-- Right: Hardware & Telemetry -->
         <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
+            @if (_availableUpdate?.IsUpdateAvailable == true && !_updateDismissed) {
+                <MudMenu Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                    <ActivatorContent>
+                        <MudTooltip Text="@($"Update v{_availableUpdate.LatestVersion} is available. Click to review or update when ready.")">
+                            <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled" 
+                                     Icon="@Icons.Material.Filled.SystemUpdate" 
+                                     Class="mr-1 update-chip-pulse" 
+                                     Style="cursor: pointer; font-weight: 700; text-transform: none;">
+                                v@_availableUpdate.LatestVersion Available
+                            </MudChip>
+                        </MudTooltip>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <div class="pa-3" style="min-width: 320px; max-width: 380px; background-color: var(--bg-dark-surface);">
+                            <div class="d-flex align-center gap-2 mb-2">
+                                <MudIcon Icon="@Icons.Material.Filled.NewReleases" Color="Color.Warning" Size="Size.Small" />
+                                <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary);">
+                                    Update v@_availableUpdate.LatestVersion Ready
+                                </MudText>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
+                                An update is available. You can finish your current training or work and update whenever you are ready.
+                            </MudText>
+                            @if (!string.IsNullOrWhiteSpace(_availableUpdate.Changelog)) {
+                                <div class="pa-2 mb-3 rounded" style="background: rgba(0,0,0,0.25); max-height: 120px; overflow-y: auto; font-size: 0.75rem; color: var(--text-secondary); white-space: pre-wrap; font-family: monospace;">
+                                    @_availableUpdate.Changelog
+                                </div>
+                            }
+                            <div class="d-flex align-center justify-space-between gap-2 mt-2">
+                                <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="@(() => _updateDismissed = true)">
+                                    Put Off for Now
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => Navigation.NavigateTo("updates"))">
+                                    Update Now
+                                </MudButton>
+                            </div>
+                        </div>
+                    </ChildContent>
+                </MudMenu>
+            }
+
             @if (TrainingRunner.IsRunning) {
                 <MudTooltip Text="@($"Training {(TrainingRunner.CurrentJob != null ? TrainingRunner.CurrentJob.Name : "job")} in progress. Click to view console.")">
                     <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2" OnClick="@(() => Navigation.NavigateTo("training"))" Style="cursor: pointer; font-weight: 600;">
@@ -302,6 +353,8 @@
     private ErrorBoundary? _errorBoundary;
     private bool _disposed;
     private bool _startupNavigated;
+    private UpdateCheckResult? _availableUpdate;
+    private bool _updateDismissed;
 
     protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
@@ -338,6 +391,18 @@
                 }
             });
         }
+
+        _ = Task.Run(async () => {
+            try {
+                var updateResult = await UpdateService.CheckForUpdatesAsync();
+                if (updateResult.IsUpdateAvailable) {
+                    _availableUpdate = updateResult;
+                    await InvokeAsync(StateHasChanged);
+                }
+            } catch {
+                // Silently ignore background update check exceptions
+            }
+        });
     }
 
     protected override void OnParametersSet() {
