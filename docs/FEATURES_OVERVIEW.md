@@ -126,13 +126,26 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 
 ## 10. Dataset Curator & Batch Caption Studio
 
-- **Tag Frequency Analysis & Cloud**:
+- **Tag Frequency Analysis & Lexicon Explorer**:
   - Scans entire dataset directories, parses comma-separated tags, and calculates exact occurrence counts and dataset percentages.
   - Interactive tag table with quick delete and find/replace population.
+- **Civitai-Style In-Place Ollama Auto-Tagging**:
+  - Automatically loads the active studio dataset directly into the Ollama LoRA Tagger with 1 click.
+  - Writes `.txt` captions in-place next to source images with zero zip/duplicate folder overhead.
+  - Instantly refreshes dataset metadata, gallery cards, and tag frequencies upon completion.
+- **Dataset-Wide Focus & Style Defaults**:
+  - Configurable dataset-wide subject focus presets (`Person / Character`, `Object / Prop`, `Scenery / Environment`, `Art Style / Aesthetic`, `General / Balanced`).
+  - Dual caption styling modes: Comma-separated Visual Tags (for SDXL / Pony / Anime) vs Natural Language sentences (for FLUX.1).
+- **Per-Image Inspect, Edit & Individual AI Auto-Tagging**:
+  - Dynamically resizing CSS card grid and compact list views with scrollable multi-line caption editors.
+  - Interactive high-res Inspect & Edit modal with parsed tag chip management.
+  - Per-image AI subject focus and caption style overrides right next to the `✨ AI Auto-Tag` button for rapid single-image refinement.
 - **Batch Prefix, Suffix & Mass Find/Replace**:
   - Mass find-and-replace across all `.txt` caption files with case-sensitivity and regex support.
   - 1-click prepend or append of trigger words and style tokens without duplicate tag contamination.
   - Automatic timestamped caption backups (`.captions_backup_YYYYMMDD_HHMMSS`) created before every batch modification.
+- **Dataset Clear & Unload**:
+  - One-click dataset clearing to safely unload the active workspace, wipe thumbnail memory caches, and reset curation session state.
 - **Aspect Ratio Bucketing & Image Audit**:
   - Analyzes image dimensions across dataset files without loading full bitmaps into RAM.
   - Groups images into standard training buckets (1:1 Square, 3:4/2:3/9:16 Portrait, 4:3/3:2/16:9 Landscape) with distribution percentages.

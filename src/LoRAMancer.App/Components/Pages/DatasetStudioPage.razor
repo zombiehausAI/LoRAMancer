@@ -121,6 +121,26 @@
                         <MudSelectItem Value="@("corrupt")">Corrupt / Errors (@_report.CorruptCount)</MudSelectItem>
                     </MudSelect>
 
+                    <div class="d-flex align-center gap-2 px-2 py-1" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                        <MudTooltip Text="Dataset-wide default subject focus for Ollama vision tagging">
+                            <div class="d-flex align-center gap-1">
+                                <MudIcon Icon="@Icons.Material.Filled.Psychology" Size="Size.Small" Style="color: #cba6f7;" />
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem; font-weight: 600;">AI Focus:</MudText>
+                            </div>
+                        </MudTooltip>
+                        <MudSelect T="string" @bind-Value="_datasetFocus" Dense="true" Margin="Margin.None" Style="width: 110px; font-size: 0.78rem;">
+                            <MudSelectItem Value="@("person")">👤 Person</MudSelectItem>
+                            <MudSelectItem Value="@("object")">📦 Object</MudSelectItem>
+                            <MudSelectItem Value="@("scenery")">🏞 Scenery</MudSelectItem>
+                            <MudSelectItem Value="@("style")">🎨 Style</MudSelectItem>
+                            <MudSelectItem Value="@("general")">🌐 General</MudSelectItem>
+                        </MudSelect>
+                        <MudSelect T="string" @bind-Value="_datasetCaptionStyle" Dense="true" Margin="Margin.None" Style="width: 105px; font-size: 0.78rem;">
+                            <MudSelectItem Value="@("tags")">🏷 Tags</MudSelectItem>
+                            <MudSelectItem Value="@("natural")">📝 Sentences</MudSelectItem>
+                        </MudSelect>
+                    </div>
+
                     @if (_isGridView) {
                         <div class="d-flex align-center gap-1 px-2 py-1" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
                             <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem;">Card Size:</MudText>
@@ -215,11 +235,11 @@
                                                 Missing .txt
                                             </span>
                                         }
-                                        <MudTooltip Text="Auto-tag this image using Ollama Vision">
+                                        <MudTooltip Text="@($"Auto-tag this image using Ollama Vision ({_datasetFocus}, {_datasetCaptionStyle})")">
                                             <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" 
                                                            Size="Size.Small" 
                                                            Color="Color.Tertiary" 
-                                                           OnClick="@(() => AutoTagSingleItemAsync(item))" 
+                                                           OnClick="@(() => AutoTagSingleItemAsync(item, _datasetFocus, _datasetCaptionStyle))" 
                                                            Disabled="@(_singleTaggingPath == item.ImagePath)" 
                                                            Style="width: 22px; height: 22px; padding: 0;" />
                                         </MudTooltip>
@@ -294,8 +314,8 @@
                                                        Color="Color.Tertiary" 
                                                        Size="Size.Small" 
                                                        StartIcon="@Icons.Material.Filled.AutoAwesome" 
-                                                       OnClick="@(() => AutoTagSingleItemAsync(item))"
-                                                       Disabled="@(_singleTaggingPath == item.ImagePath)"
+                                                       OnClick="@(() => AutoTagSingleItemAsync(item, _datasetFocus, _datasetCaptionStyle))" 
+                                                       Disabled="@(_singleTaggingPath == item.ImagePath)" 
                                                        Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
                                                 @(_singleTaggingPath == item.ImagePath ? "Tagging..." : "AI Tag")
                                             </MudButton>
@@ -663,19 +683,32 @@
                                 Caption Text (.txt)
                             </MudText>
                         </div>
-                        <div class="d-flex align-center gap-2">
-                            <span style="font-size: 0.75rem; color: #a6adc8;">
+                        <div class="d-flex align-center gap-2 flex-wrap justify-end">
+                            <span style="font-size: 0.72rem; color: #a6adc8;">
                                 @GetWordCount(_editingCaptionDraft) words | @_editingCaptionDraft.Length chars
                             </span>
-                            <MudButton Variant="Variant.Outlined" 
-                                       Color="Color.Tertiary" 
-                                       Size="Size.Small" 
-                                       StartIcon="@Icons.Material.Filled.AutoAwesome" 
-                                       OnClick="@(() => AutoTagSingleItemAsync(_editingItem))"
-                                       Disabled="@(_singleTaggingPath == _editingItem.ImagePath)"
-                                       Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
-                                @(_singleTaggingPath == _editingItem.ImagePath ? "AI Tagging..." : "✨ AI Auto-Tag")
-                            </MudButton>
+                            <div class="d-flex align-center gap-1 pa-1" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                                <MudSelect T="string" @bind-Value="_modalFocus" Dense="true" Margin="Margin.None" Style="width: 105px; font-size: 0.72rem;">
+                                    <MudSelectItem Value="@("person")">👤 Person</MudSelectItem>
+                                    <MudSelectItem Value="@("object")">📦 Object</MudSelectItem>
+                                    <MudSelectItem Value="@("scenery")">🏞 Scenery</MudSelectItem>
+                                    <MudSelectItem Value="@("style")">🎨 Style</MudSelectItem>
+                                    <MudSelectItem Value="@("general")">🌐 General</MudSelectItem>
+                                </MudSelect>
+                                <MudSelect T="string" @bind-Value="_modalCaptionStyle" Dense="true" Margin="Margin.None" Style="width: 95px; font-size: 0.72rem;">
+                                    <MudSelectItem Value="@("tags")">🏷 Tags</MudSelectItem>
+                                    <MudSelectItem Value="@("natural")">📝 Sentences</MudSelectItem>
+                                </MudSelect>
+                                <MudButton Variant="Variant.Outlined" 
+                                           Color="Color.Tertiary" 
+                                           Size="Size.Small" 
+                                           StartIcon="@Icons.Material.Filled.AutoAwesome" 
+                                           OnClick="@(() => AutoTagSingleItemAsync(_editingItem, _modalFocus, _modalCaptionStyle))"
+                                           Disabled="@(_singleTaggingPath == _editingItem.ImagePath)"
+                                           Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                    @(_singleTaggingPath == _editingItem.ImagePath ? "AI Tagging..." : "✨ AI Auto-Tag")
+                                </MudButton>
+                            </div>
                         </div>
                     </div>
 
@@ -799,10 +832,18 @@
     private string _editingCaptionDraft = "";
     private string _singleTaggingPath = string.Empty;
 
+    // AI Tagging Focus & Style: Dataset Defaults & Per-Image Modal Overrides
+    private string _datasetFocus = "general";
+    private string _datasetCaptionStyle = "tags";
+    private string _modalFocus = "general";
+    private string _modalCaptionStyle = "tags";
+
     private void OpenCaptionEditor(DatasetCuratorItem item) {
         _editingItem = item;
         _editingIndex = FilteredGalleryItems.IndexOf(item);
         _editingCaptionDraft = item.CaptionText ?? "";
+        _modalFocus = _datasetFocus;
+        _modalCaptionStyle = _datasetCaptionStyle;
     }
 
     private void CloseCaptionEditor() {
@@ -1148,7 +1189,9 @@
     private async Task OpenOllamaTaggerAsync() {
         var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.OllamaTaggerDialog> {
             { x => x.InitialInputPath, _datasetFolder },
-            { x => x.InitialTriggerWord, StudioSession.TriggerWord }
+            { x => x.InitialTriggerWord, StudioSession.TriggerWord },
+            { x => x.InitialFocus, _datasetFocus },
+            { x => x.InitialCaptionStyle, _datasetCaptionStyle }
         };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
         var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.OllamaTaggerDialog>("Ollama Vision LoRA Tagger", parameters, options);
@@ -1161,8 +1204,12 @@
         }
     }
 
-    private async Task AutoTagSingleItemAsync(DatasetCuratorItem? item) {
+    private async Task AutoTagSingleItemAsync(DatasetCuratorItem? item, string? focusOverride = null, string? styleOverride = null) {
         if (item == null || string.IsNullOrWhiteSpace(item.ImagePath) || !File.Exists(item.ImagePath)) return;
+
+        string effectiveFocus = focusOverride ?? _datasetFocus;
+        string effectiveStyle = styleOverride ?? _datasetCaptionStyle;
+        string customPrompt = GetPromptForFocusAndStyle(effectiveFocus, effectiveStyle);
 
         _singleTaggingPath = item.ImagePath;
         StateHasChanged();
@@ -1181,7 +1228,8 @@
                 ["ollama_url"] = url,
                 ["api_key"] = Settings.Current.OllamaApiKey ?? "",
                 ["trigger_word"] = StudioSession.TriggerWord,
-                ["caption_style"] = "tags",
+                ["caption_style"] = effectiveStyle,
+                ["custom_prompt"] = customPrompt,
                 ["write_txt"] = true
             };
 
@@ -1208,13 +1256,34 @@
                 _report.TagFrequencies = CuratorService.ComputeTagFrequencies(_report.Items);
             }
 
-            Snackbar.Add($"AI Tagged {Path.GetFileName(item.ImagePath)} using {model}!", Severity.Success);
+            Snackbar.Add($"AI Tagged {Path.GetFileName(item.ImagePath)} [{effectiveFocus} / {effectiveStyle}]!", Severity.Success);
         } catch (Exception ex) {
             Snackbar.Add($"AI Tagging failed: {ex.Message}", Severity.Error);
         } finally {
             _singleTaggingPath = string.Empty;
             StateHasChanged();
         }
+    }
+
+    private static string GetPromptForFocusAndStyle(string focus, string style) {
+        bool isNatural = style == "natural";
+        return focus switch {
+            "person" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing heavily on the person. Thoroughly describe their facial expression, eye direction, hairstyle, hair color, clothing and attire details, posture, lighting, and background setting. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the person in this image in detail for machine learning training. Describe the subject, hairstyle and hair color, facial expression, eye direction, attire, body pose, framing, lighting, and background setting. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "object" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing on the main object, vehicle, or product. Describe its design, materials, primary and secondary colors, surface textures, wear/condition, viewing angle, and background context. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the primary object or product in this image in detail for machine learning training. Describe the object type, shape, colors, materials, surface textures, condition, viewing angle, and background context. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "scenery" => isNatural
+                ? "Describe this scene in 1-2 detailed sentences for training a text-to-image AI model, focusing on the environment and architecture. Describe the setting, architectural style, structures, environmental elements, atmosphere, time of day, weather, and lighting conditions. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the environment and scene in this image in detail for machine learning training. Describe architectural structures, landscape elements, foliage, weather, time of day, lighting conditions, atmosphere, and perspective. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "style" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, highlighting the artistic style and medium. Describe the composition, artistic medium (e.g. digital painting, oil, anime, photograph), color palette, rendering quality, texture, and aesthetic technique. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the artistic style and visual medium of this image for machine learning training. Describe the art medium, rendering technique, linework, brushwork, texture, color palette, lighting atmosphere, and visual composition. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            _ => isNatural
+                ? "Describe this image thoroughly in 1-2 detailed sentences for training a text-to-image AI model. Focus on subject appearance, posture, clothing, colors, setting, and lighting. Do not say 'This is an image of' or 'The picture shows'. Be descriptive and direct."
+                : "Analyze this image in detail for machine learning training. Provide a concise, comma-separated list of visual tags describing: the subject, attire, hair, expression, pose, background, lighting, and artistic style. Do not include conversational filler, introductory words, or markdown. Output ONLY comma-separated tags."
+        };
     }
 
     private static Color GetRadarSeverityColor(CollisionSeverity sev) {

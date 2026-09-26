@@ -262,6 +262,12 @@
     [Parameter]
     public string InitialTriggerWord { get; set; } = string.Empty;
 
+    [Parameter]
+    public string InitialFocus { get; set; } = string.Empty;
+
+    [Parameter]
+    public string InitialCaptionStyle { get; set; } = string.Empty;
+
     private string _ollamaUrl = "http://localhost:11434";
     private string _apiKey = string.Empty;
     private string _inputPath = string.Empty;
@@ -288,6 +294,14 @@
     protected override async Task OnInitializedAsync() {
         _inputPath = InitialInputPath;
         _triggerWord = InitialTriggerWord;
+
+        if (!string.IsNullOrWhiteSpace(InitialFocus)) {
+            _subjectFocus = InitialFocus;
+        }
+
+        if (!string.IsNullOrWhiteSpace(InitialCaptionStyle)) {
+            _captionStyle = InitialCaptionStyle;
+        }
 
         if (string.IsNullOrWhiteSpace(_inputPath) && !string.IsNullOrWhiteSpace(StudioSession.DatasetFolder)) {
             _inputPath = StudioSession.DatasetFolder;
