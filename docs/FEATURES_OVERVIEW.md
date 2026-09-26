@@ -77,7 +77,18 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
 ## 5. Remote Web UI, PWA & Public Internet Serving
 
 - **Embedded Kestrel Network Server**:
-  - Host runs locally while controlling LoRAMancer from any browser on LAN or mobile.
+  - Host runs locally on Windows/Linux workstation while providing remote desktop-mirroring control from any browser or Linux client.
+  - **Auto-Start on Application Launch**: Toggle in Settings & Admin (`AutoStartServerOnAppLaunch`) automatically boots the HTTP/WebSocket server upon LoRAMancer launch.
+- **Desktop-Mirrored Full Studio Web UI**:
+  - **Identical Visual Design**: Dark Catppuccin Mocha UI with matching 260px navigation sidebar, breadcrumb pipeline stages (`1. Curate`, `2. Train & Forge`, `3. Diagnostic Lab`, `4. ComfyUI Test`, `5. Library & Vault`), and hardware acceleration pills.
+  - **Full-Featured Trainer**: Comprehensive hyperparameters (Dim/Rank, Alpha, Optimizer selection, Learning Rate, Precision, Max Steps, Batch Size, Resolution, and Sample Prompts), interactive live console with autoscroll, and real-time hardware telemetry (VRAM bar, temperature, GPU utilization).
+  - **Sequential Training Queue**: Complete remote queue management (Enqueue, Pause/Resume, Cancel All, Clear Logs, Prioritize) with single-GPU concurrency safety.
+  - **Remote Studio Stages**:
+    - *1. Curate & Caption*: Dataset upload, image gallery, and caption inspector.
+    - *3. Diagnostic Lab*: SVD Overbake radar analysis, layer surgery multipliers, and SVD compression rank pruning.
+    - *4. ComfyUI Test*: Remote prompt inference on the host GPU with live image preview and download.
+    - *5. Library & Vault*: Server `.safetensors` model cards with *Send to Lab*, *Send to Chop*, and *Test in ComfyUI* actions.
+    - *LoRA Chop-Shop*: Multi-donor garage with dominant feature tags, anatomical parts grafting, and remote SVD compilation.
 - **Progressive Web App (PWA)**:
   - Installable on iOS, Android, macOS, and Linux with offline shell caching and native app chrome.
 - **Public Internet Tunnels (Cloudflare Quick Tunnels)**:
