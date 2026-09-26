@@ -101,23 +101,61 @@ public sealed class LoraDatabaseService : IDisposable {
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_libraries_path ON Libraries(FolderPath);
+                CREATE TABLE IF NOT EXISTS Categories (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    Color TEXT NOT NULL,
+                    Icon TEXT,
+                    Description TEXT,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_categories_name ON Categories(Name);
             ";
 
             using var cmd = connection.CreateCommand();
             cmd.CommandText = createTableSql;
             await cmd.ExecuteNonQueryAsync();
 
-            // Migrate Loras table to add LibraryId column if not yet present
+            // Seed default categories if empty
+            using (var countCmd = connection.CreateCommand()) {
+                countCmd.CommandText = "SELECT COUNT(*) FROM Categories;";
+                long catCount = 0;
+                var countObj = await countCmd.ExecuteScalarAsync();
+                if (countObj != null && countObj != DBNull.Value) {
+                    catCount = Convert.ToInt64(countObj);
+                }
+                if (catCount == 0) {
+                    foreach (var defCat in LoraCategory.GetDefaultCategories()) {
+                        using var insCmd = connection.CreateCommand();
+                        insCmd.CommandText = @"
+                            INSERT OR IGNORE INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
+                            VALUES ($Id, $Name, $Color, $Icon, $Description, $CreatedAtUtc, $UpdatedAtUtc);
+                        ";
+                        insCmd.Parameters.AddWithValue("$Id", defCat.Id);
+                        insCmd.Parameters.AddWithValue("$Name", defCat.Name);
+                        insCmd.Parameters.AddWithValue("$Color", defCat.Color);
+                        insCmd.Parameters.AddWithValue("$Icon", (object?)defCat.Icon ?? DBNull.Value);
+                        insCmd.Parameters.AddWithValue("$Description", (object?)defCat.Description ?? DBNull.Value);
+                        insCmd.Parameters.AddWithValue("$CreatedAtUtc", defCat.CreatedAtUtc.ToString("O"));
+                        insCmd.Parameters.AddWithValue("$UpdatedAtUtc", defCat.UpdatedAtUtc.ToString("O"));
+                        await insCmd.ExecuteNonQueryAsync();
+                    }
+                }
+            }
+
+            // Migrate Loras table to add LibraryId, Category, and TagsJson columns if not yet present
             using var pragmaCmd = connection.CreateCommand();
             pragmaCmd.CommandText = "PRAGMA table_info(Loras);";
             bool hasLibraryId = false;
+            bool hasCategory = false;
+            bool hasTagsJson = false;
             using (var reader = await pragmaCmd.ExecuteReaderAsync()) {
                 while (await reader.ReadAsync()) {
                     string col = reader.GetString(1);
-                    if (string.Equals(col, "LibraryId", StringComparison.OrdinalIgnoreCase)) {
-                        hasLibraryId = true;
-                        break;
-                    }
+                    if (string.Equals(col, "LibraryId", StringComparison.OrdinalIgnoreCase)) hasLibraryId = true;
+                    if (string.Equals(col, "Category", StringComparison.OrdinalIgnoreCase)) hasCategory = true;
+                    if (string.Equals(col, "TagsJson", StringComparison.OrdinalIgnoreCase)) hasTagsJson = true;
                 }
             }
             if (!hasLibraryId) {
@@ -125,9 +163,22 @@ public sealed class LoraDatabaseService : IDisposable {
                 alterCmd.CommandText = "ALTER TABLE Loras ADD COLUMN LibraryId TEXT;";
                 await alterCmd.ExecuteNonQueryAsync();
             }
+            if (!hasCategory) {
+                using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE Loras ADD COLUMN Category TEXT;";
+                await alterCmd.ExecuteNonQueryAsync();
+            }
+            if (!hasTagsJson) {
+                using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE Loras ADD COLUMN TagsJson TEXT;";
+                await alterCmd.ExecuteNonQueryAsync();
+            }
 
             using (var idxCmd = connection.CreateCommand()) {
-                idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);";
+                idxCmd.CommandText = @"
+                    CREATE INDEX IF NOT EXISTS idx_loras_lib ON Loras(LibraryId);
+                    CREATE INDEX IF NOT EXISTS idx_loras_cat ON Loras(Category);
+                ";
                 await idxCmd.ExecuteNonQueryAsync();
             }
 
@@ -255,6 +306,152 @@ public sealed class LoraDatabaseService : IDisposable {
         }
     }
 
+    public async Task<List<LoraCategory>> GetCategoriesAsync() {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Categories ORDER BY Name COLLATE NOCASE ASC;";
+            var list = new List<LoraCategory>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) {
+                list.Add(new LoraCategory {
+                    Id = reader.GetString(reader.GetOrdinal("Id")),
+                    Name = reader.GetString(reader.GetOrdinal("Name")),
+                    Color = reader.GetString(reader.GetOrdinal("Color")),
+                    Icon = reader.IsDBNull(reader.GetOrdinal("Icon")) ? null : reader.GetString(reader.GetOrdinal("Icon")),
+                    Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? null : reader.GetString(reader.GetOrdinal("Description")),
+                    CreatedAtUtc = DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedAtUtc")), out var c) ? c : DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(reader.GetOrdinal("UpdatedAtUtc")), out var u) ? u : DateTime.UtcNow
+                });
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task SaveCategoryAsync(LoraCategory cat) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
+                VALUES ($Id, $Name, $Color, $Icon, $Description, $CreatedAtUtc, $UpdatedAtUtc)
+                ON CONFLICT(Id) DO UPDATE SET
+                    Name = excluded.Name,
+                    Color = excluded.Color,
+                    Icon = excluded.Icon,
+                    Description = excluded.Description,
+                    UpdatedAtUtc = excluded.UpdatedAtUtc;
+            ";
+            cmd.Parameters.AddWithValue("$Id", cat.Id);
+            cmd.Parameters.AddWithValue("$Name", cat.Name);
+            cmd.Parameters.AddWithValue("$Color", cat.Color);
+            cmd.Parameters.AddWithValue("$Icon", (object?)cat.Icon ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$Description", (object?)cat.Description ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$CreatedAtUtc", cat.CreatedAtUtc.ToString("O"));
+            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task DeleteCategoryAsync(string id, string? reassignTo = null) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var trans = connection.BeginTransaction();
+
+            string? catName = null;
+            using (var selectCmd = connection.CreateCommand()) {
+                selectCmd.Transaction = trans;
+                selectCmd.CommandText = "SELECT Name FROM Categories WHERE Id = $Id;";
+                selectCmd.Parameters.AddWithValue("$Id", id);
+                var obj = await selectCmd.ExecuteScalarAsync();
+                if (obj != null && obj != DBNull.Value) {
+                    catName = obj.ToString();
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(catName)) {
+                using var updateCmd = connection.CreateCommand();
+                updateCmd.Transaction = trans;
+                updateCmd.CommandText = "UPDATE Loras SET Category = $Reassign WHERE Category = $OldName COLLATE NOCASE;";
+                updateCmd.Parameters.AddWithValue("$Reassign", (object?)reassignTo ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("$OldName", catName);
+                await updateCmd.ExecuteNonQueryAsync();
+            }
+
+            using (var delCmd = connection.CreateCommand()) {
+                delCmd.Transaction = trans;
+                delCmd.CommandText = "DELETE FROM Categories WHERE Id = $Id;";
+                delCmd.Parameters.AddWithValue("$Id", id);
+                await delCmd.ExecuteNonQueryAsync();
+            }
+
+            trans.Commit();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task SetLoraCategoryAsync(string filePath, string? category) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE Loras SET Category = $Category, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
+            cmd.Parameters.AddWithValue("$Category", (object?)category ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task SetLoraTagsAsync(string filePath, IEnumerable<string> tags) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE Loras SET TagsJson = $TagsJson, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
+            var list = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+            cmd.Parameters.AddWithValue("$TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task SetLoraCategoryAndTagsAsync(string filePath, string? category, IEnumerable<string> tags) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync();
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE Loras SET Category = $Category, TagsJson = $TagsJson, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
+            cmd.Parameters.AddWithValue("$Category", (object?)category ?? DBNull.Value);
+            var list = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+            cmd.Parameters.AddWithValue("$TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            await cmd.ExecuteNonQueryAsync();
+        } finally {
+            _lock.Release();
+        }
+    }
+
     public async Task<List<LoraMetadata>> GetByLibraryAsync(string? libraryId = null, string? folderPath = null) {
         await EnsureInitializedAsync();
         await _lock.WaitAsync();
@@ -320,7 +517,7 @@ public sealed class LoraDatabaseService : IDisposable {
 
             const string sql = @"
                 INSERT INTO Loras (
-                    FilePath, FileName, DirectoryPath, LibraryId, BaseModel, UserBaseModel, IsFavorite,
+                    FilePath, FileName, DirectoryPath, LibraryId, BaseModel, UserBaseModel, IsFavorite, Category, TagsJson,
                     NetworkDim, NetworkAlpha, NetworkModule, LearningRate, UnetLearningRate, TextEncoderLearningRate,
                     Optimizer, LrScheduler, Epochs, TotalSteps, Resolution, Precision,
                     FileSizeBytes, LastModifiedUtc, ThumbnailPath, Sha256Hash, TrainedWordsJson, RawMetadataJson,
@@ -328,7 +525,7 @@ public sealed class LoraDatabaseService : IDisposable {
                     CivitaiDescription, CivitaiDownloadUrl, CivitaiUrl, CivitaiPreviewImageUrl, CivitaiSamplePromptsJson,
                     CreatedAtUtc, UpdatedAtUtc
                 ) VALUES (
-                    $FilePath, $FileName, $DirectoryPath, $LibraryId, $BaseModel, $UserBaseModel, $IsFavorite,
+                    $FilePath, $FileName, $DirectoryPath, $LibraryId, $BaseModel, $UserBaseModel, $IsFavorite, $Category, $TagsJson,
                     $NetworkDim, $NetworkAlpha, $NetworkModule, $LearningRate, $UnetLearningRate, $TextEncoderLearningRate,
                     $Optimizer, $LrScheduler, $Epochs, $TotalSteps, $Resolution, $Precision,
                     $FileSizeBytes, $LastModifiedUtc, $ThumbnailPath, $Sha256Hash, $TrainedWordsJson, $RawMetadataJson,
@@ -342,6 +539,8 @@ public sealed class LoraDatabaseService : IDisposable {
                     BaseModel = excluded.BaseModel,
                     UserBaseModel = COALESCE(Loras.UserBaseModel, excluded.UserBaseModel),
                     IsFavorite = Loras.IsFavorite,
+                    Category = COALESCE(Loras.Category, excluded.Category),
+                    TagsJson = COALESCE(Loras.TagsJson, excluded.TagsJson),
                     NetworkDim = excluded.NetworkDim,
                     NetworkAlpha = excluded.NetworkAlpha,
                     NetworkModule = excluded.NetworkModule,
@@ -384,6 +583,8 @@ public sealed class LoraDatabaseService : IDisposable {
             var pBaseModel = cmd.Parameters.Add("$BaseModel", SqliteType.Text);
             var pUserBaseModel = cmd.Parameters.Add("$UserBaseModel", SqliteType.Text);
             var pIsFavorite = cmd.Parameters.Add("$IsFavorite", SqliteType.Integer);
+            var pCategory = cmd.Parameters.Add("$Category", SqliteType.Text);
+            var pTagsJson = cmd.Parameters.Add("$TagsJson", SqliteType.Text);
             var pNetworkDim = cmd.Parameters.Add("$NetworkDim", SqliteType.Integer);
             var pNetworkAlpha = cmd.Parameters.Add("$NetworkAlpha", SqliteType.Real);
             var pNetworkModule = cmd.Parameters.Add("$NetworkModule", SqliteType.Text);
@@ -425,6 +626,8 @@ public sealed class LoraDatabaseService : IDisposable {
                 pBaseModel.Value = meta.BaseModel;
                 pUserBaseModel.Value = (object?)meta.UserBaseModel ?? DBNull.Value;
                 pIsFavorite.Value = meta.IsFavorite ? 1 : 0;
+                pCategory.Value = (object?)meta.Category ?? DBNull.Value;
+                pTagsJson.Value = meta.Tags != null && meta.Tags.Count > 0 ? JsonSerializer.Serialize(meta.Tags) : (object)DBNull.Value;
                 pNetworkDim.Value = (object?)meta.NetworkDim ?? DBNull.Value;
                 pNetworkAlpha.Value = (object?)meta.NetworkAlpha ?? DBNull.Value;
                 pNetworkModule.Value = (object?)meta.NetworkModule ?? DBNull.Value;
@@ -589,6 +792,20 @@ public sealed class LoraDatabaseService : IDisposable {
         } catch {
             // Ignore if LibraryId column is not present
         }
+
+        try {
+            int catOrd = reader.GetOrdinal("Category");
+            if (catOrd >= 0 && !reader.IsDBNull(catOrd)) {
+                meta.Category = reader.GetString(catOrd);
+            }
+        } catch { }
+
+        try {
+            int tagsOrd = reader.GetOrdinal("TagsJson");
+            if (tagsOrd >= 0 && !reader.IsDBNull(tagsOrd)) {
+                meta.Tags = JsonSerializer.Deserialize<List<string>>(reader.GetString(tagsOrd)) ?? new();
+            }
+        } catch { }
 
         int dimOrd = reader.GetOrdinal("NetworkDim");
         if (!reader.IsDBNull(dimOrd)) {

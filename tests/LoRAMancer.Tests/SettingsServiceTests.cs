@@ -223,7 +223,8 @@ public sealed class SettingsServiceTests {
             Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-green" && t.IsDark);
             Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-blue" && t.IsDark);
             Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-amber" && t.IsDark);
-            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-purple" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "dark-grey" && t.IsDark);
+            Assert.Contains(ThemeService.AvailableThemes, t => t.Id == "studio-grey" && t.IsDark);
 
             // Default is dark-purple
             Assert.Equal("dark-purple", themeService.CurrentThemeId);
@@ -236,7 +237,7 @@ public sealed class SettingsServiceTests {
             themeService.SetTheme("dark-grey");
             Assert.True(eventFired);
             Assert.Equal("dark-grey", themeService.CurrentThemeId);
-            Assert.Equal("Slate Greys (Dark)", themeService.CurrentTheme.Name);
+            Assert.Equal("Graphite Grey (Eye-Pleasing Dark)", themeService.CurrentTheme.Name);
 
             // Verify MudTheme palette generated properly
             var mudTheme = themeService.GetMudTheme();

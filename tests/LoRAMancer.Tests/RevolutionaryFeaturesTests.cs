@@ -106,4 +106,160 @@ public sealed class RevolutionaryFeaturesTests {
         Assert.Contains("0.9850", md);
         Assert.Contains("ss_learning_rate", md);
     }
+
+    [Fact]
+    public async Task OverbakeRadarService_AnalyzeLoraOverbake_ComputesScoresAndStatus() {
+        ProcessRunner runner = new();
+        OverbakeRadarService radar = new(runner);
+
+        string tempLora = Path.Combine(Path.GetTempPath(), $"test_lora_{Guid.NewGuid():N}.safetensors");
+        try {
+            await File.WriteAllBytesAsync(tempLora, new byte[1024 * 1024 * 4]); // 4MB dummy file
+            var report = await radar.AnalyzeLoraOverbakeAsync(tempLora);
+
+            Assert.NotNull(report);
+            Assert.True(report.TotalLoRALayers > 0);
+            Assert.True(report.OverbakeScore >= 0 && report.OverbakeScore <= 100);
+            Assert.NotEmpty(report.Verdict);
+            Assert.NotEmpty(report.Recommendation);
+            Assert.NotEmpty(report.LayerMetrics);
+        } finally {
+            if (File.Exists(tempLora)) {
+                File.Delete(tempLora);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OverbakeRadarService_AnalyzeEpochSequence_DetectsSweetSpot() {
+        ProcessRunner runner = new();
+        OverbakeRadarService radar = new(runner);
+
+        string tempFolder = Path.Combine(Path.GetTempPath(), $"test_epochs_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempFolder);
+
+        try {
+            for (int i = 1; i <= 5; i++) {
+                string file = Path.Combine(tempFolder, $"lora_concept_epoch-000{i}.safetensors");
+                await File.WriteAllBytesAsync(file, new byte[1024 * 1024 * (i + 1)]);
+            }
+
+            var result = await radar.AnalyzeEpochSequenceAsync(tempFolder);
+
+            Assert.NotNull(result);
+            Assert.Equal(5, result.TotalCheckpoints);
+            Assert.True(result.RecommendedSweetSpotEpoch >= 1 && result.RecommendedSweetSpotEpoch <= 5);
+            Assert.Contains(result.Trajectory, t => t.IsRecommendedSweetSpot);
+            Assert.NotEmpty(result.SummaryMessage);
+        } finally {
+            if (Directory.Exists(tempFolder)) {
+                Directory.Delete(tempFolder, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task LoraEchoHunterService_MissingFiles_ReturnsErrorResult() {
+        ProcessRunner runner = new();
+        LoraEchoHunterService hunter = new(runner);
+
+        var result = await hunter.HuntAndRepelGhostVectorAsync("nonexistentA.safetensors", "nonexistentB.safetensors", "out.safetensors");
+
+        Assert.False(result.Success);
+        Assert.Contains("not found", result.Message);
+    }
+
+    [Fact]
+    public async Task LoraEchoHunterService_StyleDecoupler_MissingSource_ReturnsErrorResult() {
+        ProcessRunner runner = new();
+        LoraEchoHunterService hunter = new(runner);
+
+        var result = await hunter.DecoupleStyleAndIdentityAsync("nonexistent.safetensors", "out.safetensors");
+
+        Assert.False(result.Success);
+        Assert.Contains("not found", result.Message);
+    }
+
+    [Fact]
+    public async Task LoraDeAnonymizerService_MissingFile_ThrowsFileNotFound() {
+        LoraDeAnonymizerService deAnonymizer = new();
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            deAnonymizer.ReverseEngineerLoraAsync("nonexistent_model.safetensors"));
+    }
+
+    [Fact]
+    public async Task LoraDeAnonymizerService_DummyFile_RecoversFingerprintAndHeuristicTrigger() {
+        LoraDeAnonymizerService deAnonymizer = new();
+
+        string tempLora = Path.Combine(Path.GetTempPath(), $"cyberpunk_girl_v2_rank32.safetensors");
+        try {
+            await File.WriteAllBytesAsync(tempLora, new byte[1024 * 100]); // 100KB dummy
+
+            var report = await deAnonymizer.ReverseEngineerLoraAsync(tempLora);
+
+            Assert.NotNull(report);
+            Assert.Equal("cyberpunk_girl_v2_rank32.safetensors", report.FileName);
+            Assert.NotEmpty(report.DetectedArchitecture);
+            Assert.True(report.EffectiveRank > 0);
+            Assert.NotEmpty(report.ForensicSummary);
+            Assert.NotEmpty(report.RecoveredHyperparameters);
+            Assert.Contains(report.RecoveredTriggerTokens, t => t.Token.Contains("cyberpunk_girl"));
+        } finally {
+            if (File.Exists(tempLora)) {
+                File.Delete(tempLora);
+            }
+        }
+    }
+
+    [Fact]
+    public void LoraCategory_GetDefaultCategories_ProvidesEightCuratedCategories() {
+        var categories = LoRAMancer.App.Models.LoraCategory.GetDefaultCategories();
+
+        Assert.NotNull(categories);
+        Assert.Equal(8, categories.Count);
+        Assert.Contains(categories, c => c.Name == "Character" && !string.IsNullOrWhiteSpace(c.Color) && !string.IsNullOrWhiteSpace(c.Icon));
+        Assert.Contains(categories, c => c.Name == "Style" && !string.IsNullOrWhiteSpace(c.Color));
+        Assert.Contains(categories, c => c.Name == "Concept" && !string.IsNullOrWhiteSpace(c.Color));
+        Assert.Contains(categories, c => c.Name == "Clothing" && !string.IsNullOrWhiteSpace(c.Color));
+    }
+
+    [Fact]
+    public void LoraMetadata_CategoryAndTags_HandlesDefaultsAndDisplayCategory() {
+        var lora = new LoRAMancer.App.Models.LoraMetadata {
+            FileName = "mech_pilot.safetensors"
+        };
+
+        Assert.Equal("Uncategorized", lora.DisplayCategory);
+        Assert.Empty(lora.Tags);
+
+        lora.Category = "Vehicle";
+        lora.Tags.AddRange(new[] { "mecha", "sci-fi", "armor" });
+
+        Assert.Equal("Vehicle", lora.DisplayCategory);
+        Assert.Equal(3, lora.Tags.Count);
+        Assert.Contains("mecha", lora.Tags);
+    }
+
+    [Fact]
+    public void LoraSorting_CategoryAndTags_SortsCorrectly() {
+        var list = new List<LoRAMancer.App.Models.LoraMetadata> {
+            new() { FileName = "bravo.safetensors", Category = "Style", Tags = new List<string> { "art" } },
+            new() { FileName = "alpha.safetensors", Category = "Character", Tags = new List<string> { "girl", "anime", "portrait" } },
+            new() { FileName = "charlie.safetensors", Category = null, Tags = new List<string>() }
+        };
+
+        // Sort by Category A-Z
+        var sortedByCat = list.OrderBy(l => l.DisplayCategory).ThenBy(l => l.FileName).ToList();
+        Assert.Equal("Character", sortedByCat[0].Category);
+        Assert.Equal("Style", sortedByCat[1].Category);
+        Assert.Null(sortedByCat[2].Category);
+
+        // Sort by Tags count descending
+        var sortedByTags = list.OrderByDescending(l => l.Tags.Count).ToList();
+        Assert.Equal("alpha.safetensors", sortedByTags[0].FileName);
+        Assert.Equal(3, sortedByTags[0].Tags.Count);
+        Assert.Equal("bravo.safetensors", sortedByTags[1].FileName);
+        Assert.Equal("charlie.safetensors", sortedByTags[2].FileName);
+    }
 }

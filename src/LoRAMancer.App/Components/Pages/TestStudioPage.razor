@@ -1,0 +1,216 @@
+@page "/test"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject StudioSessionService StudioSession
+@inject ComfyUiService ComfyUi
+@inject NativeFileDialogService FileDialogService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+    <div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small" Style="font-weight: 700;">STAGE 4</MudChip>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">ComfyUI Inference &amp; Test Studio</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Direct WebSocket test rendering, trigger word activation testing, and checkpoint benchmark sweeps
+        </MudText>
+    </div>
+
+    <div class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Insights" OnClick="OpenBenchmarkDialogAsync">
+            Benchmark Matrix
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SmartToy" OnClick="OpenComfyTestDialogAsync">
+            Open Advanced Tester
+        </MudButton>
+    </div>
+</div>
+
+<!-- Active Session Context Banner -->
+<MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+        <div class="d-flex align-center gap-3 flex-wrap">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Primary" Size="Size.Small" />
+                <span style="font-size: 0.85rem; color: #a6adc8;">Concept:</span>
+                <span style="font-weight: 700; color: #cdd6f4;">@StudioSession.ProjectName</span>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(StudioSession.TriggerWord)) {
+                <div class="d-flex align-center gap-2">
+                    <span style="font-size: 0.85rem; color: #a6adc8;">Trigger:</span>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Filled">@StudioSession.TriggerWord</MudChip>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_activeLoraPath)) {
+                <div class="d-flex align-center gap-2">
+                    <span style="font-size: 0.85rem; color: #a6adc8;">LoRA:</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #89b4fa;">@Path.GetFileName(_activeLoraPath)</span>
+                </div>
+            }
+        </div>
+
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Size="Size.Small" Color="@(_isComfyOnline ? Color.Success : Color.Warning)" Variant="Variant.Outlined" Icon="@(_isComfyOnline ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Warning)">
+                @(_isComfyOnline ? "ComfyUI Connected (127.0.0.1:8188)" : "ComfyUI Offline")
+            </MudChip>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Color="Color.Secondary" OnClick="CheckComfyConnectionAsync" />
+        </div>
+    </div>
+</MudCard>
+
+<MudGrid Spacing="3">
+    <!-- Left Column: Test Prompt Controls -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Class="pa-4 h-100" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;" Class="mb-3">Test Inference Controls</MudText>
+
+            <MudTextField @bind-Value="_prompt" Label="Positive Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" HelperText="LoRA trigger words are automatically inserted" Class="mb-3" />
+            <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-3" />
+
+            <div class="d-flex align-center justify-space-between mb-1">
+                <MudText Typo="Typo.caption">LoRA Strength Weight</MudText>
+                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89b4fa;">@_loraWeight.ToString("F2")</MudText>
+            </div>
+            <MudSlider @bind-Value="_loraWeight" Min="0.0" Max="2.0" Step="0.05" Color="Color.Primary" Class="mb-4" />
+
+            <div class="d-flex gap-2 flex-wrap mb-4">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="InsertTriggerWord">
+                    Insert Trigger Word
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraAsync">
+                    Select LoRA Model
+                </MudButton>
+            </div>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Large" StartIcon="@Icons.Material.Filled.PlayArrow" FullWidth="true" OnClick="RenderTestImageAsync" Disabled="_isRendering || !_isComfyOnline">
+                @(_isRendering ? "Rendering in ComfyUI..." : "Render Test Image")
+            </MudButton>
+        </MudCard>
+    </MudItem>
+
+    <!-- Right Column: Rendered Output Canvas -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="1" Class="pa-4 h-100 d-flex flex-column align-center justify-center text-center" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px; min-height: 440px;">
+            @if (!string.IsNullOrWhiteSpace(_renderedImageBase64)) {
+                <img src="@_renderedImageBase64" alt="ComfyUI Test Render" style="max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
+                <div class="d-flex align-center gap-2 mt-3">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Rendered in @_renderDuration.TotalSeconds.ToString("F1")s</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary">Weight @_loraWeight.ToString("F2")</MudChip>
+                </div>
+            } else if (_isRendering) {
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" Class="mb-3" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Sending to ComfyUI Engine...</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Generating latent diffusion sample via WebSocket</MudText>
+            } else {
+                <MudIcon Icon="@Icons.Material.Filled.Image" Color="Color.Secondary" Size="Size.Large" Class="mb-2" Style="font-size: 3rem;" />
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #a6adc8;">No Test Image Rendered</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Style="max-width: 320px;">
+                    Ensure ComfyUI is running, enter your prompt, and click Render Test Image to test your LoRA in real time.
+                </MudText>
+            }
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string _activeLoraPath = "";
+    private string _prompt = "masterpiece, best quality, solo portrait";
+    private string _negativePrompt = "blurry, low quality, distorted, extra limbs";
+    private double _loraWeight = 0.85;
+    private bool _isComfyOnline;
+    private bool _isRendering;
+    private string? _renderedImageBase64;
+    private TimeSpan _renderDuration;
+
+    protected override async Task OnInitializedAsync() {
+        StudioSession.SetStage(StudioStage.Test);
+        _activeLoraPath = StudioSession.ActiveLoraPath;
+
+        if (!string.IsNullOrWhiteSpace(StudioSession.TriggerWord)) {
+            _prompt = $"{StudioSession.TriggerWord}, {_prompt}";
+        }
+
+        await CheckComfyConnectionAsync();
+    }
+
+    private async Task CheckComfyConnectionAsync() {
+        try {
+            var status = await ComfyUi.CheckConnectionAsync();
+            _isComfyOnline = status.IsConnected;
+        } catch {
+            _isComfyOnline = false;
+        }
+        StateHasChanged();
+    }
+
+    private void InsertTriggerWord() {
+        if (!string.IsNullOrWhiteSpace(StudioSession.TriggerWord) && !_prompt.Contains(StudioSession.TriggerWord)) {
+            _prompt = $"{StudioSession.TriggerWord}, {_prompt}";
+            Snackbar.Add($"Inserted trigger word '{StudioSession.TriggerWord}'", Severity.Success);
+        }
+    }
+
+    private async Task BrowseLoraAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file) && File.Exists(file)) {
+            _activeLoraPath = file;
+            StudioSession.SetActiveLora(file);
+            Snackbar.Add($"Selected LoRA: {Path.GetFileName(file)}", Severity.Success);
+        }
+    }
+
+    private async Task RenderTestImageAsync() {
+        if (!_isComfyOnline) {
+            Snackbar.Add("ComfyUI server is offline (expected at http://127.0.0.1:8188).", Severity.Warning);
+            return;
+        }
+
+        _isRendering = true;
+        StateHasChanged();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        try {
+            var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog> {
+                { x => x.LoraFilePath, _activeLoraPath },
+                { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
+                { x => x.BaseArchitecture, "FLUX.1" },
+                { x => x.TriggerWords, StudioSession.TriggerWord }
+            };
+            var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+            var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+            var result = await dialog.Result;
+            if (result != null && !result.Canceled && result.Data is string imagePath && File.Exists(imagePath)) {
+                byte[] bytes = await File.ReadAllBytesAsync(imagePath);
+                _renderedImageBase64 = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Render error: {ex.Message}", Severity.Error);
+        } finally {
+            sw.Stop();
+            _renderDuration = sw.Elapsed;
+            _isRendering = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenComfyTestDialogAsync() {
+        var parameters = new DialogParameters<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog> {
+            { x => x.LoraFilePath, _activeLoraPath },
+            { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
+            { x => x.BaseArchitecture, "FLUX.1" },
+            { x => x.TriggerWords, StudioSession.TriggerWord }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+    }
+
+    private async Task OpenBenchmarkDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraBenchmarkDialog>("AI Benchmark Matrix & Sweet Spot Finder", options);
+    }
+
+    public void Dispose() { }
+}

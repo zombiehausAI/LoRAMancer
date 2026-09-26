@@ -8,6 +8,8 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 @inject LoraUpdaterService UpdaterService
+@inject StudioSessionService StudioSession
+@inject NavigationManager NavigationManager
 @using LoRAMancer.App.Components.Dialogs
 @using System.Collections.Concurrent
 @using System.Threading
@@ -76,19 +78,38 @@
 <MudCard Elevation="1" Class="mb-3" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
     <MudCardContent Class="py-3">
         <MudGrid Class="align-center">
-            <MudItem xs="12" md="6">
-                <MudTextField @bind-Value="SearchQuery" Placeholder="Search by file name, model title, trigger word, or path (press Enter or pause)..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="ExecuteSearchNow" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" DebounceInterval="1500" OnKeyDown="@HandleSearchKeyDown" />
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="SearchQuery" Placeholder="Search by name, model, tag, category, trigger (press Enter)..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="ExecuteSearchNow" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Immediate="true" DebounceInterval="1500" OnKeyDown="@HandleSearchKeyDown" />
             </MudItem>
-            <MudItem xs="6" md="3">
-                <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Library" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+            <MudItem xs="6" sm="3" md="2">
+                <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Base" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
                     <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
-                    <MudSelectItem Value="@("favorites")">❤️ Favorites Only</MudSelectItem>
+                    <MudSelectItem Value="@("favorites")">❤️ Favorites</MudSelectItem>
                     <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
-                    <MudSelectItem Value="@("SDXL")">SDXL / Pony / Illustrious</MudSelectItem>
+                    <MudSelectItem Value="@("SDXL")">SDXL / Pony</MudSelectItem>
                     <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
                 </MudSelect>
             </MudItem>
-            <MudItem xs="6" md="3" Class="d-flex justify-end align-center gap-1">
+            <MudItem xs="6" sm="3" md="3">
+                <MudSelect T="string" Value="_sortBy" ValueChanged="OnSortByChanged" Label="Sort By" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                    <MudSelectItem Value="@("name-asc")">Name (A-Z)</MudSelectItem>
+                    <MudSelectItem Value="@("name-desc")">Name (Z-A)</MudSelectItem>
+                    <MudSelectItem Value="@("category-asc")">Category (A-Z)</MudSelectItem>
+                    <MudSelectItem Value="@("category-desc")">Category (Z-A)</MudSelectItem>
+                    <MudSelectItem Value="@("date-desc")">Date Modified (Newest)</MudSelectItem>
+                    <MudSelectItem Value="@("date-asc")">Date Modified (Oldest)</MudSelectItem>
+                    <MudSelectItem Value="@("size-desc")">File Size (Largest)</MudSelectItem>
+                    <MudSelectItem Value="@("size-asc")">File Size (Smallest)</MudSelectItem>
+                    <MudSelectItem Value="@("dim-desc")">Rank / Dim (Highest)</MudSelectItem>
+                    <MudSelectItem Value="@("tags-desc")">Tags Count (Most)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex justify-end align-center gap-1">
+                <MudTooltip Text="Open Category &amp; Tag Manager">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Category" OnClick="OpenCategoryManagerAsync">
+                        Categories
+                    </MudButton>
+                </MudTooltip>
                 <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
                     <MudButton Variant="@(_viewMode == "grid" ? Variant.Filled : Variant.Outlined)" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GridView" OnClick="@(() => _viewMode = "grid")">
                         Cards
@@ -99,6 +120,45 @@
                 </MudButtonGroup>
             </MudItem>
         </MudGrid>
+
+        <!-- Category Filter Chips Row -->
+        <div class="d-flex align-center gap-1 flex-wrap mt-2 pt-2" style="border-top: 1px dashed var(--border-dark);">
+            <span style="font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); margin-right: 4px;">Category:</span>
+            <MudChip T="string" 
+                     Size="Size.Small" 
+                     Variant="@(_selectedCategoryFilter == "all" ? Variant.Filled : Variant.Outlined)" 
+                     Color="@(_selectedCategoryFilter == "all" ? Color.Primary : Color.Default)" 
+                     OnClick="@(() => OnCategoryFilterChanged("all"))" 
+                     Style="cursor: pointer; font-size: 0.72rem;">
+                All (@LibraryService.Items.Count)
+            </MudChip>
+            @foreach (var cat in LibraryService.Categories) {
+                int count = LibraryService.Items.Count(m => string.Equals(m.Category, cat.Name, StringComparison.OrdinalIgnoreCase));
+                bool isSelected = string.Equals(_selectedCategoryFilter, cat.Name, StringComparison.OrdinalIgnoreCase);
+                <MudChip T="string" 
+                         Icon="@cat.Icon" 
+                         Size="Size.Small" 
+                         Variant="@(isSelected ? Variant.Filled : Variant.Outlined)" 
+                         OnClick="@(() => OnCategoryFilterChanged(cat.Name))" 
+                         Style="@($"cursor: pointer; font-size: 0.72rem; font-weight: 600; border-color: {cat.Color}; {(isSelected ? $"background-color: {cat.Color}; color: #ffffff;" : $"color: {cat.Color};")}")">
+                    @cat.Name (@count)
+                </MudChip>
+            }
+            @{
+                int uncatCount = LibraryService.Items.Count(m => string.IsNullOrWhiteSpace(m.Category));
+            }
+            @if (uncatCount > 0) {
+                bool isUncatSelected = _selectedCategoryFilter == "uncategorized";
+                <MudChip T="string" 
+                         Size="Size.Small" 
+                         Variant="@(isUncatSelected ? Variant.Filled : Variant.Outlined)" 
+                         Color="@(isUncatSelected ? Color.Warning : Color.Default)" 
+                         OnClick="@(() => OnCategoryFilterChanged("uncategorized"))" 
+                         Style="cursor: pointer; font-size: 0.72rem;">
+                    Uncategorized (@uncatCount)
+                </MudChip>
+            }
+        </div>
     </MudCardContent>
 </MudCard>
 
@@ -278,9 +338,11 @@
         <!-- LoRA Model Cards (Paged) -->
         @foreach (var lora in PagedLoras) {
             <MudItem xs="12" sm="6" md="4" lg="3">
-                <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
-                    <!-- Thumbnail Container -->
-                    <div style="position: relative; width: 100%; height: 220px; background-color: var(--bg-dark-base); display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                <MudMenu ActivationEvent="MouseEvent.RightClick" PositionAtCursor="true" Dense="true" Style="height: 100%; display: flex; flex-direction: column;">
+                    <ActivatorContent>
+                        <MudCard Elevation="1" Style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 10px; overflow: hidden; height: 100%; display: flex; flex-direction: column;">
+                            <!-- Thumbnail Container -->
+                            <div style="position: relative; width: 100%; height: 220px; background-color: var(--bg-dark-base); display: flex; align-items: center; justify-content: center; overflow: hidden;">
                         @{
                             string thumbSrc = GetImageSrc(lora.ThumbnailPath);
                         }
@@ -328,6 +390,40 @@
                             </MudTooltip>
                         </div>
 
+                        <!-- Category Overlay Badge -->
+                        <div style="position: absolute; bottom: 8px; left: 10px; z-index: 2;">
+                            <MudMenu Dense="true" Size="Size.Small">
+                                <ActivatorContent>
+                                    @{
+                                        var cardCat = GetCategoryObj(lora.Category);
+                                    }
+                                    <MudChip T="string" 
+                                             Size="Size.Small" 
+                                             Variant="Variant.Filled" 
+                                             Icon="@cardCat?.Icon"
+                                             Style="@($"font-size: 0.68rem; font-weight: 600; cursor: pointer; background-color: {(cardCat != null ? $"{cardCat.Color}33" : "rgba(0,0,0,0.5)")}; color: {(cardCat?.Color ?? "#cdd6f4")}; border: 1px solid {(cardCat?.Color ?? "rgba(255,255,255,0.2)")}; backdrop-filter: blur(4px);")">
+                                        @(lora.Category ?? "+ Category")
+                                    </MudChip>
+                                </ActivatorContent>
+                                <ChildContent>
+                                    <MudMenuItem OnClick="@(() => SetCategoryAsync(lora, null))">None (Uncategorized)</MudMenuItem>
+                                    <MudDivider />
+                                    @foreach (var cat in LibraryService.Categories) {
+                                        <MudMenuItem Icon="@cat.Icon" OnClick="@(() => SetCategoryAsync(lora, cat.Name))">
+                                            @cat.Name
+                                        </MudMenuItem>
+                                    }
+                                    <MudDivider />
+                                    <MudMenuItem Icon="@Icons.Material.Filled.LocalOffer" OnClick="@(() => OpenTagEditorAsync(lora))">
+                                        Assign Category &amp; Tags...
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="OpenCategoryManagerAsync">
+                                        Manage Categories...
+                                    </MudMenuItem>
+                                </ChildContent>
+                            </MudMenu>
+                        </div>
+
                         <!-- Size Badge -->
                         <div style="position: absolute; bottom: 8px; right: 10px; background: var(--bg-dark-overlay); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: var(--text-primary);">
                             @lora.FormattedSize
@@ -347,6 +443,20 @@
                         @if (_showAllFlat || !string.IsNullOrWhiteSpace(_searchQuery)) {
                             <div class="mt-1" style="font-size: 0.7rem; color: #6c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 📁 @GetRelativeSubfolder(lora.FilePath)
+                            </div>
+                        }
+
+                        <!-- Custom Tags Chips -->
+                        @if (lora.Tags != null && lora.Tags.Count > 0) {
+                            <div class="d-flex align-center gap-1 flex-wrap my-1">
+                                @foreach (var tag in lora.Tags.Take(4)) {
+                                    <span style="font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; background: rgba(137, 180, 250, 0.15); color: #89b4fa; border: 1px solid rgba(137, 180, 250, 0.3);">
+                                        #@tag
+                                    </span>
+                                }
+                                @if (lora.Tags.Count > 4) {
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary);">+@(lora.Tags.Count - 4)</span>
+                                }
                             </div>
                         }
 
@@ -385,8 +495,43 @@
                             Use Settings
                         </MudButton>
                         <div class="d-flex gap-1">
-                            <MudTooltip Text="Test / Render in ComfyUI">
-                                <MudIconButton Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Color="Color.Success" OnClick="@(() => OpenComfyUiTestAsync(lora))" />
+                            <MudTooltip Text="Diagnostics &amp; Lab Suite">
+                                <MudMenu Icon="@Icons.Material.Filled.Science" Size="Size.Small" Color="Color.Info" Dense="true">
+                                    <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.7rem; font-weight: 700; color: #89b4fa;">
+                                        DIAGNOSTICS &amp; LAB SUITE
+                                    </div>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Radar" IconColor="Color.Warning" OnClick="@(() => RouteToDiagnostic(lora, 3, autoRun: true))">
+                                        SVD Overbake Radar (Auto-Scan)
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Fingerprint" IconColor="Color.Primary" OnClick="@(() => RouteToDiagnostic(lora, 5, autoRun: true))">
+                                        Forensic De-Anonymizer (Reverse-Engineer)
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(lora, 4))">
+                                        Ghost Hunter &amp; Style Decoupler
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.ContentCut" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(lora, 0))">
+                                        Layer Surgery &amp; Resizing
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Biotech" IconColor="Color.Tertiary" OnClick="@(() => OpenLoraGeneTherapyAsync(lora))">
+                                        Vector Gene Therapy Suite
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Difference" IconColor="Color.Info" OnClick="@(() => OpenLoraDiffAsync(lora))">
+                                        Visual Diff &amp; Angle Drift Inspector
+                                    </MudMenuItem>
+                                    <MudDivider Class="my-1" />
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Science" IconColor="Color.Info" OnClick="@(() => SendToStudioLab(lora))">
+                                        Open Full Diagnostic Lab (Stage 3)
+                                    </MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(lora))">
+                                        Test in ComfyUI Canvas (Stage 4)
+                                    </MudMenuItem>
+                                </MudMenu>
+                            </MudTooltip>
+                            <MudTooltip Text="Send to Studio Test Canvas (Stage 4)">
+                                <MudIconButton Icon="@Icons.Material.Filled.Speed" Size="Size.Small" Color="Color.Success" OnClick="@(() => SendToStudioTest(lora))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Quick ComfyUI Test Modal">
+                                <MudIconButton Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" Color="Color.Tertiary" OnClick="@(() => OpenComfyUiTestAsync(lora))" />
                             </MudTooltip>
                             <MudTooltip Text="LoRA Surgery & SVD Resizing">
                                 <MudIconButton Icon="@Icons.Material.Filled.ContentCut" Size="Size.Small" Color="Color.Secondary" OnClick="@(() => OpenLoraSurgeryAsync(lora))" />
@@ -415,7 +560,109 @@
                         </div>
                     </MudCardActions>
                 </MudCard>
-            </MudItem>
+            </ActivatorContent>
+            <ChildContent>
+                <!-- Section 1: Studio Pipeline Routing -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #cba6f7; letter-spacing: 0.5px;">
+                    ⚡ STUDIO PIPELINE ROUTING
+                </div>
+                <MudMenuItem Icon="@Icons.Material.Filled.Science" IconColor="Color.Info" OnClick="@(() => SendToStudioLab(lora))">
+                    Send to Diagnostic Lab (Stage 3)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(lora))">
+                    Test in ComfyUI Canvas (Stage 4)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(lora))">
+                    Clone Recipe into Trainer (Stage 2)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(lora))">
+                    Seed Concept to Dataset Curator (Stage 1)
+                </MudMenuItem>
+
+                <MudDivider Class="my-1" />
+
+                <!-- Section 2: Diagnostics & Surgery -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #89b4fa; letter-spacing: 0.5px;">
+                    🔬 DIAGNOSTICS &amp; SURGERY
+                </div>
+                <MudMenuItem Icon="@Icons.Material.Filled.Radar" IconColor="Color.Warning" OnClick="@(() => RouteToDiagnostic(lora, 3, autoRun: true))">
+                    SVD Overbake Radar (Auto-Scan)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Fingerprint" IconColor="Color.Primary" OnClick="@(() => RouteToDiagnostic(lora, 5, autoRun: true))">
+                    Forensic De-Anonymizer (Reverse-Engineer)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(lora, 4))">
+                    Ghost Hunter &amp; Style Decoupler
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.ContentCut" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(lora, 0))">
+                    Layer Surgery &amp; Resizing
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Biotech" IconColor="Color.Tertiary" OnClick="@(() => OpenLoraGeneTherapyAsync(lora))">
+                    Vector Gene Therapy Suite
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Difference" IconColor="Color.Info" OnClick="@(() => OpenLoraDiffAsync(lora))">
+                    Visual Diff &amp; Angle Drift Inspector
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Insights" IconColor="Color.Warning" OnClick="@(() => OpenBenchmarkDialogAsync(lora))">
+                    Batch Benchmark &amp; Sweet Spot Matrix
+                </MudMenuItem>
+
+                <MudDivider Class="my-1" />
+
+                <!-- Section 3: Prompts & Clipboard -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #a6e3a1; letter-spacing: 0.5px;">
+                    📋 PROMPTS &amp; CLIPBOARD
+                </div>
+                <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" IconColor="Color.Success" OnClick="@(() => CopyTriggerWordAsync(lora))">
+                    Copy Trigger Word
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.DataObject" IconColor="Color.Primary" OnClick="@(() => CopyLoraPromptSyntaxAsync(lora))">
+                    Copy Prompt Syntax (&lt;lora:...&gt;)
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.FolderZip" IconColor="Color.Default" OnClick="@(() => CopyFilePathAsync(lora))">
+                    Copy Full File Path
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.DataObject" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraMetadataJsonAsync(lora))">
+                    Save &amp; Copy Metadata JSON
+                </MudMenuItem>
+
+                <MudDivider Class="my-1" />
+
+                <!-- Section 4: Categories & Tags -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #fab387; letter-spacing: 0.5px;">
+                    🏷️ CATEGORIES &amp; TAGS
+                </div>
+                <MudMenuItem Icon="@Icons.Material.Filled.LocalOffer" IconColor="Color.Primary" OnClick="@(() => OpenTagEditorAsync(lora))">
+                    Assign Category &amp; Tags...
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Category" IconColor="Color.Warning" OnClick="OpenCategoryManagerAsync">
+                    Manage Categories...
+                </MudMenuItem>
+
+                <MudDivider Class="my-1" />
+
+                <!-- Section 5: Vault Actions -->
+                <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #f9e2af; letter-spacing: 0.5px;">
+                    🗄️ VAULT ACTIONS
+                </div>
+                <MudMenuItem Icon="@(lora.IsFavorite ? Icons.Material.Filled.FavoriteBorder : Icons.Material.Filled.Favorite)" IconColor="Color.Error" OnClick="@(() => ToggleFavoriteAsync(lora))">
+                    @(lora.IsFavorite ? "Remove from Favorites" : "Mark as Favorite")
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.CloudDownload" IconColor="Color.Tertiary" OnClick="@(() => FetchSingleCivitaiAsync(lora))">
+                    Fetch Civitai Info &amp; Preview
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Refresh" IconColor="Color.Info" OnClick="@(() => RefreshLoraAsync(lora))">
+                    Refresh from Disk
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Visibility" IconColor="Color.Secondary" OnClick="@(() => InspectLora(lora))">
+                    Inspect Header Metadata
+                </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" IconColor="Color.Default" OnClick="@(() => OpenInExplorer(lora.FilePath))">
+                    Reveal in Explorer
+                </MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </MudItem>
         }
     </MudGrid>
 
@@ -452,6 +699,7 @@
         <HeaderContent>
             <MudTh Style="width: 48px;">Fav</MudTh>
             <MudTh>File Name</MudTh>
+            <MudTh>Category</MudTh>
             <MudTh>Base Model</MudTh>
             <MudTh>Rank (Dim)</MudTh>
             <MudTh>Alpha</MudTh>
@@ -468,13 +716,149 @@
                                OnClick="@(() => ToggleFavoriteAsync(context))" />
             </MudTd>
             <MudTd DataLabel="File Name">
-                <div class="d-flex align-center">
-                    <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
-                    <div>
-                        <div style="font-weight: 600; color: #cdd6f4;">@context.FileName</div>
-                        <div style="font-size: 0.75rem; color: #6c7086;">@context.FilePath</div>
-                    </div>
-                </div>
+                <MudMenu ActivationEvent="MouseEvent.RightClick" PositionAtCursor="true" Dense="true">
+                    <ActivatorContent>
+                        <div class="d-flex align-center" style="cursor: context-menu;">
+                            <MudIcon Icon="@Icons.Material.Filled.Layers" Color="Color.Primary" Size="Size.Small" Class="mr-2" />
+                            <div>
+                                <div style="font-weight: 600; color: #cdd6f4;">@context.FileName</div>
+                                <div style="font-size: 0.75rem; color: #6c7086;">@context.FilePath</div>
+                            </div>
+                        </div>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <!-- Section 1: Studio Pipeline Routing -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #cba6f7; letter-spacing: 0.5px;">
+                            ⚡ STUDIO PIPELINE ROUTING
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Science" IconColor="Color.Info" OnClick="@(() => SendToStudioLab(context))">
+                            Send to Diagnostic Lab (Stage 3)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(context))">
+                            Test in ComfyUI Canvas (Stage 4)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(context))">
+                            Clone Recipe into Trainer (Stage 2)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(context))">
+                            Seed Concept to Dataset Curator (Stage 1)
+                        </MudMenuItem>
+
+                        <MudDivider Class="my-1" />
+
+                        <!-- Section 2: Diagnostics & Surgery -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #89b4fa; letter-spacing: 0.5px;">
+                            🔬 DIAGNOSTICS &amp; SURGERY
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Radar" IconColor="Color.Warning" OnClick="@(() => RouteToDiagnostic(context, 3, autoRun: true))">
+                            SVD Overbake Radar (Auto-Scan)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Fingerprint" IconColor="Color.Primary" OnClick="@(() => RouteToDiagnostic(context, 5, autoRun: true))">
+                            Forensic De-Anonymizer (Reverse-Engineer)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(context, 4))">
+                            Ghost Hunter &amp; Style Decoupler
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.ContentCut" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(context, 0))">
+                            Layer Surgery &amp; Resizing
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Biotech" IconColor="Color.Tertiary" OnClick="@(() => OpenLoraGeneTherapyAsync(context))">
+                            Vector Gene Therapy Suite
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Difference" IconColor="Color.Info" OnClick="@(() => OpenLoraDiffAsync(context))">
+                            Visual Diff &amp; Angle Drift Inspector
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Insights" IconColor="Color.Warning" OnClick="@(() => OpenBenchmarkDialogAsync(context))">
+                            Batch Benchmark &amp; Sweet Spot Matrix
+                        </MudMenuItem>
+
+                        <MudDivider Class="my-1" />
+
+                        <!-- Section 3: Prompts & Clipboard -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #a6e3a1; letter-spacing: 0.5px;">
+                            📋 PROMPTS &amp; CLIPBOARD
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.ContentCopy" IconColor="Color.Success" OnClick="@(() => CopyTriggerWordAsync(context))">
+                            Copy Trigger Word
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.DataObject" IconColor="Color.Primary" OnClick="@(() => CopyLoraPromptSyntaxAsync(context))">
+                            Copy Prompt Syntax (&lt;lora:...&gt;)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.FolderZip" IconColor="Color.Default" OnClick="@(() => CopyFilePathAsync(context))">
+                            Copy Full File Path
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.DataObject" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraMetadataJsonAsync(context))">
+                            Save &amp; Copy Metadata JSON
+                        </MudMenuItem>
+
+                        <MudDivider Class="my-1" />
+
+                        <!-- Section 4: Categories & Tags -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #fab387; letter-spacing: 0.5px;">
+                            🏷️ CATEGORIES &amp; TAGS
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.LocalOffer" IconColor="Color.Primary" OnClick="@(() => OpenTagEditorAsync(context))">
+                            Assign Category &amp; Tags...
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Category" IconColor="Color.Warning" OnClick="OpenCategoryManagerAsync">
+                            Manage Categories...
+                        </MudMenuItem>
+
+                        <MudDivider Class="my-1" />
+
+                        <!-- Section 5: Vault Actions -->
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.68rem; font-weight: 700; color: #f9e2af; letter-spacing: 0.5px;">
+                            🗄️ VAULT ACTIONS
+                        </div>
+                        <MudMenuItem Icon="@(context.IsFavorite ? Icons.Material.Filled.FavoriteBorder : Icons.Material.Filled.Favorite)" IconColor="Color.Error" OnClick="@(() => ToggleFavoriteAsync(context))">
+                            @(context.IsFavorite ? "Remove from Favorites" : "Mark as Favorite")
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.CloudDownload" IconColor="Color.Tertiary" OnClick="@(() => FetchSingleCivitaiAsync(context))">
+                            Fetch Civitai Info &amp; Preview
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Refresh" IconColor="Color.Info" OnClick="@(() => RefreshLoraAsync(context))">
+                            Refresh from Disk
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Visibility" IconColor="Color.Secondary" OnClick="@(() => InspectLora(context))">
+                            Inspect Header Metadata
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.FolderOpen" IconColor="Color.Default" OnClick="@(() => OpenInExplorer(context.FilePath))">
+                            Reveal in Explorer
+                        </MudMenuItem>
+                    </ChildContent>
+                </MudMenu>
+            </MudTd>
+            <MudTd DataLabel="Category">
+                <MudMenu Dense="true" Size="Size.Small">
+                    <ActivatorContent>
+                        @{
+                            var rowCat = GetCategoryObj(context.Category);
+                        }
+                        <MudChip T="string" 
+                                 Size="Size.Small" 
+                                 Variant="Variant.Filled" 
+                                 Icon="@rowCat?.Icon"
+                                 Style="@($"font-size: 0.7rem; font-weight: 600; cursor: pointer; background-color: {(rowCat != null ? $"{rowCat.Color}22" : "rgba(255,255,255,0.06)")}; color: {(rowCat?.Color ?? "var(--text-secondary)")}; border: 1px solid {(rowCat?.Color ?? "var(--border-dark)")};")">
+                            @(context.Category ?? "None")
+                        </MudChip>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <MudMenuItem OnClick="@(() => SetCategoryAsync(context, null))">None (Uncategorized)</MudMenuItem>
+                        <MudDivider />
+                        @foreach (var cat in LibraryService.Categories) {
+                            <MudMenuItem Icon="@cat.Icon" OnClick="@(() => SetCategoryAsync(context, cat.Name))">
+                                @cat.Name
+                            </MudMenuItem>
+                        }
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Filled.LocalOffer" OnClick="@(() => OpenTagEditorAsync(context))">
+                            Assign Category &amp; Tags...
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="OpenCategoryManagerAsync">
+                            Manage Categories...
+                        </MudMenuItem>
+                    </ChildContent>
+                </MudMenu>
             </MudTd>
             <MudTd DataLabel="Base Model">
                 <MudMenu Dense="true" Size="Size.Small">
@@ -504,6 +888,41 @@
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" OnClick="@(() => UseLoraTrainingSettings(context))" Class="mr-1">
                     Use Settings
                 </MudButton>
+                <MudTooltip Text="Diagnostics &amp; Lab Suite">
+                    <MudMenu Icon="@Icons.Material.Filled.Science" Size="Size.Small" Color="Color.Info" Dense="true">
+                        <div class="px-3 py-1" style="border-bottom: 1px solid var(--border-dark); font-size: 0.7rem; font-weight: 700; color: #89b4fa;">
+                            DIAGNOSTICS &amp; LAB SUITE
+                        </div>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Radar" IconColor="Color.Warning" OnClick="@(() => RouteToDiagnostic(context, 3, autoRun: true))">
+                            SVD Overbake Radar (Auto-Scan)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Fingerprint" IconColor="Color.Primary" OnClick="@(() => RouteToDiagnostic(context, 5, autoRun: true))">
+                            Forensic De-Anonymizer (Reverse-Engineer)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.AutoFixHigh" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(context, 4))">
+                            Ghost Hunter &amp; Style Decoupler
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.ContentCut" IconColor="Color.Secondary" OnClick="@(() => RouteToDiagnostic(context, 0))">
+                            Layer Surgery &amp; Resizing
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Biotech" IconColor="Color.Tertiary" OnClick="@(() => OpenLoraGeneTherapyAsync(context))">
+                            Vector Gene Therapy Suite
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Difference" IconColor="Color.Info" OnClick="@(() => OpenLoraDiffAsync(context))">
+                            Visual Diff &amp; Angle Drift Inspector
+                        </MudMenuItem>
+                        <MudDivider Class="my-1" />
+                        <MudMenuItem Icon="@Icons.Material.Filled.Science" IconColor="Color.Info" OnClick="@(() => SendToStudioLab(context))">
+                            Open Full Diagnostic Lab (Stage 3)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(context))">
+                            Test in ComfyUI Canvas (Stage 4)
+                        </MudMenuItem>
+                    </MudMenu>
+                </MudTooltip>
+                <MudTooltip Text="Send to Studio Test Canvas (Stage 4)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Speed" Color="Color.Success" Size="Size.Small" OnClick="@(() => SendToStudioTest(context))" />
+                </MudTooltip>
                 <MudTooltip Text="LoRA Gene Therapy & Outlier Pruning">
                     <MudIconButton Icon="@Icons.Material.Filled.Biotech" Color="Color.Tertiary" Size="Size.Small" OnClick="@(() => OpenLoraGeneTherapyAsync(context))" />
                 </MudTooltip>
@@ -658,6 +1077,9 @@
         }
     }
 
+    private string _selectedCategoryFilter = "all";
+    private string _sortBy = "name-asc";
+
     private void UpdateFilteredList() {
         try {
             string current = LibraryService.CurrentFolder;
@@ -670,6 +1092,7 @@
             // Update filtered LoRAs
             string query = _searchQuery?.Trim() ?? string.Empty;
             string arch = _selectedArchitecture ?? "all";
+            string catFilter = _selectedCategoryFilter ?? "all";
 
             var filtered = items.Where(l => {
                 if (l == null) {
@@ -698,11 +1121,24 @@
                     }
                 }
 
+                // Category matching
+                if (string.Equals(catFilter, "uncategorized", StringComparison.OrdinalIgnoreCase)) {
+                    if (!string.IsNullOrWhiteSpace(l.Category)) {
+                        return false;
+                    }
+                } else if (!string.Equals(catFilter, "all", StringComparison.OrdinalIgnoreCase)) {
+                    if (!string.Equals(l.Category, catFilter, StringComparison.OrdinalIgnoreCase)) {
+                        return false;
+                    }
+                }
+
                 // Search query matching
                 if (!string.IsNullOrWhiteSpace(query)) {
                     bool matchName = l.FileName != null && l.FileName.Contains(query, StringComparison.OrdinalIgnoreCase);
                     bool matchModel = l.CivitaiInfo?.ModelName != null && l.CivitaiInfo.ModelName.Contains(query, StringComparison.OrdinalIgnoreCase);
                     bool matchPath = l.FilePath != null && l.FilePath.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    bool matchCat = l.Category != null && l.Category.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    bool matchTags = l.Tags != null && l.Tags.Any(t => !string.IsNullOrWhiteSpace(t) && t.Contains(query, StringComparison.OrdinalIgnoreCase));
                     bool matchTriggers = false;
                     try {
                         if (l.TrainedWords != null && l.TrainedWords.Count > 0) {
@@ -716,16 +1152,30 @@
                         }
                     } catch { }
 
-                    if (!matchName && !matchModel && !matchPath && !matchTriggers) {
+                    if (!matchName && !matchModel && !matchPath && !matchTriggers && !matchCat && !matchTags) {
                         return false;
                     }
                 }
 
                 return true;
-            }).ToList();
+            });
+
+            // Sorting logic
+            IEnumerable<LoraMetadata> sorted = _sortBy switch {
+                "name-desc" => filtered.OrderByDescending(l => l.FileName, StringComparer.OrdinalIgnoreCase),
+                "category-asc" => filtered.OrderBy(l => l.DisplayCategory, StringComparer.OrdinalIgnoreCase).ThenBy(l => l.FileName, StringComparer.OrdinalIgnoreCase),
+                "category-desc" => filtered.OrderByDescending(l => l.DisplayCategory, StringComparer.OrdinalIgnoreCase).ThenBy(l => l.FileName, StringComparer.OrdinalIgnoreCase),
+                "date-desc" => filtered.OrderByDescending(l => l.LastModifiedUtc ?? DateTime.MinValue),
+                "date-asc" => filtered.OrderBy(l => l.LastModifiedUtc ?? DateTime.MaxValue),
+                "size-desc" => filtered.OrderByDescending(l => l.FileSizeBytes),
+                "size-asc" => filtered.OrderBy(l => l.FileSizeBytes),
+                "dim-desc" => filtered.OrderByDescending(l => l.NetworkDim ?? 0),
+                "tags-desc" => filtered.OrderByDescending(l => l.Tags?.Count ?? 0),
+                _ => filtered.OrderBy(l => l.FileName, StringComparer.OrdinalIgnoreCase)
+            };
 
             lock (_filterLock) {
-                _filteredLoras = filtered;
+                _filteredLoras = sorted.ToList();
             }
 
             if (_currentPage > TotalPages) {
@@ -999,6 +1449,7 @@
     }
 
     protected override async Task OnInitializedAsync() {
+        StudioSession.SetStage(StudioStage.Vault);
         LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
         LibraryService.OnLibrariesChanged += HandleLibrariesChanged;
         LibraryService.OnScanProgress += HandleScanProgress;
@@ -1006,6 +1457,7 @@
         LibraryService.OnEnrichStateChanged += HandleEnrichStateChanged;
         LibraryService.OnEnrichProgress += HandleEnrichProgress;
         LibraryService.OnLoraEnriched += HandleLoraEnriched;
+        LibraryService.OnCategoriesChanged += HandleCategoriesChanged;
         UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
 
         // Directly sync from SQLite database if items are not yet in memory
@@ -1017,6 +1469,13 @@
     }
 
     private void HandleLibrariesChanged() {
+        _ = SafeInvokeAsync(() => {
+            UpdateFilteredList();
+            StateHasChanged();
+        });
+    }
+
+    private void HandleCategoriesChanged() {
         _ = SafeInvokeAsync(() => {
             UpdateFilteredList();
             StateHasChanged();
@@ -1071,6 +1530,7 @@
         } catch { }
         LibraryService.OnLibraryUpdated -= HandleLibraryUpdated;
         LibraryService.OnLibrariesChanged -= HandleLibrariesChanged;
+        LibraryService.OnCategoriesChanged -= HandleCategoriesChanged;
         LibraryService.OnScanProgress -= HandleScanProgress;
         LibraryService.OnScanStateChanged -= HandleScanStateChanged;
         LibraryService.OnEnrichStateChanged -= HandleEnrichStateChanged;
@@ -1407,5 +1867,149 @@
             BackdropClick = false
         };
         await DialogService.ShowAsync<LoraDiffDialog>("LoRA Visual Diff Inspector", parameters, options);
+    }
+
+    private void SendToStudioLab(LoraMetadata lora) {
+        if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
+        StudioSession.SetActiveLora(lora.FilePath);
+        string? trigger = GetPrimaryTrigger(lora);
+        if (!string.IsNullOrWhiteSpace(trigger)) {
+            StudioSession.SetTriggerWord(trigger);
+        }
+        NavigationManager.NavigateTo("/lab");
+    }
+
+    private void SendToStudioTest(LoraMetadata lora) {
+        if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
+        StudioSession.SetActiveLora(lora.FilePath);
+        string? trigger = GetPrimaryTrigger(lora);
+        if (!string.IsNullOrWhiteSpace(trigger)) {
+            StudioSession.SetTriggerWord(trigger);
+        }
+        NavigationManager.NavigateTo("/test");
+    }
+
+    private void RouteToDiagnostic(LoraMetadata lora, int tabIndex, bool autoRun = false) {
+        if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) return;
+        StudioSession.SetActiveLora(lora.FilePath);
+        string? trigger = GetPrimaryTrigger(lora);
+        if (!string.IsNullOrWhiteSpace(trigger)) {
+            StudioSession.SetTriggerWord(trigger);
+        }
+        string url = $"/lab?tab={tabIndex}" + (autoRun ? "&autoRun=true" : "");
+        NavigationManager.NavigateTo(url);
+    }
+
+    private void SeedConceptToCurator(LoraMetadata lora) {
+        if (lora == null) return;
+        string? trigger = GetPrimaryTrigger(lora);
+        string concept = !string.IsNullOrWhiteSpace(trigger) 
+            ? trigger 
+            : (lora.CivitaiInfo?.ModelName ?? Path.GetFileNameWithoutExtension(lora.FilePath ?? "concept"));
+        NavigationManager.NavigateTo($"/curator?concept={Uri.EscapeDataString(concept)}");
+    }
+
+    private async Task CopyTriggerWordAsync(LoraMetadata lora) {
+        string? trigger = GetPrimaryTrigger(lora);
+        if (!string.IsNullOrWhiteSpace(trigger)) {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", trigger);
+            Snackbar.Add($"Copied trigger word: \"{trigger}\"", Severity.Success);
+        } else {
+            Snackbar.Add("No trigger word recorded for this LoRA", Severity.Info);
+        }
+    }
+
+    private async Task CopyLoraPromptSyntaxAsync(LoraMetadata lora) {
+        string baseName = Path.GetFileNameWithoutExtension(lora.FilePath ?? lora.FileName ?? "model");
+        string? trigger = GetPrimaryTrigger(lora);
+        string promptSnippet = string.IsNullOrWhiteSpace(trigger) 
+            ? $"<lora:{baseName}:0.85>" 
+            : $"<lora:{baseName}:0.85>, {trigger}";
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", promptSnippet);
+        Snackbar.Add($"Copied prompt syntax: {promptSnippet}", Severity.Success);
+    }
+
+    private async Task CopyFilePathAsync(LoraMetadata lora) {
+        if (!string.IsNullOrWhiteSpace(lora.FilePath)) {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", lora.FilePath);
+            Snackbar.Add("Copied file path to clipboard", Severity.Success);
+        }
+    }
+
+    private async Task OpenBenchmarkDialogAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<LoraBenchmarkDialog> {
+            { x => x.InitialFolder, Path.GetDirectoryName(lora.FilePath) ?? string.Empty },
+            { x => x.InitialTriggerWord, GetPrimaryTrigger(lora) ?? string.Empty }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false
+        };
+        await DialogService.ShowAsync<LoraBenchmarkDialog>("LoRA Batch Benchmark & Weight Sweep", parameters, options);
+    }
+
+    private LoraCategory? GetCategoryObj(string? categoryName) {
+        if (string.IsNullOrWhiteSpace(categoryName)) return null;
+        return LibraryService.Categories.FirstOrDefault(c => string.Equals(c.Name, categoryName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task SetCategoryAsync(LoraMetadata lora, string? category) {
+        try {
+            await LibraryService.SetLoraCategoryAsync(lora, category);
+            Snackbar.Add(string.IsNullOrWhiteSpace(category) 
+                ? "Cleared category." 
+                : $"Assigned category \"{category}\".", Severity.Success);
+            UpdateFilteredList();
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to assign category: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OpenCategoryManagerAsync() {
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true,
+            CloseButton = true
+        };
+        var dialog = await DialogService.ShowAsync<CategoryManagerDialog>("Category & Tag Manager", options);
+        var res = await dialog.Result;
+        if (res != null && !res.Canceled) {
+            UpdateFilteredList();
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenTagEditorAsync(LoraMetadata lora) {
+        var parameters = new DialogParameters<LoraTagEditorDialog> {
+            { x => x.Lora, lora }
+        };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseButton = true
+        };
+        var dialog = await DialogService.ShowAsync<LoraTagEditorDialog>("Assign Category & Tags", parameters, options);
+        var res = await dialog.Result;
+        if (res != null && !res.Canceled) {
+            UpdateFilteredList();
+            StateHasChanged();
+        }
+    }
+
+    private void OnCategoryFilterChanged(string category) {
+        _selectedCategoryFilter = category;
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
+    }
+
+    private void OnSortByChanged(string sortBy) {
+        _sortBy = sortBy;
+        _currentPage = 1;
+        UpdateFilteredList();
+        StateHasChanged();
     }
 }

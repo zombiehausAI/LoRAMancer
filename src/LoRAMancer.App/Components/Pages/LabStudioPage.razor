@@ -1,0 +1,714 @@
+@page "/lab"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@implements IDisposable
+@inject StudioSessionService StudioSession
+@inject LoraSurgeryService SurgeryService
+@inject LoraDiffService DiffService
+@inject OverbakeRadarService OverbakeRadar
+@inject LoraEchoHunterService EchoHunter
+@inject LoraDeAnonymizerService DeAnonymizer
+@inject NativeFileDialogService FileDialogService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+    <div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Color="Color.Info" Variant="Variant.Filled" Size="Size.Small" Style="font-weight: 700;">STAGE 3</MudChip>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--text-primary);">LoRA Diagnostic Lab &amp; Surgery Studio</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Layer surgery, block weight manipulation, vector gene therapy, SVD radar, ghost hunting, and forensic de-anonymization
+        </MudText>
+    </div>
+
+    <div class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowsePrimaryLoraAsync">
+            Load Target LoRA
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Layers" OnClick="OpenSurgeryDialogAsync">
+            Open Advanced Surgery
+        </MudButton>
+    </div>
+</div>
+
+<!-- Active LoRA Target Bar -->
+<MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+        <div class="d-flex align-center gap-2 flex-grow-1" style="min-width: 280px;">
+            <MudIcon Icon="@Icons.Material.Filled.Biotech" Color="Color.Info" Size="Size.Small" />
+            <MudText Typo="Typo.body2" Style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #cdd6f4;">
+                @(string.IsNullOrWhiteSpace(_primaryLoraPath) ? "No LoRA target loaded" : _primaryLoraPath)
+            </MudText>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_primaryLoraPath) && File.Exists(_primaryLoraPath)) {
+            <div class="d-flex align-center gap-2">
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">@GetFileSize(_primaryLoraPath)</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">Ready for Surgery</MudChip>
+            </div>
+        }
+    </div>
+</MudCard>
+
+@if (!string.IsNullOrWhiteSpace(_primaryLoraPath) && File.Exists(_primaryLoraPath)) {
+    <MudTabs @bind-ActivePanelIndex="_activeTabIndex" Elevation="1" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4" Color="Color.Dark" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid #313244; border-radius: 8px;">
+        <!-- Tab 1: Layer Surgery & Block Pruner -->
+        <MudTabPanel Text="Layer Surgery &amp; Pruning" Icon="@Icons.Material.Filled.ContentCut">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-3">
+                Adjust layer weights, prune zero-impact ranks, and rescale cross-attention blocks to eliminate style bleed or reduce file footprint.
+            </MudText>
+
+            <MudGrid Spacing="3">
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #cdd6f4;" Class="mb-2">Cross-Attention &amp; TE Scaling</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">
+                            Rescale text encoder vs unet/transformer blocks to tune prompt responsiveness.
+                        </MudText>
+
+                        <div class="mb-3">
+                            <div class="d-flex justify-space-between">
+                                <MudText Typo="Typo.caption">Text Encoder Multiplier</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89b4fa;">@_teScale.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="_teScale" Min="0.0" Max="2.0" Step="0.05" Color="Color.Primary" />
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="d-flex justify-space-between">
+                                <MudText Typo="Typo.caption">UNet / Transformer Backbone Multiplier</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #a6e3a1;">@_unetScale.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="_unetScale" Min="0.0" Max="2.0" Step="0.05" Color="Color.Success" />
+                        </div>
+
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Tune" OnClick="ApplySurgeryScalesAsync" Disabled="_isProcessing">
+                            @(_isProcessing ? "Processing Tensors..." : "Apply Layer Rescale & Save")
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #cdd6f4;" Class="mb-2">Rank Pruning &amp; SVD Compression</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">
+                            Compress high-rank LoRAs (e.g. rank 64 down to rank 16) using Singular Value Decomposition truncation without losing concept fidelity.
+                        </MudText>
+
+                        <div class="mb-4">
+                            <MudSelect T="int" @bind-Value="_targetRank" Label="Target Rank Compression" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                <MudSelectItem Value="8">Rank 8 (Ultra-compact ~16MB)</MudSelectItem>
+                                <MudSelectItem Value="16">Rank 16 (Standard production ~32MB)</MudSelectItem>
+                                <MudSelectItem Value="32">Rank 32 (High fidelity ~64MB)</MudSelectItem>
+                                <MudSelectItem Value="64">Rank 64 (Full capacity)</MudSelectItem>
+                            </MudSelect>
+                        </div>
+
+                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Compress" OnClick="ApplyRankPruneAsync" Disabled="_isProcessing">
+                            @(_isProcessing ? "Compressing SVD..." : "Compress to Target Rank")
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <!-- Tab 2: LoRA Gene Therapy -->
+        <MudTabPanel Text="Vector Gene Therapy" Icon="@Icons.Material.Filled.Biotech">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-3">
+                Isolate and suppress toxic weight eigenvectors that produce noisy skin artifacts, high-contrast overbake, or corrupted eyes.
+            </MudText>
+
+            <MudCard Elevation="0" Class="pa-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+                    <div>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #cdd6f4;">Artifact Suppression Filter</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Clamp top 1% extreme outlier weight eigenvalues causing chromatic blowout</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Filled" Color="Color.Info" StartIcon="@Icons.Material.Filled.Healing" OnClick="OpenGeneTherapyDialogAsync">
+                        Open Gene Therapy Suite
+                    </MudButton>
+                </div>
+            </MudCard>
+        </MudTabPanel>
+
+        <!-- Tab 3: Visual Diff & Weights -->
+        <MudTabPanel Text="Visual Diff &amp; Inspection" Icon="@Icons.Material.Filled.Difference">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-3">
+                Inspect layer weight magnitudes, Frobenius norms, and compare against reference models or intermediate epoch checkpoints.
+            </MudText>
+
+            <MudCard Elevation="0" Class="pa-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3">
+                    <div>
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #cdd6f4;">Layer Delta Inspector</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Compare Frobenius norm distribution across attention blocks</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Analytics" OnClick="OpenDiffDialogAsync">
+                        Launch Full Diff Inspector
+                    </MudButton>
+                </div>
+            </MudCard>
+        </MudTabPanel>
+
+        <!-- Tab 4: SVD Spectral Decay & Overbake Radar -->
+        <MudTabPanel Text="SVD Overbake Radar" Icon="@Icons.Material.Filled.Radar">
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 mt-1">
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">SVD Spectral Energy Decay &amp; Overbake Radar</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Detect catastrophic rank collapse, singular value monopolization, and mathematical overbaking
+                    </MudText>
+                </div>
+                <div class="d-flex gap-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Analytics" OnClick="RunOverbakeAnalysisAsync" Disabled="_isAnalyzingOverbake">
+                        @(_isAnalyzingOverbake ? "Computing SVD..." : "Run SVD Analysis")
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="AnalyzeEpochFolderAsync" Disabled="_isAnalyzingOverbake">
+                        Audit Epoch Checkpoints
+                    </MudButton>
+                </div>
+            </div>
+
+            @if (_overbakeReport != null) {
+                <MudGrid Spacing="3" Class="mb-3">
+                    <MudItem xs="12" md="4">
+                        <MudCard Elevation="0" Class="pa-4 text-center h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Overbake Severity Index</MudText>
+                            <div class="d-flex flex-column align-center justify-center my-3">
+                                <MudProgressCircular Color="@GetOverbakeColor(_overbakeReport.OverallStatus)" Value="@_overbakeReport.OverbakeScore" Size="Size.Large" StrokeWidth="8" />
+                                <span style="font-weight: 800; font-size: 1.1rem; color: #cdd6f4; margin-top: 8px;">@_overbakeReport.OverbakeScore%</span>
+                            </div>
+                            <MudChip T="string" Color="@GetOverbakeColor(_overbakeReport.OverallStatus)" Size="Size.Small" Variant="Variant.Filled" Style="font-weight: 700;">
+                                @_overbakeReport.OverallStatus
+                            </MudChip>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="8">
+                        <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;" Class="mb-1">Mathematical Diagnosis</MudText>
+                            <MudText Typo="Typo.body2" Style="color: #a6e3a1;" Class="mb-2">@_overbakeReport.Verdict</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">@_overbakeReport.Recommendation</MudText>
+
+                            <div class="d-flex gap-3 flex-wrap pt-2" style="border-top: 1px solid #313244;">
+                                <div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Avg Frobenius Norm</MudText>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 700; color: #89b4fa;">@_overbakeReport.AverageFrobeniusNorm.ToString("F3")</MudText>
+                                </div>
+                                <div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Peak Layer Norm</MudText>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 700; color: #fab387;">@_overbakeReport.MaxFrobeniusNorm.ToString("F3")</MudText>
+                                </div>
+                                <div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Spectral Entropy</MudText>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 700; color: #cba6f7;">@_overbakeReport.AverageSpectralEntropy.ToString("F3") / 1.0</MudText>
+                                </div>
+                                <div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Analyzed Layers</MudText>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 700; color: #cdd6f4;">@_overbakeReport.TotalLoRALayers</MudText>
+                                </div>
+                            </div>
+                        </MudCard>
+                    </MudItem>
+                </MudGrid>
+
+                <MudTable Items="@_overbakeReport.LayerMetrics" Dense="true" Hover="true" Elevation="0" Style="background-color: transparent;" Outlined="true" Height="340px" FixedHeader="true">
+                    <HeaderContent>
+                        <MudTh>Layer Name</MudTh>
+                        <MudTh Style="width: 140px;">Frobenius Norm</MudTh>
+                        <MudTh Style="width: 140px;">Top SVD (σ₁)</MudTh>
+                        <MudTh Style="width: 160px;">Top-1 Dominance</MudTh>
+                        <MudTh Style="width: 160px;">Spectral Entropy</MudTh>
+                        <MudTh Style="width: 140px; text-align: right;">Status</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #cdd6f4;">@context.LayerName</span>
+                        </MudTd>
+                        <MudTd>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #89b4fa;">@context.FrobeniusNorm</span>
+                        </MudTd>
+                        <MudTd>
+                            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #fab387;">@context.TopSingularValue</span>
+                        </MudTd>
+                        <MudTd>
+                            <div class="d-flex align-center gap-2">
+                                <MudProgressLinear Color="@(context.DominancePct > 70 ? Color.Error : Color.Tertiary)" Value="@context.DominancePct" Size="Size.Small" Style="width: 60px;" />
+                                <span style="font-size: 0.75rem;">@context.DominancePct.ToString("F1")%</span>
+                            </div>
+                        </MudTd>
+                        <MudTd>
+                            <span style="font-size: 0.8rem; color: #a6adc8;">@context.SpectralEntropy.ToString("F3")</span>
+                        </MudTd>
+                        <MudTd Style="text-align: right;">
+                            <MudChip T="string" Color="@GetOverbakeColor(context.Status)" Size="Size.Small" Variant="Variant.Outlined">
+                                @context.Status
+                            </MudChip>
+                        </MudTd>
+                    </RowTemplate>
+                    <PagerContent>
+                        <MudTablePager PageSizeOptions="new int[] { 10, 25, 50 }" />
+                    </PagerContent>
+                </MudTable>
+            }
+
+            @if (_sequenceReport != null) {
+                <MudCard Elevation="0" Class="pa-4 mt-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                    <div class="d-flex align-center gap-2 mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Stars" Color="Color.Success" />
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #a6e3a1;">Epoch Sequence Sweet Spot Radar</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@_sequenceReport.SummaryMessage</MudText>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        @foreach (var item in _sequenceReport.Trajectory) {
+                            <MudCard Elevation="0" Class="pa-3 text-center" Style="@($"background-color: #181825; border: 1px solid {(item.IsRecommendedSweetSpot ? "#a6e3a1" : "#313244")}; border-radius: 6px; min-width: 140px;")">
+                                <div class="d-flex align-center justify-center gap-1 mb-1">
+                                    <MudText Typo="Typo.caption" Style="font-weight: 700;">Epoch @item.EpochNumber</MudText>
+                                    @if (item.IsRecommendedSweetSpot) {
+                                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                    }
+                                </div>
+                                <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {(item.IsRecommendedSweetSpot ? "#a6e3a1" : "#cdd6f4")};")">
+                                    @item.OverbakeScore%
+                                </MudText>
+                                <MudChip T="string" Size="Size.Small" Color="@GetOverbakeColor(item.Status)" Variant="Variant.Filled" Class="mt-1">
+                                    @item.Status
+                                </MudChip>
+                            </MudCard>
+                        }
+                    </div>
+                </MudCard>
+            }
+        </MudTabPanel>
+
+        <!-- Tab 5: Ghost & Echo Hunter + Style Decoupler -->
+        <MudTabPanel Text="Ghost Hunter &amp; Decoupler" Icon="@Icons.Material.Filled.AutoFixHigh">
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-3">
+                Decouple art style bleed from character identity, or project out toxic negative vectors and unwanted traits via orthogonal repulsion.
+            </MudText>
+
+            <MudGrid Spacing="3">
+                <!-- Style vs Identity Decoupler -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Palette" Color="Color.Secondary" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">Style vs. Identity Decoupler</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">
+                            Attenuate backbone / cross-attention blocks that dictate artistic style, lighting, and palette while locking in the core character facial and structural identity.
+                        </MudText>
+
+                        <div class="mb-3">
+                            <div class="d-flex justify-space-between">
+                                <MudText Typo="Typo.caption">Identity Retention (Face &amp; Anatomy)</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89b4fa;">@_identityRetention.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="_identityRetention" Min="0.1" Max="2.0" Step="0.05" Color="Color.Primary" />
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="d-flex justify-space-between">
+                                <MudText Typo="Typo.caption">Style Bleed Attenuation</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #f38ba8;">@_styleAttenuation.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="_styleAttenuation" Min="0.0" Max="1.0" Step="0.05" Color="Color.Error" />
+                        </div>
+
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FilterTiltShift" OnClick="DecoupleStyleAsync" Disabled="_isProcessingEcho">
+                            @(_isProcessingEcho ? "Decoupling Vectors..." : "Decouple Identity from Style")
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+
+                <!-- Ghost & Echo Repulsion -->
+                <MudItem xs="12" md="6">
+                    <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <div class="d-flex align-center gap-2 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.GppBad" Color="Color.Error" />
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">Negative Vector &amp; Ghost Repulsion</MudText>
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">
+                            Perform orthogonal subtraction of failure vectors from a donor LoRA or bad run (e.g. eliminating overbaked hands or an unwanted art bias).
+                        </MudText>
+
+                        <div class="d-flex align-center gap-2 mb-3">
+                            <MudTextField @bind-Value="_ghostDonorPath" Label="Donor / Negative Vector LoRA" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" Placeholder="Select bad checkpoint or unwanted style LoRA..." />
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" Variant="Variant.Filled" OnClick="BrowseGhostDonorAsync" />
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="d-flex justify-space-between">
+                                <MudText Typo="Typo.caption">Orthogonal Repulsion Strength</MudText>
+                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #fab387;">@_ghostRepulsionStrength.ToString("F2")x</MudText>
+                            </div>
+                            <MudSlider @bind-Value="_ghostRepulsionStrength" Min="0.1" Max="2.0" Step="0.05" Color="Color.Warning" />
+                        </div>
+
+                        <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.FlashOn" OnClick="RepelGhostVectorAsync" Disabled="@(_isProcessingEcho || string.IsNullOrWhiteSpace(_ghostDonorPath))">
+                            @(_isProcessingEcho ? "Repelling Ghost Vector..." : "Repel & Purify LoRA")
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <!-- Tab 6: LoRA Forensic De-Anonymizer -->
+        <MudTabPanel Text="Forensic De-Anonymizer" Icon="@Icons.Material.Filled.Fingerprint">
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 mt-1">
+                <div>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">LoRA Reverse-Engineering &amp; De-Anonymizer</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Reconstruct architecture fingerprint, rank/alpha scaling, trained trigger keywords, and training hyperparameters from raw weights
+                    </MudText>
+                </div>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Search" OnClick="RunDeAnonymizerAsync" Disabled="_isDeAnonymizing">
+                    @(_isDeAnonymizing ? "Forensic Scan in Progress..." : "De-Anonymize Model")
+                </MudButton>
+            </div>
+
+            @if (_forensicReport != null) {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3">
+                    @_forensicReport.ForensicSummary
+                </MudAlert>
+
+                <MudGrid Spacing="3" Class="mb-3">
+                    <MudItem xs="12" md="3">
+                        <MudCard Elevation="0" Class="pa-3 text-center h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Architecture</MudText>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #89b4fa;">@_forensicReport.DetectedArchitecture</MudText>
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Outlined" Class="mt-1">
+                                @_forensicReport.ArchitectureConfidence.ToString("F0")% Confidence
+                            </MudChip>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="3">
+                        <MudCard Elevation="0" Class="pa-3 text-center h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Rank &amp; Alpha</MudText>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #fab387;">Rank @_forensicReport.EffectiveRank / α @_forensicReport.EffectiveAlpha.ToString("F1")</MudText>
+                            <MudText Typo="Typo.caption" Style="color: #a6adc8;">Ratio: @_forensicReport.AlphaRankRatio.ToString("F2")</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="3">
+                        <MudCard Elevation="0" Class="pa-3 text-center h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Precision &amp; Size</MudText>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #a6e3a1;">@_forensicReport.Precision</MudText>
+                            <MudText Typo="Typo.caption" Style="color: #a6adc8;">@_forensicReport.FormattedSize</MudText>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="3">
+                        <MudCard Elevation="0" Class="pa-3 text-center h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Components</MudText>
+                            <div class="d-flex justify-center gap-1 mt-1">
+                                <MudChip T="string" Size="Size.Small" Color="@(_forensicReport.HasTextEncoderWeights ? Color.Primary : Color.Dark)" Variant="Variant.Filled">TE</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@(_forensicReport.HasUnetBackboneWeights ? Color.Success : Color.Dark)" Variant="Variant.Filled">UNet/Transformer</MudChip>
+                            </div>
+                        </MudCard>
+                    </MudItem>
+                </MudGrid>
+
+                <!-- Trigger Words Recovery -->
+                <MudCard Elevation="0" Class="pa-4 mb-3" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;" Class="mb-2">Recovered Concept &amp; Trigger Words</MudText>
+                    @if (_forensicReport.RecoveredTriggerTokens.Count > 0) {
+                        <div class="d-flex align-center gap-2 flex-wrap">
+                            @foreach (var token in _forensicReport.RecoveredTriggerTokens) {
+                                <MudChip T="string" Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => SetActiveTrigger(token.Token))" Style="cursor: pointer;">
+                                    <span style="font-weight: 700;">@token.Token</span>
+                                    <span style="font-size: 0.75rem; margin-left: 6px; opacity: 0.85;">(@token.TokenCategory - @token.ConfidencePct.ToString("F0")%)</span>
+                                </MudChip>
+                            }
+                        </div>
+                    } else {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">No distinct trigger tags identified in metadata or tensor keys.</MudText>
+                    }
+                </MudCard>
+
+                <!-- Recovered Training Hyperparameters Table -->
+                <MudCard Elevation="0" Class="pa-4" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;" Class="mb-2">Extracted Hyperparameters &amp; Training Spec</MudText>
+                    <MudSimpleTable Dense="true" Hover="true" Style="background-color: transparent;" Outlined="true">
+                        <thead>
+                            <tr>
+                                <th style="color: #89b4fa; width: 280px;">Parameter</th>
+                                <th style="color: #cdd6f4;">Extracted Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var kvp in _forensicReport.RecoveredHyperparameters) {
+                                <tr>
+                                    <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 600; color: #bac2de;">@kvp.Key</td>
+                                    <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #a6e3a1;">@kvp.Value</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudCard>
+            }
+        </MudTabPanel>
+    </MudTabs>
+} else {
+    <!-- Empty State -->
+    <MudCard Elevation="0" Class="pa-8 text-center my-6" Style="background-color: var(--bg-dark-surface, #181825); border: 1px dashed #313244; border-radius: 12px;">
+        <MudIcon Icon="@Icons.Material.Filled.Biotech" Color="Color.Info" Size="Size.Large" Class="mb-3" />
+        <MudText Typo="Typo.h6" Style="font-weight: 700;">No Target LoRA Selected</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-4" Style="max-width: 500px; margin: 0 auto;">
+            Load any trained .safetensors model to inspect layer weight distributions, perform block weight surgery, or repair overtrained artifacts.
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowsePrimaryLoraAsync">
+            Browse Target LoRA...
+        </MudButton>
+    </MudCard>
+}
+
+@code {
+    private string _primaryLoraPath = "";
+    private double _teScale = 1.0;
+    private double _unetScale = 1.0;
+    private int _targetRank = 16;
+    private bool _isProcessing;
+    private bool _isAnalyzingOverbake;
+    private bool _isProcessingEcho;
+    private bool _isDeAnonymizing;
+    private double _identityRetention = 1.0;
+    private double _styleAttenuation = 0.20;
+    private string _ghostDonorPath = "";
+    private double _ghostRepulsionStrength = 0.60;
+    private OverbakeModelReport? _overbakeReport;
+    private EpochSequenceRadarReport? _sequenceReport;
+    private LoraForensicReport? _forensicReport;
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public int? InitialTab { get; set; }
+
+    [SupplyParameterFromQuery(Name = "autoRun")]
+    public bool AutoRun { get; set; }
+
+    private int _activeTabIndex;
+
+    protected override void OnInitialized() {
+        StudioSession.SetStage(StudioStage.Lab);
+        _primaryLoraPath = StudioSession.ActiveLoraPath;
+
+        if (InitialTab.HasValue && InitialTab.Value >= 0 && InitialTab.Value <= 5) {
+            _activeTabIndex = InitialTab.Value;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (firstRender && AutoRun && !string.IsNullOrWhiteSpace(_primaryLoraPath) && File.Exists(_primaryLoraPath)) {
+            if (_activeTabIndex == 3 && _overbakeReport == null) {
+                await RunOverbakeAnalysisAsync();
+            } else if (_activeTabIndex == 5 && _forensicReport == null) {
+                await RunDeAnonymizerAsync();
+            }
+        }
+    }
+
+    private async Task BrowsePrimaryLoraAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file) && File.Exists(file)) {
+            _primaryLoraPath = file;
+            StudioSession.SetActiveLora(file);
+            Snackbar.Add($"Loaded LoRA: {Path.GetFileName(file)}", Severity.Success);
+        }
+    }
+
+    private async Task BrowseGhostDonorAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrWhiteSpace(file) && File.Exists(file)) {
+            _ghostDonorPath = file;
+        }
+    }
+
+    private async Task DecoupleStyleAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath)) return;
+        _isProcessingEcho = true;
+        StateHasChanged();
+        try {
+            string dir = Path.GetDirectoryName(_primaryLoraPath) ?? "";
+            string fname = Path.GetFileNameWithoutExtension(_primaryLoraPath) + "_decoupled.safetensors";
+            string output = Path.Combine(dir, fname);
+            var result = await EchoHunter.DecoupleStyleAndIdentityAsync(_primaryLoraPath, output, (float)_identityRetention, (float)_styleAttenuation);
+            if (result.Success) {
+                Snackbar.Add(result.Message, Severity.Success);
+                _primaryLoraPath = output;
+                StudioSession.SetActiveLora(output);
+            } else {
+                Snackbar.Add($"Decouple failed: {result.Message}", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Operation error: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessingEcho = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RepelGhostVectorAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath) || string.IsNullOrWhiteSpace(_ghostDonorPath)) return;
+        _isProcessingEcho = true;
+        StateHasChanged();
+        try {
+            string dir = Path.GetDirectoryName(_primaryLoraPath) ?? "";
+            string fname = Path.GetFileNameWithoutExtension(_primaryLoraPath) + "_purified.safetensors";
+            string output = Path.Combine(dir, fname);
+            var result = await EchoHunter.HuntAndRepelGhostVectorAsync(_primaryLoraPath, _ghostDonorPath, output, EchoHunterMode.OrthogonalRepulsion, (float)_ghostRepulsionStrength);
+            if (result.Success) {
+                Snackbar.Add(result.Message, Severity.Success);
+                _primaryLoraPath = output;
+                StudioSession.SetActiveLora(output);
+            } else {
+                Snackbar.Add($"Repulsion failed: {result.Message}", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Operation error: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessingEcho = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunDeAnonymizerAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath)) return;
+        _isDeAnonymizing = true;
+        StateHasChanged();
+        try {
+            _forensicReport = await DeAnonymizer.ReverseEngineerLoraAsync(_primaryLoraPath);
+            Snackbar.Add($"De-anonymization complete: {_forensicReport.DetectedArchitecture} ({_forensicReport.EffectiveRank} rank)", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Forensic analysis failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isDeAnonymizing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetActiveTrigger(string token) {
+        StudioSession.SetTriggerWord(token);
+        Snackbar.Add($"Active trigger word set to '{token}' across Studio session", Severity.Info);
+    }
+
+    private async Task ApplySurgeryScalesAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath)) return;
+        _isProcessing = true;
+        StateHasChanged();
+        try {
+            string dir = Path.GetDirectoryName(_primaryLoraPath) ?? "";
+            string fname = Path.GetFileNameWithoutExtension(_primaryLoraPath) + "_attenuated.safetensors";
+            string output = Path.Combine(dir, fname);
+            var blocks = new List<string> { "lora_te", "lora_unet" };
+            var result = await SurgeryService.PruneOrAttenuateBlocksAsync(_primaryLoraPath, output, blocks, (float)_teScale);
+            if (result.Success) {
+                Snackbar.Add($"Attenuated LoRA saved: {fname}", Severity.Success);
+                _primaryLoraPath = output;
+                StudioSession.SetActiveLora(output);
+            } else {
+                Snackbar.Add($"Operation message: {result.Message}", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Surgery failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyRankPruneAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath)) return;
+        _isProcessing = true;
+        StateHasChanged();
+        try {
+            string dir = Path.GetDirectoryName(_primaryLoraPath) ?? "";
+            string fname = Path.GetFileNameWithoutExtension(_primaryLoraPath) + $"_rank{_targetRank}.safetensors";
+            string output = Path.Combine(dir, fname);
+            var result = await SurgeryService.ResizeLoraAsync(_primaryLoraPath, output, _targetRank);
+            if (result.Success) {
+                Snackbar.Add($"Compressed LoRA saved to rank {_targetRank}: {fname}", Severity.Success);
+                _primaryLoraPath = output;
+                StudioSession.SetActiveLora(output);
+            } else {
+                Snackbar.Add($"Resize message: {result.Message}", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Compression failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenSurgeryDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraSurgeryDialog>("LoRA Surgery & Merger Studio", options);
+    }
+
+    private async Task OpenGeneTherapyDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraGeneTherapyDialog>("LoRA Gene Therapy Studio", options);
+    }
+
+    private async Task OpenDiffDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraDiffDialog>("LoRA Visual Diff Inspector", options);
+    }
+
+    private static string GetFileSize(string path) {
+        try {
+            var fi = new FileInfo(path);
+            double mb = fi.Length / (1024.0 * 1024.0);
+            return $"{mb:F1} MB";
+        } catch {
+            return "";
+        }
+    }
+
+    private async Task RunOverbakeAnalysisAsync() {
+        if (string.IsNullOrWhiteSpace(_primaryLoraPath) || !File.Exists(_primaryLoraPath)) return;
+        _isAnalyzingOverbake = true;
+        StateHasChanged();
+        try {
+            _overbakeReport = await OverbakeRadar.AnalyzeLoraOverbakeAsync(_primaryLoraPath);
+            Snackbar.Add($"SVD Overbake analysis complete: Score {_overbakeReport.OverbakeScore}% ({_overbakeReport.OverallStatus})", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Analysis failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isAnalyzingOverbake = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AnalyzeEpochFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Training Output Checkpoints Folder");
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
+
+        _isAnalyzingOverbake = true;
+        StateHasChanged();
+        try {
+            _sequenceReport = await OverbakeRadar.AnalyzeEpochSequenceAsync(folder);
+            Snackbar.Add($"Found {_sequenceReport.TotalCheckpoints} checkpoints. Sweet spot: Epoch #{_sequenceReport.RecommendedSweetSpotEpoch}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Epoch sequence audit failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isAnalyzingOverbake = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Color GetOverbakeColor(OverbakeStatus status) {
+        return status switch {
+            OverbakeStatus.Underbaked => Color.Info,
+            OverbakeStatus.OptimalSweetSpot => Color.Success,
+            OverbakeStatus.OvercookedWarning => Color.Warning,
+            OverbakeStatus.BurnedCollapse => Color.Error,
+            _ => Color.Default
+        };
+    }
+
+    public void Dispose() { }
+}

@@ -3,7 +3,9 @@
 @inject TrainingRunnerService TrainingRunner
 @inject ThemeService ThemeManager
 @inject AmdVenvProvisioner Provisioner
+@inject StudioSessionService StudioSession
 @using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
 @implements IDisposable
 
 <MudThemeProvider IsDarkMode="@ThemeManager.CurrentTheme.IsDark" Theme="@ThemeManager.GetMudTheme()" />
@@ -104,11 +106,80 @@
 </style>
 
 <MudLayout>
-    <MudAppBar Elevation="1" Dense="true" Class="px-2" Style="@($"background-color: {ThemeManager.CurrentTheme.AppbarBackground}; color: {ThemeManager.CurrentTheme.TextPrimary}; border-bottom: 1px solid {ThemeManager.CurrentTheme.Border}; padding-right: 14px;")">
-        <div class="d-flex align-center flex-shrink-0">
+    <MudAppBar Elevation="2" Dense="true" Class="px-3" Style="@($"background-color: {ThemeManager.CurrentTheme.AppbarBackground}; color: {ThemeManager.CurrentTheme.TextPrimary}; border-bottom: 1px solid {ThemeManager.CurrentTheme.Border};")">
+        <!-- Left: Brand + Active Concept -->
+        <div class="d-flex align-center flex-shrink-0 gap-2">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerOpen = !_drawerOpen)" />
-            <img src="favicon.png" alt="LoRAMancer" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 10px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
-            <MudText Typo="Typo.h6" Style="@($"font-weight: 700; color: {ThemeManager.CurrentTheme.Primary}; letter-spacing: 0.5px;")">LoRAMancer</MudText>
+            <img src="favicon.png" alt="LoRAMancer" style="width: 26px; height: 26px; border-radius: 6px; box-shadow: 0 0 10px rgba(137, 180, 250, 0.4);" />
+            <MudText Typo="Typo.h6" Style="@($"font-weight: 800; color: {ThemeManager.CurrentTheme.Primary}; letter-spacing: 0.5px; font-size: 1.1rem;")">LoRAMancer</MudText>
+            
+            <div class="d-none d-lg-flex align-center ml-2 pa-1 px-2" style="background-color: rgba(255,255,255,0.04); border: 1px solid var(--border-dark, #313244); border-radius: 6px;">
+                <MudIcon Icon="@Icons.Material.Filled.Lightbulb" Color="Color.Tertiary" Size="Size.Small" Class="mr-1" />
+                <span style="font-size: 0.75rem; color: #a6adc8; margin-right: 4px;">Concept:</span>
+                <span style="font-size: 0.8rem; font-weight: 700; color: #cdd6f4;">@StudioSession.ProjectName</span>
+            </div>
+        </div>
+
+        <MudSpacer />
+
+        <!-- Center: 5-Stage Studio Pipeline Navigation -->
+        <div class="d-none d-md-flex align-center gap-1" style="background-color: rgba(17,17,27,0.6); padding: 3px 6px; border-radius: 20px; border: 1px solid var(--border-dark, #313244);">
+            <MudButton Variant="@(IsCurrentPath("curate") ? Variant.Filled : Variant.Text)"
+                       Color="@(IsCurrentPath("curate") ? Color.Tertiary : Color.Default)"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Collections"
+                       OnClick="@(() => Navigation.NavigateTo("curate"))"
+                       Style="font-weight: 600; text-transform: uppercase; font-size: 0.75rem; border-radius: 16px;">
+                1. Curate
+            </MudButton>
+
+            <MudButton Variant="@(IsCurrentPath("training") ? Variant.Filled : Variant.Text)"
+                       Color="@(IsCurrentPath("training") ? Color.Primary : Color.Default)"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Terminal"
+                       OnClick="@(() => Navigation.NavigateTo("training"))"
+                       Style="font-weight: 600; text-transform: uppercase; font-size: 0.75rem; border-radius: 16px;">
+                2. Train
+            </MudButton>
+
+            <MudButton Variant="@(IsCurrentPath("lab") ? Variant.Filled : Variant.Text)"
+                       Color="@(IsCurrentPath("lab") ? Color.Info : Color.Default)"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Biotech"
+                       OnClick="@(() => Navigation.NavigateTo("lab"))"
+                       Style="font-weight: 600; text-transform: uppercase; font-size: 0.75rem; border-radius: 16px;">
+                3. Lab
+            </MudButton>
+
+            <MudButton Variant="@(IsCurrentPath("test") ? Variant.Filled : Variant.Text)"
+                       Color="@(IsCurrentPath("test") ? Color.Success : Color.Default)"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.SmartToy"
+                       OnClick="@(() => Navigation.NavigateTo("test"))"
+                       Style="font-weight: 600; text-transform: uppercase; font-size: 0.75rem; border-radius: 16px;">
+                4. Test
+            </MudButton>
+
+            <MudButton Variant="@(IsCurrentPath("") ? Variant.Filled : Variant.Text)"
+                       Color="@(IsCurrentPath("") ? Color.Secondary : Color.Default)"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.FolderSpecial"
+                       OnClick="@(() => Navigation.NavigateTo(""))"
+                       Style="font-weight: 600; text-transform: uppercase; font-size: 0.75rem; border-radius: 16px;">
+                5. Vault
+            </MudButton>
+        </div>
+
+        <MudSpacer />
+
+        <!-- Right: Hardware & Telemetry -->
+        <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
+            @if (TrainingRunner.IsRunning) {
+                <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
+                    Step @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
+                </MudChip>
+            }
+
             @if (_envInfo != null) {
                 <MudTooltip Text="@($"{_envInfo.GpuName} | {GetAcceleratorDetail()}")">
                     <MudChip T="string" 
@@ -116,39 +187,22 @@
                              Color="@GetAcceleratorChipColor()" 
                              Variant="Variant.Outlined" 
                              Icon="@Icons.Material.Filled.Bolt"
-                             Class="ml-3 d-none d-md-inline-flex" 
+                             Class="mr-2 d-none d-xl-inline-flex" 
                              OnClick="@(() => Navigation.NavigateTo("environment"))" 
                              Style="cursor: pointer; font-weight: 600;">
                         @GetAcceleratorLabel()
                     </MudChip>
                 </MudTooltip>
-            } else {
-                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Class="ml-3 d-none d-md-inline-flex" Style="@($"border-color: {ThemeManager.CurrentTheme.Border}; color: {ThemeManager.CurrentTheme.TextSecondary};")">
-                    Detecting Hardware...
-                </MudChip>
-            }
-        </div>
-
-        <MudSpacer />
-
-        <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
-            @if (TrainingRunner.IsRunning) {
-                <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.PlayArrow" Class="mr-2">
-                    Training Active: @TrainingRunner.CurrentProgress.CurrentStep / @TrainingRunner.CurrentProgress.TotalSteps
-                </MudChip>
             }
 
-            <MudTooltip Text="Auto-Updates">
-                <MudIconButton Icon="@Icons.Material.Filled.SystemUpdate" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("updates"))" />
+            <MudTooltip Text="Compute Environment">
+                <MudIconButton Icon="@Icons.Material.Filled.Memory" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => Navigation.NavigateTo("environment"))" />
             </MudTooltip>
-            <MudTooltip Text="Plugins">
-                <MudIconButton Icon="@Icons.Material.Filled.Extension" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("plugins"))" />
+            <MudTooltip Text="Plugin Manager">
+                <MudIconButton Icon="@Icons.Material.Filled.Extension" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => Navigation.NavigateTo("plugins"))" />
             </MudTooltip>
-            <MudTooltip Text="Compute Environment Setup">
-                <MudIconButton Icon="@Icons.Material.Filled.Memory" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("environment"))" />
-            </MudTooltip>
-            <MudTooltip Text="Settings & Themes">
-                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" OnClick="@(() => Navigation.NavigateTo("settings"))" />
+            <MudTooltip Text="Settings &amp; Admin">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => Navigation.NavigateTo("settings"))" />
             </MudTooltip>
         </div>
     </MudAppBar>
@@ -188,6 +242,8 @@
     protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
         ThemeManager.OnThemeChanged += HandleThemeChanged;
+        StudioSession.OnSessionChanged += HandleSessionChanged;
+        Navigation.LocationChanged += HandleLocationChanged;
         try {
             _envInfo = await Provisioner.DetectEnvironmentAsync();
         } catch {
@@ -281,9 +337,25 @@
         }
     }
 
+    private bool IsCurrentPath(string targetPath) {
+        string relative = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
+        string target = targetPath.Trim('/');
+        return string.Equals(relative, target, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void HandleSessionChanged() {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e) {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose() {
         _disposed = true;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
         ThemeManager.OnThemeChanged -= HandleThemeChanged;
+        StudioSession.OnSessionChanged -= HandleSessionChanged;
+        Navigation.LocationChanged -= HandleLocationChanged;
     }
 }

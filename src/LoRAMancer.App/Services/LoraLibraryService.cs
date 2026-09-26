@@ -46,8 +46,18 @@ public sealed class LoraLibraryService {
         }
     }
 
+    private readonly List<LoraCategory> _categories = new();
+    public IReadOnlyList<LoraCategory> Categories {
+        get {
+            lock (_lock) {
+                return _categories.ToList();
+            }
+        }
+    }
+
     public event Action? OnLibraryUpdated;
     public event Action? OnLibrariesChanged;
+    public event Action? OnCategoriesChanged;
     public event Action<string, int, int>? OnScanProgress;
     public event Action<bool>? OnScanStateChanged;
     public event Action<bool>? OnEnrichStateChanged;
@@ -90,10 +100,14 @@ public sealed class LoraLibraryService {
     public async Task InitializeLibrariesAsync() {
         try {
             var dbLibs = await _databaseService.GetLibrariesAsync();
+            var dbCats = await _databaseService.GetCategoriesAsync();
             lock (_lock) {
                 _libraries.Clear();
                 _libraries.AddRange(dbLibs);
+                _categories.Clear();
+                _categories.AddRange(dbCats);
             }
+            OnCategoriesChanged?.Invoke();
 
             if (_libraries.Count == 0) {
                 string defaultPath = !string.IsNullOrWhiteSpace(RootFolder) && Directory.Exists(RootFolder)
@@ -268,6 +282,52 @@ public sealed class LoraLibraryService {
         meta.UserBaseModel = string.IsNullOrWhiteSpace(baseModel) ? null : baseModel.Trim();
         await _databaseService.SetUserBaseModelAsync(meta.FilePath, meta.UserBaseModel);
         OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task SetLoraCategoryAsync(LoraMetadata meta, string? category) {
+        ArgumentNullException.ThrowIfNull(meta);
+        meta.Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim();
+        await _databaseService.SetLoraCategoryAsync(meta.FilePath, meta.Category);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task SetLoraTagsAsync(LoraMetadata meta, IEnumerable<string> tags) {
+        ArgumentNullException.ThrowIfNull(meta);
+        meta.Tags = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+        await _databaseService.SetLoraTagsAsync(meta.FilePath, meta.Tags);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task SetLoraCategoryAndTagsAsync(LoraMetadata meta, string? category, IEnumerable<string> tags) {
+        ArgumentNullException.ThrowIfNull(meta);
+        meta.Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim();
+        meta.Tags = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+        await _databaseService.SetLoraCategoryAndTagsAsync(meta.FilePath, meta.Category, meta.Tags);
+        OnLibraryUpdated?.Invoke();
+    }
+
+    public async Task<List<LoraCategory>> LoadCategoriesAsync() {
+        var cats = await _databaseService.GetCategoriesAsync();
+        lock (_lock) {
+            _categories.Clear();
+            _categories.AddRange(cats);
+        }
+        OnCategoriesChanged?.Invoke();
+        return cats;
+    }
+
+    public async Task SaveCategoryAsync(LoraCategory category) {
+        ArgumentNullException.ThrowIfNull(category);
+        await _databaseService.SaveCategoryAsync(category);
+        await LoadCategoriesAsync();
+    }
+
+    public async Task DeleteCategoryAsync(string id, string? reassignTo = null) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await _databaseService.DeleteCategoryAsync(id, reassignTo);
+        await LoadCategoriesAsync();
+        // Refresh currently loaded items from DB to reflect reassigned categories
+        await LoadFromDatabaseAsync();
     }
 
     public async Task RefreshSingleLoraAsync(LoraMetadata meta) {

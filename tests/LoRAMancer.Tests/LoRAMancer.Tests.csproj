@@ -51,6 +51,10 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraDiffService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\SemanticCollisionService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\LoraBenchmarkService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\StudioSessionService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\OverbakeRadarService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraEchoHunterService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\LoraDeAnonymizerService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>

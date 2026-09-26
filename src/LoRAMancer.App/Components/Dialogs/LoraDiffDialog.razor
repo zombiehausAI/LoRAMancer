@@ -113,7 +113,7 @@
                             <MudTextField @bind-Value="_layerSearch" Placeholder="Search layer..." Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Style="max-width: 250px;" />
                         </div>
 
-                        <MudTable Items="FilteredLayers" Dense="true" Hover="true" Elevation="0" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
+                        <MudTable Items="FilteredLayers" Dense="true" Hover="true" Elevation="0" Height="420px" FixedHeader="true" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
                             <HeaderContent>
                                 <MudTh>Layer Name</MudTh>
                                 <MudTh>Status</MudTh>
@@ -172,12 +172,15 @@
                                     </MudChip>
                                 </MudTd>
                             </RowTemplate>
+                            <PagerContent>
+                                <MudTablePager PageSizeOptions="new int[] { 25, 50, 100, 250 }" />
+                            </PagerContent>
                         </MudTable>
                     </MudTabPanel>
 
                     <!-- Tab 2: Recipe & Metadata Diffs -->
                     <MudTabPanel Text="@($"Recipe Diffs ({_summary.MetadataDiffs.Count(x => x.IsDifferent)})")" Icon="@Icons.Material.Filled.Tune">
-                        <MudTable Items="_summary.MetadataDiffs" Dense="true" Hover="true" Elevation="0" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
+                        <MudTable Items="_summary.MetadataDiffs" Dense="true" Hover="true" Elevation="0" Height="420px" FixedHeader="true" Style="background-color: var(--bg-dark-surface, #11111b); font-size: 0.8rem;">
                             <HeaderContent>
                                 <MudTh>Property</MudTh>
                                 <MudTh>Model A</MudTh>
@@ -200,6 +203,9 @@
                                     }
                                 </MudTd>
                             </RowTemplate>
+                            <PagerContent>
+                                <MudTablePager PageSizeOptions="new int[] { 25, 50, 100 }" />
+                            </PagerContent>
                         </MudTable>
                     </MudTabPanel>
 

@@ -149,8 +149,10 @@ public sealed class SemanticCollisionService {
     public List<string> GenerateSyntheticTokens(int count = 5, string? seedHint = null) {
         var results = new List<string>();
         var random = new Random();
+        int attempts = 0;
 
-        for (int i = 0; i < count; i++) {
+        while (results.Count < count && attempts < count * 20) {
+            attempts++;
             string prefix = _rarePrefixes[random.Next(_rarePrefixes.Length)];
             string stem = _rareStems[random.Next(_rareStems.Length)];
             string suffix = _rareSuffixes[random.Next(_rareSuffixes.Length)];

@@ -1,0 +1,253 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject LoraLibraryService LibraryService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Category" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">Category &amp; Tag Manager</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Create, edit, color-code, and organize assignable categories across your LoRA vault
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 75vh; overflow-y: auto;">
+            <!-- Action Toolbar & Search -->
+            <div class="d-flex align-center justify-space-between gap-2 flex-wrap">
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Filter categories..." Variant="Variant.Outlined" Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Clearable="true" Style="max-width: 280px;" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Size="Size.Small" OnClick="StartCreateCategory">
+                    Add Category
+                </MudButton>
+            </div>
+
+            <!-- Create / Edit Category Panel -->
+            @if (_isEditing) {
+                <MudCard Elevation="1" Class="pa-4 my-2" Style="background-color: var(--bg-dark-base, #18191d); border: 1px solid var(--accent-purple, #cba6f7); border-radius: 8px;">
+                    <div class="d-flex align-center justify-space-between mb-3">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;">
+                            @(_editTargetId == null ? "Create New Category" : $"Edit Category: {_editingName}")
+                        </MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Default" OnClick="CancelEdit" />
+                    </div>
+
+                    <MudGrid>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editingName" Label="Category Name" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" Placeholder="e.g. Concept, Cyberpunk, Pose" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_editingDescription" Label="Description" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Optional description or keywords" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudText Typo="Typo.caption" Style="color: var(--text-secondary); font-weight: 600;">Accent Color:</MudText>
+                            <div class="d-flex align-center gap-2 flex-wrap mt-1">
+                                @foreach (var color in _presetColors) {
+                                    <div @onclick="@(() => _editingColor = color)" 
+                                         style="@($"width: 26px; height: 26px; border-radius: 50%; background-color: {color}; cursor: pointer; border: {(_editingColor == color ? "3px solid #ffffff" : "1px solid rgba(255,255,255,0.2)")}; transition: transform 0.15s ease;")" 
+                                         title="@color">
+                                    </div>
+                                }
+                                <MudTextField @bind-Value="_editingColor" Variant="Variant.Outlined" Margin="Margin.Dense" Style="width: 110px;" />
+                            </div>
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudText Typo="Typo.caption" Style="color: var(--text-secondary); font-weight: 600;">Icon Preset:</MudText>
+                            <div class="d-flex align-center gap-1 flex-wrap mt-1">
+                                @foreach (var (iconVal, iconLabel) in _presetIcons) {
+                                    <MudChip T="string" 
+                                             Icon="@iconVal" 
+                                             Variant="@(_editingIcon == iconVal ? Variant.Filled : Variant.Outlined)" 
+                                             Color="@(_editingIcon == iconVal ? Color.Primary : Color.Default)" 
+                                             Size="Size.Small" 
+                                             OnClick="@(() => _editingIcon = iconVal)" 
+                                             Style="cursor: pointer;">
+                                        @iconLabel
+                                    </MudChip>
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    <div class="d-flex justify-end gap-2 mt-4">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" OnClick="CancelEdit">
+                            Cancel
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveCurrentEditAsync">
+                            @(_editTargetId == null ? "Create Category" : "Save Changes")
+                        </MudButton>
+                    </div>
+                </MudCard>
+            }
+
+            <!-- Category Table List -->
+            <MudTable Items="FilteredCategories" Hover="true" Dense="true" Elevation="0" Style="background-color: var(--bg-dark-surface, #1e2025); border: 1px solid var(--border-dark, #363942); border-radius: 8px;">
+                <HeaderContent>
+                    <MudTh>Category Badge</MudTh>
+                    <MudTh>Description</MudTh>
+                    <MudTh Style="width: 110px; text-align: center;">Assigned LoRAs</MudTh>
+                    <MudTh Style="width: 120px; text-align: right;">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Badge">
+                        <div class="d-flex align-center gap-2">
+                            <span style="@($"display: inline-flex; align-center; gap: 4px; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; background-color: {context.Color}22; color: {context.Color}; border: 1px solid {context.Color};")">
+                                @if (!string.IsNullOrWhiteSpace(context.Icon)) {
+                                    <MudIcon Icon="@context.Icon" Size="Size.Small" Style="@($"color: {context.Color}; font-size: 1rem;")" />
+                                }
+                                @context.Name
+                            </span>
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Description">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            @(string.IsNullOrWhiteSpace(context.Description) ? "-" : context.Description)
+                        </MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Count" Style="text-align: center;">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Tertiary">
+                            @GetModelCount(context.Name)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Actions" Style="text-align: right;">
+                        <MudTooltip Text="Edit Category">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary" OnClick="@(() => StartEditCategory(context))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Delete Category">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => PromptDeleteCategoryAsync(context))" />
+                        </MudTooltip>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <div class="pa-4 text-center">
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">No categories match your search filter.</MudText>
+                    </div>
+                </NoRecordsContent>
+            </MudTable>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CloseDialog">
+            Done
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _searchQuery = string.Empty;
+    private bool _isEditing;
+    private string? _editTargetId;
+    private string _editingName = string.Empty;
+    private string _editingColor = "#89b4fa";
+    private string? _editingIcon = Icons.Material.Filled.Category;
+    private string _editingDescription = string.Empty;
+
+    private static readonly string[] _presetColors = new[] {
+        "#89b4fa", "#cba6f7", "#a6e3a1", "#f9e2af",
+        "#fab387", "#94e2d5", "#f38ba8", "#b4befe",
+        "#f5c2e7", "#eba0ac", "#74c7ec", "#a6adc8"
+    };
+
+    private static readonly (string Icon, string Label)[] _presetIcons = new[] {
+        (Icons.Material.Filled.Person, "Person"),
+        (Icons.Material.Filled.Palette, "Style"),
+        (Icons.Material.Filled.Lightbulb, "Concept"),
+        (Icons.Material.Filled.Checkroom, "Clothing"),
+        (Icons.Material.Filled.SportsGymnastics, "Pose"),
+        (Icons.Material.Filled.Landscape, "Environment"),
+        (Icons.Material.Filled.DirectionsCar, "Vehicle"),
+        (Icons.Material.Filled.AutoFixHigh, "Enhance"),
+        (Icons.Material.Filled.Face, "Face"),
+        (Icons.Material.Filled.Brush, "Brush"),
+        (Icons.Material.Filled.CameraAlt, "Photo"),
+        (Icons.Material.Filled.Star, "Star")
+    };
+
+    private IEnumerable<LoraCategory> FilteredCategories {
+        get {
+            var list = LibraryService.Categories;
+            if (string.IsNullOrWhiteSpace(_searchQuery)) {
+                return list;
+            }
+            return list.Where(c => c.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                                  (!string.IsNullOrWhiteSpace(c.Description) && c.Description.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    private int GetModelCount(string categoryName) {
+        if (string.IsNullOrWhiteSpace(categoryName)) {
+            return 0;
+        }
+        return LibraryService.Items.Count(m => string.Equals(m.Category, categoryName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void StartCreateCategory() {
+        _isEditing = true;
+        _editTargetId = null;
+        _editingName = string.Empty;
+        _editingColor = "#89b4fa";
+        _editingIcon = Icons.Material.Filled.Category;
+        _editingDescription = string.Empty;
+    }
+
+    private void StartEditCategory(LoraCategory cat) {
+        _isEditing = true;
+        _editTargetId = cat.Id;
+        _editingName = cat.Name;
+        _editingColor = string.IsNullOrWhiteSpace(cat.Color) ? "#89b4fa" : cat.Color;
+        _editingIcon = cat.Icon ?? Icons.Material.Filled.Category;
+        _editingDescription = cat.Description ?? string.Empty;
+    }
+
+    private void CancelEdit() {
+        _isEditing = false;
+        _editTargetId = null;
+    }
+
+    private async Task SaveCurrentEditAsync() {
+        if (string.IsNullOrWhiteSpace(_editingName)) {
+            Snackbar.Add("Category name is required.", Severity.Warning);
+            return;
+        }
+
+        var cat = new LoraCategory {
+            Id = _editTargetId ?? Guid.NewGuid().ToString("N"),
+            Name = _editingName.Trim(),
+            Color = string.IsNullOrWhiteSpace(_editingColor) ? "#89b4fa" : _editingColor.Trim(),
+            Icon = _editingIcon,
+            Description = string.IsNullOrWhiteSpace(_editingDescription) ? null : _editingDescription.Trim(),
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        try {
+            await LibraryService.SaveCategoryAsync(cat);
+            Snackbar.Add($"Saved category: \"{cat.Name}\"", Severity.Success);
+            _isEditing = false;
+            _editTargetId = null;
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save category: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task PromptDeleteCategoryAsync(LoraCategory cat) {
+        int count = GetModelCount(cat.Name);
+        try {
+            await LibraryService.DeleteCategoryAsync(cat.Id, reassignTo: null);
+            Snackbar.Add($"Deleted category \"{cat.Name}\"{(count > 0 ? $" and cleared from {count} models" : "")}.", Severity.Info);
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to delete category: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CloseDialog() {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

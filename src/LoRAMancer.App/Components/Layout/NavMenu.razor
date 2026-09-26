@@ -1,29 +1,36 @@
 @inject IDialogService DialogService
 
-<MudNavMenu Class="pt-4">
-    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-2" Style="font-weight: 600; text-transform: uppercase;">Workflows</MudText>
-    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderSpecial">
-        LoRA Library
+<MudNavMenu Class="pt-2">
+    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Studio Pipeline</MudText>
+    <MudNavLink Href="curate" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Collections">
+        1. Curate &amp; Caption
     </MudNavLink>
     <MudNavLink Href="training" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Terminal">
-        Training Console
+        2. Train &amp; Forge
+    </MudNavLink>
+    <MudNavLink Href="lab" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Biotech">
+        3. Diagnostic Lab
+    </MudNavLink>
+    <MudNavLink Href="test" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.SmartToy">
+        4. ComfyUI Test
+    </MudNavLink>
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderSpecial">
+        5. Library &amp; Vault
     </MudNavLink>
     <MudNavLink Href="history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HistoryEdu">
-        History & Vault
+        Training History
     </MudNavLink>
+
+    <MudDivider Class="my-3" Style="border-color: #313244;" />
+
+    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Studio Modal Tools</MudText>
     <MudNavLink Icon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
         Ollama Vision Tagger
     </MudNavLink>
-    <MudNavLink Icon="@Icons.Material.Filled.Collections" OnClick="OpenDatasetCuratorAsync">
-        Dataset Batch Curator
-    </MudNavLink>
-    <MudNavLink Icon="@Icons.Material.Filled.SmartToy" OnClick="OpenComfyUiTestAsync">
-        ComfyUI Test Studio
-    </MudNavLink>
     <MudNavLink Icon="@Icons.Material.Filled.ContentCut" OnClick="OpenLoraSurgeryAsync">
-        LoRA Surgery & Merger
+        LoRA Surgery &amp; Merger
     </MudNavLink>
-    <MudNavLink Icon="@Icons.Material.Filled.Biotech" OnClick="OpenLoraGeneTherapyAsync">
+    <MudNavLink Icon="@Icons.Material.Filled.Healing" OnClick="OpenLoraGeneTherapyAsync">
         LoRA Gene Therapy
     </MudNavLink>
     <MudNavLink Icon="@Icons.Material.Filled.Difference" OnClick="OpenLoraDiffAsync">
@@ -33,9 +40,9 @@
         AI Benchmark Matrix
     </MudNavLink>
 
-    <MudDivider Class="my-4" Style="border-color: #313244;" />
+    <MudDivider Class="my-3" Style="border-color: #313244;" />
 
-    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-2" Style="font-weight: 600; text-transform: uppercase;">Subsystems</MudText>
+    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Subsystems</MudText>
     <MudNavLink Href="environment" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Memory">
         Compute Environment
     </MudNavLink>
@@ -46,7 +53,7 @@
         Auto-Updates
     </MudNavLink>
     <MudNavLink Href="settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
-        Settings & Admin
+        Settings &amp; Admin
     </MudNavLink>
     <MudNavLink Href="docs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MenuBook">
         Documentation

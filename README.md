@@ -29,6 +29,10 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 13. **Semantic Collision Radar & Anti-Bleed Token Synthesizer**: Detect lexical collisions between proposed trigger words and the base model's CLIP/T5 vocabulary priors to prevent concept bleed; synthesize zero-collision phonetic tokens (e.g. `ohwx`, `v9x`) and cleanse entire datasets in one click.
 14. **Automated AI Benchmark Matrix (Sweet Spot Finder)**: Automatically evaluate multiple epoch checkpoints across a 4-part visual battery (likeness, style flexibility, bleed stress, composition) via ComfyUI, plot the learning curve, and pinpoint the optimal checkpoint before overfitting occurs.
 15. **TensorBoard & Pre-Flight OOM Protection**: Dry-run hardware estimation comparing model requirements against detected GPU VRAM to prevent driver crashes, paired with 1-click TensorBoard launch.
+16. **5-Stage Creative Studio Pipeline**: Cohesive production studio flow spanning Curate (`/curate`), Train (`/training`), Lab (`/lab`), Test (`/test`), and Vault (`/`) with auto-persisted concept session state.
+17. **SVD Spectral Energy Decay & Overbake Radar**: SVD analysis measuring singular value monopolization ($\sigma_1$), Frobenius norms, and Shannon spectral entropy to diagnose overbaking and auto-audit multi-epoch checkpoints.
+18. **LoRA Ghost Hunter & Style Decoupler**: Gram-Schmidt orthogonal repulsion to purge bad traits/artifacts from donor models, and cross-attention attenuation to isolate character identity from art style bleed.
+19. **Forensic Reverse-Engineering & De-Anonymizer**: Reconstructs base architectures, effective rank/alpha scaling ratios, trained trigger keywords, and training recipes from raw weights.
 
 ## Documentation Index
 

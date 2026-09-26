@@ -29,9 +29,12 @@ public sealed class LoraMetadata {
     public string? LibraryId { get; set; }
     public bool IsFavorite { get; set; }
     public string? UserBaseModel { get; set; }
+    public string? Category { get; set; }
+    public List<string> Tags { get; set; } = new();
     public DateTime? LastModifiedUtc { get; set; }
 
     public string EffectiveBaseModel => !string.IsNullOrWhiteSpace(UserBaseModel) ? UserBaseModel : BaseModel;
+    public string DisplayCategory => !string.IsNullOrWhiteSpace(Category) ? Category : "Uncategorized";
     public string FormattedSize => (FileSizeBytes / (1024.0 * 1024.0)).ToString("0.0") + " MB";
 }
 

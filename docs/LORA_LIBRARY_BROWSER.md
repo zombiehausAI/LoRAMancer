@@ -62,7 +62,32 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
 
 ---
 
-## 3. "Use Training Settings" (Hyperparameter Cloning)
+## 3. Categories, Custom Tags & Classification Pipeline
+
+LoRAMancer features a robust, assignable category and tagging architecture persisted in SQLite (`~/.LoRAMancer/loras.db`):
+
+- **Assignable Primary Categories**:
+  - Assign any LoRA to curated classifications such as **Character**, **Style**, **Concept**, **Clothing**, **Pose**, **Environment**, **Vehicle**, or **Enhancement**.
+  - **1-Click Card & Table Assignment**: Quick-assign categories via the colored badge on the lower-left corner of any card thumbnail or the dedicated table row chip.
+  - **Category Manager**: Launch the manager via the **"Categories"** toolbar button or context menu to create custom categories, customize hex accent colors, assign icons, and edit descriptions. Deleting a category automatically gives you the choice to clear or reassign associated models.
+- **Custom Model Tags**:
+  - Assign multiple custom tags (e.g. `anime`, `cyberpunk`, `portrait`, `lighting`) to any model via the **"Assign Category & Tags..."** dialog.
+  - Custom tags appear as styled mini-badges directly below the model title on cards and are searchable in real-time.
+- **Searchable & Filterable**:
+  - **Category Filter Chips**: A dedicated filter bar displays live counts for each category (e.g. `Character (14)`, `Style (8)`, `Uncategorized (3)`). Clicking any pill immediately restricts the vault view.
+  - **Omni-Search Bar**: Entering terms in the global search bar matches against category names and custom tags alongside file names, Civitai titles, and trigger words.
+- **Multi-Factor Sorting**:
+  - Sort your vault instantly with the **"Sort By"** selector:
+    - **Name (A-Z / Z-A)**
+    - **Category (A-Z / Z-A)**
+    - **Date Modified (Newest / Oldest)**
+    - **File Size (Largest / Smallest)**
+    - **Rank / Dim (Highest)**
+    - **Tags Count (Most)**
+
+---
+
+## 4. "Use Training Settings" (Hyperparameter Cloning)
 
 A central feature of LoRAMancer is borrowing the mathematical settings from high-quality donor LoRAs without copying the donor's unique subject or dataset:
 1. Click **"Use Settings"** on any LoRA card.
@@ -93,7 +118,45 @@ A central feature of LoRAMancer is borrowing the mathematical settings from high
 
 ---
 
-## 5. Theme Engine & JSON Import / Export
+## 5. Right-Click Context Menu & Studio Synergy Pipeline
+
+Every LoRA card and table row in the Vault features instant access to a comprehensive 4-section context menu designed for complete studio synergy:
+- **Right-Click Anywhere**: Right-clicking on any LoRA card or table row brings up the context menu at the cursor position.
+- **Dedicated Diagnostics Button**: A visible **`Science` (⚗️)** icon button is also available on both card and table action toolbars for immediate one-click diagnostic routing.
+
+### Context Menu Sections & Actions:
+
+1. **⚡ Studio Pipeline Routing**:
+   - **Send to Diagnostic Lab (Stage 3)**: Auto-loads the model and primary trigger into the studio session and navigates directly to `/lab`.
+   - **Test in ComfyUI Canvas (Stage 4)**: Auto-loads the model and trigger word into the studio session and routes straight to `/test`.
+   - **Clone Recipe into Trainer (Stage 2)**: Re-seeds the training hyperparameter matrix (dim, alpha, learning rates, optimizer, scheduler, resolution) directly into the Training Wizard.
+   - **Seed Concept to Dataset Curator (Stage 1)**: Transfers the model's concept name or primary trigger token into Stage 1 Dataset Curator (`/curator?concept=...`) for instant paired dataset gathering.
+
+2. **🔬 Diagnostics & Surgery**:
+   - **SVD Overbake Radar (Auto-Scan)**: Navigates straight to Stage 3 Lab Tab 4 with the LoRA auto-inserted, automatically running the SVD singular value monopolization scan.
+   - **Forensic De-Anonymizer (Reverse-Engineer)**: Navigates to Stage 3 Lab Tab 6 with the LoRA auto-inserted, automatically reconstructing architecture fingerprint, rank/alpha scaling, trigger tokens, and training hyperparameters.
+   - **Ghost Hunter & Style Decoupler**: Opens Stage 3 Lab Tab 5 with the LoRA pre-loaded into identity retention and style damping controls.
+   - **Layer Surgery & Resizing**: Opens Stage 3 Lab Tab 1 with the LoRA pre-loaded for SVD rank compression or cross-attention block scaling.
+   - **Vector Gene Therapy Suite**: Launches the interactive Gene Therapy modal dialog with the LoRA pre-selected for eigenvalue outlier suppression.
+   - **Visual Diff & Angle Drift Inspector**: Launches the Visual Diff modal dialog with Model A pre-set to the selected model.
+   - **Batch Benchmark & Sweet Spot Matrix**: Launches the automated epoch sweep matrix evaluator, testing likeness, style flexibility, and color burn.
+
+3. **📋 Prompts & Clipboard**:
+   - **Copy Trigger Word**: Copies the model's primary trigger keyword to the system clipboard with an instant confirmation snackbar.
+   - **Copy Prompt Syntax (`<lora:...>`)**: Automatically formats and copies standard WebUI/ComfyUI prompt notation (e.g. `<lora:my_model:0.85>, trigger_word`).
+   - **Copy Full File Path**: Copies the absolute system path of the `.safetensors` model file for external script or workflow integration.
+   - **Save & Copy Metadata JSON**: Exports a formatted `<model>_metadata.json` sidecar alongside the file and copies the full payload to the clipboard.
+
+4. **🗄️ Vault Actions**:
+   - **Toggle Favorite**: Quickly pin or unpin high-priority LoRAs to the top of the Vault.
+   - **Fetch Civitai Info & Preview**: Queries Civitai API by hash to download model cards, descriptions, tags, and preview thumbnails.
+   - **Refresh from Disk**: Re-reads headers directly from storage to update dimensions and file state.
+   - **Inspect Header Metadata**: Slides out the non-blocking header inspector drawer.
+   - **Reveal in Explorer**: Opens Windows Explorer with the specific `.safetensors` file selected.
+
+---
+
+## 6. Theme Engine & JSON Import / Export
 
 - **High-Contrast Dark Themes**: Curated modern palettes tailored for OLED and high-resolution displays, including Catppuccin Mocha, Tokyo Night, Slate Greys (Obsidian), Crimson Blood, Emerald Cyber, Solar Amber, and Cobalt Sapphire.
 - **JSON Theme Import & Export**:

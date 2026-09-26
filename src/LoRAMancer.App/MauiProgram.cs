@@ -74,6 +74,10 @@ public static class MauiProgram {
         builder.Services.AddSingleton<LoraDiffService>();
         builder.Services.AddSingleton<SemanticCollisionService>();
         builder.Services.AddSingleton<LoraBenchmarkService>();
+        builder.Services.AddSingleton<OverbakeRadarService>();
+        builder.Services.AddSingleton<LoraEchoHunterService>();
+        builder.Services.AddSingleton<LoraDeAnonymizerService>();
+        builder.Services.AddSingleton<StudioSessionService>();
         builder.Services.AddSingleton<SystemTrayService>();
 
 #if DEBUG

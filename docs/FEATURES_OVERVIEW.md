@@ -221,4 +221,66 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - Pinpoints the exact mathematical optimal epoch checkpoint before overfitting occurred.
   - 1-click promotion of the winning checkpoint into the primary LoRA Library.
 
+---
+
+## 18. 5-Stage Creative Studio Pipeline & Concept Session
+
+LoRAMancer unifies individual workflows into a cohesive 5-stage production studio pipeline:
+
+- **Persistent Active Concept Session (`StudioSessionService`)**:
+  - Tracks the user's active concept name, training dataset path, trigger words, base model architecture, and target `.safetensors` model.
+  - State automatically flows between every studio workspace without re-entering paths or parameters.
+  - Session persists across restarts in `~/.loramancer/studio_session.json`.
+- **Top Studio Pipeline Switcher**:
+  1. **Curate (`/curate`)**: Full-screen dataset gallery, inline caption editor, tag frequency data grid, batch prefix/suffix trigger words, aspect ratio bucketing, and Semantic Collision Radar.
+  2. **Train (`/training`)**: Forge and training studio with live AI-Toolkit loss telemetry, real-time log stream, and hardware acceleration monitors.
+  3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, and Forensic De-Anonymizer.
+  4. **Test (`/test`)**: ComfyUI inference studio with live WebSocket image rendering, prompt testing, and AI benchmark matrix sweeps.
+  5. **Vault (`/`)**: Central LoRA model library, visual card/table browser, Civitai metadata enricher, and version management.
+
+---
+
+## 19. SVD Spectral Energy Decay & Overbake Radar
+
+- **Mathematical Rank & Spectral Entropy Decomposition**:
+  - Performs Singular Value Decomposition (SVD: $\Delta W = U \Sigma V^T$) across every attention projection matrix in the LoRA.
+  - Measures singular value decay distributions, Frobenius norms ($\| \Delta W \|_F$), and Shannon spectral entropy ($H = -\sum p_i \ln p_i$).
+  - Detects **singular value monopolization** ($\sigma_1$ energy dominance) where a single vector dominates model behavior, causing blown-out saturation and training collapse.
+- **Overbake Severity Index & Categorization**:
+  - Calculates a real-time 0 - 100% score mapped to 4 actionable diagnostic tiers:
+    - **Underbaked (< 20%)**: Concept has low activation and may require higher prompt weights or additional training steps.
+    - **Optimal Sweet Spot (20% - 65%)**: Clean rank distribution with high flexibility and strong concept capture.
+    - **Overcooked Warning (65% - 85%)**: High Top-1 singular value concentration; prompts are beginning to fight the LoRA.
+    - **Burned Collapse (> 85%)**: Severe rank collapse, extreme contrast blowout, or irreversible style bleed.
+- **Multi-Epoch Checkpoint Sequence Audit**:
+  - Scans an entire folder of checkpoint `.safetensors` files from a training run.
+  - Automatically identifies the exact sweet-spot epoch before singular value monopolization escalated.
+
+---
+
+## 20. LoRA Ghost & Echo Hunter + Style vs. Identity Decoupler
+
+- **Style vs. Identity Decoupler**:
+  - Solves the classic problem where training a character or person bakes in the lighting, background, or photographic medium of the dataset.
+  - Allows independent scaling sliders for **Identity Retention** (preserving facial anatomy, key features, and character likeness) vs. **Style Bleed Attenuation** (dampening cross-attention and text-encoder layers that carry color palette and medium bias).
+  - Produces a purified LoRA that adopts whatever style is requested in the prompt.
+- **Orthogonal Negative Vector & Ghost Repulsion**:
+  - Eliminates unwanted traits, defective hands, or bad styling inherited from a donor LoRA or failed training checkpoint.
+  - Uses high-dimensional Gram-Schmidt orthogonal projection: decomposes the LoRA weight matrices into parallel and orthogonal components relative to the bad vector, projecting the undesirable trait out of the model weight space.
+
+---
+
+## 21. LoRA Forensic Reverse-Engineering & De-Anonymizer
+
+- **Architecture Fingerprinting**:
+  - Forensically reconstructs the target base model architecture (FLUX.1-Dev/Schnell, SDXL 1.0, Pony Diffusion, SD 1.5, HunyuanVideo, Wan 2.1) directly from tensor key topologies and dimensional signatures, even when training metadata has been stripped.
+- **Topology & Hyperparameter Reconstruction**:
+  - Accurately recovers effective network rank ($dim$), network alpha ($\alpha$), and alpha/rank scaling ratios.
+  - Extracts training hyperparameters (learning rates, UNet/Text Encoder split LRs, optimizer type, LR scheduler, total training steps, batch size, and resolution).
+- **Trigger Word & Concept Recovery**:
+  - Recovers trained concept keywords and frequent dataset tags embedded in headers or inferred via heuristic token analysis.
+  - 1-click binding: instantly assigns recovered trigger words into the active Studio Session for immediate inference and testing.
+
+
+
 
