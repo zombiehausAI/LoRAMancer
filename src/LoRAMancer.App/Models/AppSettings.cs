@@ -40,6 +40,7 @@ public sealed class AppSettings {
     public bool AutoCheckUpdatesOnStartup { get; set; } = true;
     public bool EnableDarkTheme { get; set; } = true;
     public string ThemePreset { get; set; } = "dark-purple";
+    public string? CustomPrimaryColor { get; set; }
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
     // AI-Toolkit & Training Environment

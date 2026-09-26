@@ -262,4 +262,96 @@ public sealed class RevolutionaryFeaturesTests {
         Assert.Equal("bravo.safetensors", sortedByTags[1].FileName);
         Assert.Equal("charlie.safetensors", sortedByTags[2].FileName);
     }
+
+    [Fact]
+    public async Task ThemeService_DynamicAccentColor_OverridesAndNotifies() {
+        var themeService = new LoRAMancer.App.Services.ThemeService();
+        Assert.NotEmpty(LoRAMancer.App.Services.ThemeService.CuratedAccentSwatches);
+
+        string defaultPrimary = themeService.EffectivePrimaryColor;
+        Assert.False(string.IsNullOrWhiteSpace(defaultPrimary));
+
+        bool eventFired = false;
+        themeService.OnThemeChanged += () => eventFired = true;
+
+        await themeService.SetCustomPrimaryColorAsync("#10b981");
+
+        Assert.Equal("#10b981", themeService.EffectivePrimaryColor);
+        Assert.Equal("#10b981", themeService.CustomPrimaryColor);
+        Assert.True(eventFired);
+
+        var mudTheme = themeService.GetMudTheme();
+        Assert.Equal("rgba(16,185,129,1)", mudTheme.PaletteDark.Primary.ToString());
+
+        // Reset to default
+        await themeService.SetCustomPrimaryColorAsync(null);
+        Assert.Null(themeService.CustomPrimaryColor);
+        Assert.Equal(defaultPrimary, themeService.EffectivePrimaryColor);
+    }
+
+    [Fact]
+    public void ModelArchitectureRegistry_ExpandedPresets_RegisteredAndResolvable() {
+        var registry = new LoRAMancer.App.Engines.ModelArchitectureRegistry();
+        var all = registry.GetAll();
+
+        Assert.Contains(all, a => a.DisplayName == "Stable Diffusion 3.5" && a.Family == "SD3.5");
+        Assert.Contains(all, a => a.DisplayName == "Wan 2.1" && a.Family == "Wan");
+        Assert.Contains(all, a => a.DisplayName == "HunyuanVideo" && a.Family == "Hunyuan");
+        Assert.Contains(all, a => a.DisplayName == "Stable Diffusion 2.1" && a.Family == "SD21");
+        Assert.Contains(all, a => a.DisplayName == "AuraFlow" && a.Family == "AuraFlow");
+        Assert.Contains(all, a => a.DisplayName == "Illustrious-XL");
+        Assert.Contains(all, a => a.DisplayName == "Pony Diffusion V6 XL");
+        Assert.Contains(all, a => a.DisplayName == "ChromaHD-1");
+        Assert.Contains(all, a => a.DisplayName == "Stable Diffusion 1.5");
+    }
+
+    [Fact]
+    public void ModelArchitectureRegistry_PathHeuristicInference_InfersFromParentFolders() {
+        var registry = new LoRAMancer.App.Engines.ModelArchitectureRegistry();
+        var emptyMeta = new Dictionary<string, string>();
+
+        // Folder: Pony
+        var pony = registry.InferFromPathOrMetadata(@"D:\LoRAs\Pony\anime_character.safetensors", emptyMeta);
+        Assert.Equal("Pony Diffusion V6 XL", pony.DisplayName);
+
+        // Folder: Illustrious
+        var ill = registry.InferFromPathOrMetadata(@"D:\LoRAs\Illustrious\cyberpunk_style.safetensors", emptyMeta);
+        Assert.Equal("Illustrious-XL", ill.DisplayName);
+
+        // Folder: SD3.5
+        var sd35 = registry.InferFromPathOrMetadata(@"D:\LoRAs\SD3.5\portrait_v1.safetensors", emptyMeta);
+        Assert.Equal("Stable Diffusion 3.5", sd35.DisplayName);
+
+        // Folder: SD1.5
+        var sd15 = registry.InferFromPathOrMetadata(@"D:\LoRAs\SD1.5\retro_game.safetensors", emptyMeta);
+        Assert.Equal("Stable Diffusion 1.5", sd15.DisplayName);
+
+        // Folder: Chroma
+        var chroma = registry.InferFromPathOrMetadata(@"D:\LoRAs\Chroma\lighting.safetensors", emptyMeta);
+        Assert.Equal("ChromaHD-1", chroma.DisplayName);
+
+        // Folder: Flux
+        var flux = registry.InferFromPathOrMetadata(@"D:\LoRAs\Flux\realism.safetensors", emptyMeta);
+        Assert.Equal("FLUX.1-dev", flux.DisplayName);
+
+        // Folder: Wan
+        var wan = registry.InferFromPathOrMetadata(@"D:\LoRAs\Wan\video_motion.safetensors", emptyMeta);
+        Assert.Equal("Wan 2.1", wan.DisplayName);
+    }
+
+    [Fact]
+    public void ModelArchitectureRegistry_CustomRegistration_WorksSeamlessly() {
+        var registry = new LoRAMancer.App.Engines.ModelArchitectureRegistry();
+        var custom = registry.RegisterCustom("Animagine 3.1", "SDXL", dim: 32, alpha: 32.0, lr: 0.00005, resolution: 1024);
+
+        Assert.NotNull(custom);
+        Assert.Equal("Animagine 3.1", custom.DisplayName);
+        Assert.Equal("animagine_3_1", custom.Id);
+        Assert.True(registry.TryGet("animagine_3_1", out var fetched));
+        Assert.Equal("Animagine 3.1", fetched!.DisplayName);
+
+        // Infer from metadata with custom keyword
+        var inferred = registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = "animagine_3_1" });
+        Assert.Equal("Animagine 3.1", inferred.DisplayName);
+    }
 }

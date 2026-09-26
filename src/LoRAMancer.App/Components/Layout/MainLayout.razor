@@ -28,7 +28,7 @@
         --bg-dark-surface: @ThemeManager.CurrentTheme.Surface;
         --bg-dark-overlay: @ThemeManager.CurrentTheme.Overlay;
         --border-dark: @ThemeManager.CurrentTheme.Border;
-        --accent-purple: @ThemeManager.CurrentTheme.Primary;
+        --accent-purple: @ThemeManager.EffectivePrimaryColor;
         --accent-blue: @ThemeManager.CurrentTheme.Secondary;
         --accent-green: @ThemeManager.CurrentTheme.Tertiary;
         --text-primary: @ThemeManager.CurrentTheme.TextPrimary;
@@ -204,6 +204,58 @@
             <MudTooltip Text="Settings &amp; Admin">
                 <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" Size="Size.Small" OnClick="@(() => Navigation.NavigateTo("settings"))" />
             </MudTooltip>
+
+            <!-- Dynamic Highlight / Accent Color Picker -->
+            <MudMenu Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                <ActivatorContent>
+                    <MudTooltip Text="Studio Highlight &amp; Accent Color">
+                        <MudIconButton Icon="@Icons.Material.Filled.Palette" 
+                                       Style="@($"color: {ThemeManager.EffectivePrimaryColor}; filter: drop-shadow(0 0 4px {ThemeManager.EffectivePrimaryColor}66);")" 
+                                       Size="Size.Small" />
+                    </MudTooltip>
+                </ActivatorContent>
+                <ChildContent>
+                    <div class="pa-3" style="min-width: 250px; background-color: var(--bg-dark-surface);">
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary);" Class="mb-1">
+                            Studio Highlight Color
+                        </MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3 d-block">
+                            Dynamically override the primary accent across buttons, chips, and active tabs.
+                        </MudText>
+
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                            @foreach (var swatch in ThemeService.CuratedAccentSwatches) {
+                                <MudTooltip Text="@swatch.Name">
+                                    <div @onclick="@(() => SetAccentColorAsync(swatch.Hex))"
+                                         style="@($"width: 24px; height: 24px; border-radius: 50%; background-color: {swatch.Hex}; cursor: pointer; border: {(string.Equals(ThemeManager.EffectivePrimaryColor, swatch.Hex, StringComparison.OrdinalIgnoreCase) ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)")}; box-shadow: 0 2px 4px rgba(0,0,0,0.3);")">
+                                    </div>
+                                </MudTooltip>
+                            }
+                        </div>
+
+                        <MudColorPicker Label="Custom Color"
+                                        Value="@(new MudBlazor.Utilities.MudColor(ThemeManager.EffectivePrimaryColor))"
+                                        ValueChanged="@(c => SetAccentColorAsync(c.Value))"
+                                        ColorPickerMode="ColorPickerMode.HEX"
+                                        ShowAlpha="false"
+                                        ShowInputs="true"
+                                        Margin="Margin.Dense"
+                                        Variant="Variant.Outlined"
+                                        Class="mb-2" />
+
+                        @if (!string.IsNullOrWhiteSpace(ThemeManager.CustomPrimaryColor)) {
+                            <MudButton Variant="Variant.Text" 
+                                       Color="Color.Secondary" 
+                                       Size="Size.Small" 
+                                       StartIcon="@Icons.Material.Filled.RestartAlt" 
+                                       FullWidth="true" 
+                                       OnClick="@(() => SetAccentColorAsync(null))">
+                                Reset to Theme Default (@ThemeManager.CurrentTheme.Primary)
+                            </MudButton>
+                        }
+                    </div>
+                </ChildContent>
+            </MudMenu>
         </div>
     </MudAppBar>
 
@@ -349,6 +401,11 @@
 
     private void HandleLocationChanged(object? sender, LocationChangedEventArgs e) {
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetAccentColorAsync(string? hex) {
+        await ThemeManager.SetCustomPrimaryColorAsync(hex);
+        StateHasChanged();
     }
 
     public void Dispose() {

@@ -270,6 +270,50 @@ public sealed class ThemeService {
         }
     }
 
+    private string? _customPrimaryColorFallback;
+
+    public string? CustomPrimaryColor {
+        get => _settingsService != null ? _settingsService.Current.CustomPrimaryColor : _customPrimaryColorFallback;
+        set {
+            if (_settingsService != null) {
+                if (_settingsService.Current.CustomPrimaryColor != value) {
+                    _settingsService.Current.CustomPrimaryColor = value;
+                    _ = _settingsService.SaveSettingsAsync(_settingsService.Current);
+                    OnThemeChanged?.Invoke();
+                }
+            } else {
+                if (_customPrimaryColorFallback != value) {
+                    _customPrimaryColorFallback = value;
+                    OnThemeChanged?.Invoke();
+                }
+            }
+        }
+    }
+
+    public string EffectivePrimaryColor =>
+        !string.IsNullOrWhiteSpace(CustomPrimaryColor) ? CustomPrimaryColor : CurrentTheme.Primary;
+
+    public static readonly IReadOnlyList<(string Name, string Hex)> CuratedAccentSwatches = new List<(string, string)> {
+        ("Lavender", "#cba6f7"),
+        ("Emerald", "#10b981"),
+        ("Solar Amber", "#f59e0b"),
+        ("Neon Rose", "#f43f5e"),
+        ("Warm Coral", "#fb923c"),
+        ("Sky Blue", "#38bdf8"),
+        ("Titanium Light", "#cbd5e1")
+    };
+
+    public async Task SetCustomPrimaryColorAsync(string? colorHex) {
+        string? normalized = string.IsNullOrWhiteSpace(colorHex) ? null : colorHex.Trim();
+        if (_settingsService != null) {
+            _settingsService.Current.CustomPrimaryColor = normalized;
+            await _settingsService.SaveSettingsAsync(_settingsService.Current);
+        } else {
+            _customPrimaryColorFallback = normalized;
+        }
+        OnThemeChanged?.Invoke();
+    }
+
     public void LoadCustomThemes() {
         lock (_lock) {
             _customThemes.Clear();
@@ -414,11 +458,12 @@ public sealed class ThemeService {
 
     public MudTheme GetMudTheme() {
         ThemeDefinition current = CurrentTheme;
+        string primary = EffectivePrimaryColor;
 
         if (current.IsDark) {
             return new MudTheme {
                 PaletteDark = new PaletteDark {
-                    Primary = current.Primary,
+                    Primary = primary,
                     Secondary = current.Secondary,
                     Tertiary = current.Tertiary,
                     Background = current.Background,
@@ -426,7 +471,7 @@ public sealed class ThemeService {
                     AppbarBackground = current.AppbarBackground,
                     AppbarText = current.TextPrimary,
                     DrawerBackground = current.DrawerBackground,
-                    DrawerIcon = current.Primary,
+                    DrawerIcon = primary,
                     DrawerText = current.TextPrimary,
                     TextPrimary = current.TextPrimary,
                     TextSecondary = current.TextSecondary,
@@ -444,7 +489,7 @@ public sealed class ThemeService {
 
         return new MudTheme {
             PaletteLight = new PaletteLight {
-                Primary = current.Primary,
+                Primary = primary,
                 Secondary = current.Secondary,
                 Tertiary = current.Tertiary,
                 Background = current.Background,
@@ -452,7 +497,7 @@ public sealed class ThemeService {
                 AppbarBackground = current.AppbarBackground,
                 AppbarText = current.TextPrimary,
                 DrawerBackground = current.DrawerBackground,
-                DrawerIcon = current.Primary,
+                DrawerIcon = primary,
                 DrawerText = current.TextPrimary,
                 TextPrimary = current.TextPrimary,
                 TextSecondary = current.TextSecondary,

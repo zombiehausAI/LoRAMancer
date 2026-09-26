@@ -58,7 +58,32 @@ The browser supports both a rich **Card Grid** view and a compact **Table** view
   - **Full Re-index**: Forces a clean re-scan and header re-parse across all files in the configured directory tree.
 - **Favorites & Base Model Overrides**:
   - **Favorites (❤️)**: Mark any LoRA as a favorite with a single click on card or table view, and filter instantly with the "Favorites Only" chip.
-  - **Base Model Assignment**: Assign or override detected base models (e.g. FLUX.1, SDXL, SD 1.5, Pony, Illustrious, Chroma, HunyuanVideo, Wan 2.1) directly from quick dropdown menus on cards and table rows, automatically persisting changes to SQLite.
+  - **Dynamic Base Model Architecture Discovery**:
+    - The **Filter Base** dropdown automatically discovers all base models actively present across your indexed LoRAs, appending real-time item counts (e.g. `Pony (45)`, `Illustrious (32)`, `FLUX.1 (72)`, `SD 3.5 (18)`, `SD 1.5 (25)`, `Chroma (18)`).
+    - Unioned with full modern foundation presets: `FLUX.1-dev`, `FLUX.1-schnell`, `SDXL 1.0`, `Pony Diffusion V6 XL`, `Illustrious-XL / NoobAI`, `Stable Diffusion 3.5`, `Stable Diffusion 1.5`, `Stable Diffusion 2.1`, `ChromaHD-1`, `Wan 2.1`, `HunyuanVideo`, and `AuraFlow`.
+  - **Smart Subfolder & Path Heuristic Detection**:
+    - Community `.safetensors` files often lack architecture headers or use generic checkpoint names. LoRAMancer checks parent directory names upon scanning (e.g. `LoRAs/Pony/...`, `LoRAs/Illustrious/...`, `LoRAs/SD3.5/...`, `LoRAs/SD1.5/...`, `LoRAs/Chroma/...`, `LoRAs/Flux/...`, `LoRAs/Wan/...`) and automatically tags the model with the exact target architecture.
+  - **Custom Base Model Assignment**:
+    - Users can assign any custom base model name directly from the card overlay badge, table row menu, or the **"Assign Category & Tags"** dialog. Custom architectures are persisted in SQLite and immediately appear across all studio filter dropdowns.
+  - **AI-Toolkit Dynamic Model Scanner**:
+    - When AI-Toolkit is installed in `tools/ai-toolkit` or custom directories, LoRAMancer automatically scans `config/examples/` and `extensions_built_in/diffusion_models/` on boot and setup, registering newly supported models directly into `ModelArchitectureRegistry` for training and filtering.
+
+---
+
+## 3. Dynamic Studio Highlight / Accent Color Customization
+
+Creators can personalize the accent illumination of LoRAMancer on the fly without editing configuration files:
+- **Top AppBar Palette Selector**: A dedicated Palette button in the top navigation bar displays a quick popover with curated 1-click swatches tailored for graphite/dark themes:
+  - 🟣 **Catppuccin Lavender** (`#cba6f7`)
+  - 🟢 **Matrix Emerald** (`#10b981`)
+  - 🟡 **Solar Amber** (`#f59e0b`)
+  - 🔴 **Neon Rose** (`#f43f5e`)
+  - 🟠 **Warm Coral** (`#fb923c`)
+  - 🔵 **Cyan / Sky Blue** (`#38bdf8`)
+  - 🪨 **Titanium Neutral Light** (`#cbd5e1`)
+- **Interactive Color Picker**: Fine-tune any custom HEX or RGB color using the integrated `<MudColorPicker>`.
+- **Global Reactive Illumination**: Changing the highlight color immediately updates `--accent-purple`, MudTheme `PaletteDark.Primary` / `PaletteLight.Primary`, button accents, tab indicators, chip borders, and active highlights across the entire studio in real time.
+- **Persistent Preference**: Custom highlight colors are saved in `AppSettings.json` (`CustomPrimaryColor`) and can be reset back to theme defaults at any time.
 
 ---
 

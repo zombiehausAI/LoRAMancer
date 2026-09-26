@@ -18,6 +18,46 @@
     </TitleContent>
     <DialogContent>
         <div class="d-flex flex-column gap-4" style="max-height: 70vh; overflow-y: auto;">
+            <!-- Base Model Architecture -->
+            <div>
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                    Base Model Architecture:
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+                    Foundation checkpoint family (Auto-detected: <b>@Lora.BaseModel</b>)
+                </MudText>
+
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudTextField @bind-Value="_selectedBaseModel" 
+                                  Label="Architecture Name" 
+                                  Variant="Variant.Outlined" 
+                                  Margin="Margin.Dense" 
+                                  Placeholder="e.g. Pony, Illustrious, SD 3.5, FLUX.1, or custom model" 
+                                  FullWidth="true" />
+                    @if (!string.IsNullOrWhiteSpace(_selectedBaseModel) && !string.Equals(_selectedBaseModel, Lora.BaseModel, StringComparison.OrdinalIgnoreCase)) {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => _selectedBaseModel = null)">
+                            Reset Auto
+                        </MudButton>
+                    }
+                </div>
+
+                <div class="d-flex align-center gap-1 flex-wrap mb-1">
+                    @foreach (var preset in _basePresets) {
+                        bool isCur = string.Equals(_selectedBaseModel, preset, StringComparison.OrdinalIgnoreCase) || (string.IsNullOrWhiteSpace(_selectedBaseModel) && string.Equals(Lora.BaseModel, preset, StringComparison.OrdinalIgnoreCase));
+                        <MudChip T="string" 
+                                 Size="Size.Small" 
+                                 Variant="@(isCur ? Variant.Filled : Variant.Outlined)" 
+                                 Color="@(isCur ? Color.Primary : Color.Default)" 
+                                 OnClick="@(() => _selectedBaseModel = preset)" 
+                                 Style="cursor: pointer; font-size: 0.72rem;">
+                            @preset
+                        </MudChip>
+                    }
+                </div>
+            </div>
+
+            <MudDivider />
+
             <!-- Category Assignment -->
             <div>
                 <div class="d-flex align-center justify-space-between mb-1">
@@ -112,12 +152,18 @@
     public LoraMetadata Lora { get; set; } = default!;
 
     private string? _selectedCategory;
+    private string? _selectedBaseModel;
     private List<string> _tags = new();
     private string _newTagInput = string.Empty;
+
+    private static readonly string[] _basePresets = new[] {
+        "FLUX.1", "SDXL", "Pony", "Illustrious", "SD 3.5", "SD 1.5", "SD 2.1", "Chroma", "Wan 2.1", "HunyuanVideo"
+    };
 
     protected override void OnInitialized() {
         if (Lora != null) {
             _selectedCategory = Lora.Category;
+            _selectedBaseModel = !string.IsNullOrWhiteSpace(Lora.UserBaseModel) ? Lora.UserBaseModel : null;
             _tags = Lora.Tags != null ? new List<string>(Lora.Tags) : new List<string>();
         }
     }
@@ -160,7 +206,11 @@
     private async Task SaveAsync() {
         try {
             await LibraryService.SetLoraCategoryAndTagsAsync(Lora, _selectedCategory, _tags);
-            Snackbar.Add($"Updated category and tags for {Lora.FileName}", Severity.Success);
+            string? normalizedBase = string.IsNullOrWhiteSpace(_selectedBaseModel) ? null : _selectedBaseModel.Trim();
+            if (!string.Equals(normalizedBase, Lora.UserBaseModel, StringComparison.OrdinalIgnoreCase)) {
+                await LibraryService.SetUserBaseModelAsync(Lora, normalizedBase);
+            }
+            Snackbar.Add($"Updated settings for {Lora.FileName}", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         } catch (Exception ex) {
             Snackbar.Add($"Failed to update: {ex.Message}", Severity.Error);

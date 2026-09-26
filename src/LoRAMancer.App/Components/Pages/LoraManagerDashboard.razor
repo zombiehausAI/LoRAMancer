@@ -11,6 +11,8 @@
 @inject StudioSessionService StudioSession
 @inject NavigationManager NavigationManager
 @using LoRAMancer.App.Components.Dialogs
+@using LoRAMancer.App.Engines
+@inject ModelArchitectureRegistry ArchitectureRegistry
 @using System.Collections.Concurrent
 @using System.Threading
 
@@ -83,11 +85,9 @@
             </MudItem>
             <MudItem xs="6" sm="3" md="2">
                 <MudSelect T="string" Value="_selectedArchitecture" ValueChanged="OnArchitectureChanged" Label="Filter Base" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
-                    <MudSelectItem Value="@("all")">All Architectures</MudSelectItem>
-                    <MudSelectItem Value="@("favorites")">❤️ Favorites</MudSelectItem>
-                    <MudSelectItem Value="@("FLUX.1")">FLUX.1</MudSelectItem>
-                    <MudSelectItem Value="@("SDXL")">SDXL / Pony</MudSelectItem>
-                    <MudSelectItem Value="@("Chroma")">Chroma</MudSelectItem>
+                    @foreach (var opt in GetArchitectureFilterOptions()) {
+                        <MudSelectItem Value="@opt.Value">@opt.Label</MudSelectItem>
+                    }
                 </MudSelect>
             </MudItem>
             <MudItem xs="6" sm="3" md="3">
@@ -367,14 +367,12 @@
                                     </MudChip>
                                 </ActivatorContent>
                                 <ChildContent>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "FLUX.1"))">FLUX.1</MudMenuItem>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "SDXL"))">SDXL</MudMenuItem>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Pony"))">Pony</MudMenuItem>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Illustrious"))">Illustrious</MudMenuItem>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "Chroma"))">Chroma</MudMenuItem>
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, "SD 1.5"))">SD 1.5</MudMenuItem>
+                                    @foreach (var arch in GetBaseModelMenuOptions()) {
+                                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, arch))">@arch</MudMenuItem>
+                                    }
                                     <MudDivider />
-                                    <MudMenuItem OnClick="@(() => SetBaseModelAsync(lora, null))">Reset to Auto (@lora.BaseModel)</MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenTagEditorAsync(lora))">Assign Custom Base Model...</MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.RestartAlt" OnClick="@(() => SetBaseModelAsync(lora, null))">Reset to Auto (@lora.BaseModel)</MudMenuItem>
                                 </ChildContent>
                             </MudMenu>
                         </div>
@@ -868,14 +866,12 @@
                         </MudChip>
                     </ActivatorContent>
                     <ChildContent>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "FLUX.1"))">FLUX.1</MudMenuItem>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "SDXL"))">SDXL</MudMenuItem>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Pony"))">Pony</MudMenuItem>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Illustrious"))">Illustrious</MudMenuItem>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "Chroma"))">Chroma</MudMenuItem>
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, "SD 1.5"))">SD 1.5</MudMenuItem>
+                        @foreach (var arch in GetBaseModelMenuOptions()) {
+                            <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, arch))">@arch</MudMenuItem>
+                        }
                         <MudDivider />
-                        <MudMenuItem OnClick="@(() => SetBaseModelAsync(context, null))">Reset to Auto (@context.BaseModel)</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenTagEditorAsync(context))">Assign Custom Base Model...</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.RestartAlt" OnClick="@(() => SetBaseModelAsync(context, null))">Reset to Auto (@context.BaseModel)</MudMenuItem>
                     </ChildContent>
                 </MudMenu>
             </MudTd>
@@ -1116,7 +1112,7 @@
                     }
                 } else if (!string.Equals(arch, "all", StringComparison.OrdinalIgnoreCase)) {
                     string effective = l.EffectiveBaseModel;
-                    if (string.IsNullOrWhiteSpace(effective) || !effective.Contains(arch, StringComparison.OrdinalIgnoreCase)) {
+                    if (string.IsNullOrWhiteSpace(effective) || (!effective.Contains(arch, StringComparison.OrdinalIgnoreCase) && !arch.Contains(effective, StringComparison.OrdinalIgnoreCase))) {
                         return false;
                     }
                 }
@@ -1450,6 +1446,11 @@
 
     protected override async Task OnInitializedAsync() {
         StudioSession.SetStage(StudioStage.Vault);
+        try {
+            ArchitectureRegistry.ScanAiToolkitInstallation();
+        } catch {
+            // Non-critical auto-discovery
+        }
         LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
         LibraryService.OnLibrariesChanged += HandleLibrariesChanged;
         LibraryService.OnScanProgress += HandleScanProgress;
@@ -1730,7 +1731,55 @@
         if (arch.Contains("flux", StringComparison.OrdinalIgnoreCase)) return Color.Tertiary;
         if (arch.Contains("sdxl", StringComparison.OrdinalIgnoreCase)) return Color.Info;
         if (arch.Contains("pony", StringComparison.OrdinalIgnoreCase)) return Color.Secondary;
+        if (arch.Contains("illustrious", StringComparison.OrdinalIgnoreCase) || arch.Contains("noobai", StringComparison.OrdinalIgnoreCase)) return Color.Primary;
+        if (arch.Contains("sd3.5", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd 3.5", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd3", StringComparison.OrdinalIgnoreCase)) return Color.Success;
+        if (arch.Contains("sd1.5", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd 1.5", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd15", StringComparison.OrdinalIgnoreCase)) return Color.Warning;
+        if (arch.Contains("sd2.1", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd 2.1", StringComparison.OrdinalIgnoreCase) || arch.Contains("sd21", StringComparison.OrdinalIgnoreCase)) return Color.Dark;
+        if (arch.Contains("chroma", StringComparison.OrdinalIgnoreCase)) return Color.Error;
+        if (arch.Contains("wan", StringComparison.OrdinalIgnoreCase) || arch.Contains("hunyuan", StringComparison.OrdinalIgnoreCase)) return Color.Warning;
         return Color.Default;
+    }
+
+    private IReadOnlyList<(string Value, string Label)> GetArchitectureFilterOptions() {
+        var options = new List<(string Value, string Label)> {
+            ("all", $"All Architectures ({LibraryService.Items.Count})"),
+            ("favorites", $"❤️ Favorites ({LibraryService.Items.Count(x => x.IsFavorite)})")
+        };
+
+        var counts = LibraryService.Items
+            .Where(x => !string.IsNullOrWhiteSpace(x.EffectiveBaseModel))
+            .GroupBy(x => x.EffectiveBaseModel, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+        var known = ArchitectureRegistry.GetAll().Select(a => a.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase);
+        var allArchs = counts.Keys.Union(known, StringComparer.OrdinalIgnoreCase).OrderBy(a => a);
+        foreach (var arch in allArchs) {
+            int count = counts.TryGetValue(arch, out int c) ? c : 0;
+            options.Add((arch, $"{arch} ({count})"));
+        }
+
+        return options;
+    }
+
+    private IReadOnlyList<string> GetBaseModelMenuOptions() {
+        var basePresets = new[] {
+            "FLUX.1-dev",
+            "SDXL 1.0",
+            "Pony Diffusion V6 XL",
+            "Illustrious-XL",
+            "Stable Diffusion 3.5",
+            "Stable Diffusion 1.5",
+            "Stable Diffusion 2.1",
+            "ChromaHD-1",
+            "Wan 2.1",
+            "HunyuanVideo",
+            "AuraFlow"
+        };
+        var discovered = LibraryService.Items
+            .Select(x => x.EffectiveBaseModel)
+            .Where(x => !string.IsNullOrWhiteSpace(x) && !x.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return basePresets.Union(discovered, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private async Task OpenLoraUpdaterAsync() {

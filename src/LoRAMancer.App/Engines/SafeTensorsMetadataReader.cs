@@ -94,9 +94,9 @@ public sealed class SafeTensorsMetadataReader {
 
         // Check explicit architecture specifications first, before generic model checkpoint filenames
         string baseModel = ExtractString(metadataDict, "modelspec.architecture", "ss_base_model_version", "ss_model_type", "base_model", "ss_sd_model_name");
-        ModelArchitectureInfo inferred = _registry.InferFromMetadata(metadataDict);
+        ModelArchitectureInfo inferred = _registry.InferFromPathOrMetadata(filePath, metadataDict);
         if (!string.IsNullOrWhiteSpace(baseModel) && !baseModel.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) {
-            var specificInferred = _registry.InferFromMetadata(new Dictionary<string, string> { ["base_model"] = baseModel });
+            var specificInferred = _registry.InferFromPathOrMetadata(filePath, new Dictionary<string, string> { ["base_model"] = baseModel });
             if (!specificInferred.Id.Equals("flux_1_dev", StringComparison.OrdinalIgnoreCase) || baseModel.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
                 inferred = specificInferred;
             }
