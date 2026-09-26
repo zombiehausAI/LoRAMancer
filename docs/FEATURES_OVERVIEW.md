@@ -145,7 +145,12 @@ LoRAMancer automatically inspects local system graphics hardware (`AmdVenvProvis
   - 1-click prepend or append of trigger words and style tokens without duplicate tag contamination.
   - Automatic timestamped caption backups (`.captions_backup_YYYYMMDD_HHMMSS`) created before every batch modification.
 - **Dataset Clear & Unload**:
-  - One-click dataset clearing to safely unload the active workspace, wipe thumbnail memory caches, and reset curation session state.
+  - One-click dataset clearing to safely unload the active workspace, wipe thumbnail memory caches, reset curation session state, and automatically clean up temporary extracted working copy directories.
+- **Dataset ZIP Archive Import, Working Copy & Save-to-ZIP**:
+  - Direct import of `.zip` dataset archives via the "Import ZIP" action in the studio header and empty state.
+  - Automatically extracts archives into an isolated temporary working directory (`%TEMP%\loramancer_working_datasets\<guid>\`), enabling full studio curation, batch find/replace, Ollama vision autotagging, and radar inspection on the archive's contents.
+  - Dedicated **"Save to ZIP"** action compresses the working directory and atomically updates the original `.zip` archive while keeping the dataset open for continuous editing.
+  - Unloading or clearing the dataset safely purges the temporary extracted directory.
 - **Dataset ZIP Archive Packaging**:
   - 1-click dialog to compress images and `.txt` captions into `<folder_name>.zip`.
   - Toggle between saving directly inside the dataset folder (`<dataset_folder>\<folder_name>.zip`) or alongside in the parent directory (`<parent_dir>\<folder_name>.zip`).

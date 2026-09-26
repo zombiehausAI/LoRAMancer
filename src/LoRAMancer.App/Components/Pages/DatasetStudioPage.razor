@@ -2,6 +2,7 @@
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @using System.Text.Json
+@using System.IO.Compression
 @implements IDisposable
 @inject StudioSessionService StudioSession
 @inject DatasetCuratorService CuratorService
@@ -29,20 +30,31 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
             Ollama Vision Tagger
         </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isLoading">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isLoading || _isSavingZip">
             Select Dataset
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isLoading || string.IsNullOrWhiteSpace(_datasetFolder)">
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync" Disabled="_isLoading || _isSavingZip">
+            Import ZIP
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isLoading || _isSavingZip || string.IsNullOrWhiteSpace(_datasetFolder)">
             @(_isLoading ? "Scanning..." : "Rescan")
         </MudButton>
         @if (!string.IsNullOrWhiteSpace(_datasetFolder)) {
-            <MudTooltip Text="@($"Zip dataset images and captions into {Path.GetFileName(_datasetFolder.TrimEnd('\\', '/'))}.zip")">
-                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="OpenZipDatasetDialogAsync" Disabled="_isLoading">
-                    Zip Dataset
-                </MudButton>
-            </MudTooltip>
+            @if (_isZipWorkingCopy) {
+                <MudTooltip Text="@($"Save all changes and update original {Path.GetFileName(_zipSourcePath)}")">
+                    <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveToZipAsync" Disabled="_isLoading || _isSavingZip">
+                        @(_isSavingZip ? "Saving..." : "Save to ZIP")
+                    </MudButton>
+                </MudTooltip>
+            } else {
+                <MudTooltip Text="@($"Zip dataset images and captions into {Path.GetFileName(_datasetFolder.TrimEnd('\\', '/'))}.zip")">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="OpenZipDatasetDialogAsync" Disabled="_isLoading || _isSavingZip">
+                        Zip Dataset
+                    </MudButton>
+                </MudTooltip>
+            }
             <MudTooltip Text="Unload and clear active dataset">
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearDataset" Disabled="_isLoading">
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearDataset" Disabled="_isLoading || _isSavingZip">
                     Clear Dataset
                 </MudButton>
             </MudTooltip>
@@ -54,10 +66,15 @@
 <MudCard Elevation="0" Class="pa-3 mb-4" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
     <div class="d-flex align-center justify-space-between flex-wrap gap-2">
         <div class="d-flex align-center gap-2 flex-grow-1" style="min-width: 280px;">
-            <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Primary" Size="Size.Small" />
+            <MudIcon Icon="@(_isZipWorkingCopy ? Icons.Material.Filled.FolderZip : Icons.Material.Filled.Folder)" Color="Color.Primary" Size="Size.Small" />
             <MudText Typo="Typo.body2" Style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #cdd6f4;">
-                @(string.IsNullOrWhiteSpace(_datasetFolder) ? "No dataset folder selected" : _datasetFolder)
+                @(string.IsNullOrWhiteSpace(_datasetFolder) ? "No dataset folder selected" : (_isZipWorkingCopy ? $"{Path.GetFileName(_zipSourcePath)} (ZIP Working Copy)" : _datasetFolder))
             </MudText>
+            @if (_isZipWorkingCopy) {
+                <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 20px; font-weight: 700;">
+                    ZIP ARCHIVE
+                </MudChip>
+            }
         </div>
         <div class="d-flex align-center gap-2">
             @if (_report != null) {
@@ -612,11 +629,16 @@
         <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Primary" Size="Size.Large" Class="mb-3" />
         <MudText Typo="Typo.h6" Style="font-weight: 700;">No Dataset Directory Selected</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-4" Style="max-width: 500px; margin: 0 auto;">
-            Choose a directory containing your training images and .txt caption pairs to begin curating, inspecting tag frequencies, and checking for prompt bleed.
+            Choose a directory containing your training images and .txt caption pairs, or import a zipped dataset archive to begin curating, inspecting tag frequencies, and autotagging.
         </MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync">
-            Browse Dataset Folder...
-        </MudButton>
+        <div class="d-flex justify-center gap-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync">
+                Browse Dataset Folder...
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Large" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync">
+                Import ZIP Archive...
+            </MudButton>
+        </div>
     </MudCard>
 }
 
@@ -959,32 +981,116 @@
     private DatasetCollisionAudit? _datasetAudit;
     private bool _isAuditingDataset;
     private bool _isReplacingRadarToken;
+    private static bool _isZipWorkingCopy;
+    private static string _zipSourcePath = "";
+    private bool _isSavingZip;
 
     protected override async Task OnInitializedAsync() {
         StudioSession.SetStage(StudioStage.Curate);
         _datasetFolder = StudioSession.DatasetFolder;
         if (!string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
             await ScanFolderAsync();
+        } else if (_isZipWorkingCopy) {
+            _isZipWorkingCopy = false;
+            _zipSourcePath = "";
         }
     }
 
     private async Task BrowseFolderAsync() {
         string? folder = await FileDialogService.PickFolderAsync("Select Dataset Folder to Curate");
         if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder)) {
+            if (_isZipWorkingCopy && !string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
+                try {
+                    Directory.Delete(_datasetFolder, recursive: true);
+                } catch { }
+            }
+            _isZipWorkingCopy = false;
+            _zipSourcePath = "";
             _datasetFolder = folder;
             StudioSession.SetDatasetFolder(folder);
             await ScanFolderAsync();
         }
     }
 
+    private async Task BrowseZipAsync() {
+        string? zipFile = await FileDialogService.PickZipFileAsync("Select Dataset ZIP Archive to Import");
+        if (string.IsNullOrWhiteSpace(zipFile) || !File.Exists(zipFile)) {
+            return;
+        }
+
+        if (_isZipWorkingCopy && !string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
+            try {
+                Directory.Delete(_datasetFolder, recursive: true);
+            } catch { }
+        }
+
+        _isLoading = true;
+        StateHasChanged();
+
+        try {
+            string tempDir = Path.Combine(Path.GetTempPath(), "loramancer_working_datasets", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            await Task.Run(() => ZipFile.ExtractToDirectory(zipFile, tempDir, overwriteFiles: true));
+
+            _isZipWorkingCopy = true;
+            _zipSourcePath = zipFile;
+            _datasetFolder = tempDir;
+            StudioSession.SetDatasetFolder(tempDir);
+
+            await ScanFolderAsync();
+            Snackbar.Add($"Imported {Path.GetFileName(zipFile)} to temporary working copy.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to import ZIP: {ex.Message}", Severity.Error);
+        } finally {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveToZipAsync() {
+        if (!_isZipWorkingCopy || string.IsNullOrWhiteSpace(_zipSourcePath) || string.IsNullOrWhiteSpace(_datasetFolder) || !Directory.Exists(_datasetFolder)) {
+            Snackbar.Add("No active ZIP working copy to save.", Severity.Warning);
+            return;
+        }
+
+        _isSavingZip = true;
+        StateHasChanged();
+
+        try {
+            string stagingZip = Path.Combine(Path.GetTempPath(), $"loramancer_save_{Guid.NewGuid():N}.zip");
+
+            await Task.Run(() => {
+                if (File.Exists(stagingZip)) {
+                    File.Delete(stagingZip);
+                }
+                ZipFile.CreateFromDirectory(_datasetFolder, stagingZip, CompressionLevel.Optimal, includeBaseDirectory: false);
+                File.Move(stagingZip, _zipSourcePath, overwrite: true);
+            });
+
+            Snackbar.Add($"Saved dataset changes back to {Path.GetFileName(_zipSourcePath)}.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save ZIP archive: {ex.Message}", Severity.Error);
+        } finally {
+            _isSavingZip = false;
+            StateHasChanged();
+        }
+    }
+
     private void ClearDataset() {
+        if (_isZipWorkingCopy && !string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
+            try {
+                Directory.Delete(_datasetFolder, recursive: true);
+            } catch { }
+        }
+        _isZipWorkingCopy = false;
+        _zipSourcePath = "";
         _datasetFolder = "";
         _report = null;
         _datasetAudit = null;
         _singleTokenReport = null;
         _thumbnailCache.Clear();
         StudioSession.SetDatasetFolder("");
-        Snackbar.Add("Dataset cleared.", Severity.Info);
+        Snackbar.Add("Dataset cleared and temporary files removed.", Severity.Info);
     }
 
     private async Task ScanFolderAsync() {
