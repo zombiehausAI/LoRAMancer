@@ -270,7 +270,7 @@ LoRAMancer unifies individual workflows into a cohesive 5-stage production studi
 - **Top Studio Pipeline Switcher**:
   1. **Curate (`/curate`)**: Full-screen dataset gallery, inline caption editor, tag frequency data grid, batch prefix/suffix trigger words, aspect ratio bucketing, and Semantic Collision Radar.
   2. **Train (`/training`)**: Forge and training studio with live AI-Toolkit loss telemetry, real-time log stream, and hardware acceleration monitors.
-  3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, and Forensic De-Anonymizer.
+  3. **Lab (`/lab`)**: LoRA surgery, block weight attenuation, SVD rank compression, vector gene therapy, SVD Overbake Radar, Ghost Hunter, Style Decoupler, and Forensic De-Anonymizer. Includes 1-click model clearing and switching back to the browse empty state.
   4. **Test (`/test`)**: ComfyUI inference studio with live WebSocket image rendering, prompt testing, and AI benchmark matrix sweeps.
   5. **Vault (`/`)**: Central LoRA model library, visual card/table browser, Civitai metadata enricher, and version management.
 - **Configurable Startup Section**:
