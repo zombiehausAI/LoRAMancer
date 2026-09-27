@@ -80,9 +80,14 @@
             </MudMenuItem>
         </MudMenu>
 
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
-            Browse Folder...
-        </MudButton>
+        <div class="d-flex align-center gap-1">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+                Browse Folder...
+            </MudButton>
+            <MudTooltip Text="Enter or paste folder path manually (RDP / Remote Server)">
+                <MudIconButton Icon="@Icons.Material.Filled.EditLocationAlt" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Medium" OnClick="OpenManualFolderDialog" />
+            </MudTooltip>
+        </div>
         <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="BrowseLoraFileAsync">
             Add File...
         </MudButton>
@@ -336,9 +341,14 @@
                         : "No models or subfolders match the current filter."))
             </MudText>
             @if (string.IsNullOrWhiteSpace(LibraryService.RootFolder)) {
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
-                    Select LoRA Folder
-                </MudButton>
+                <div class="d-flex justify-center gap-2 flex-wrap">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseLibraryFolderAsync">
+                        Select LoRA Folder
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.EditLocationAlt" OnClick="OpenManualFolderDialog">
+                        Enter Path Manually...
+                    </MudButton>
+                </div>
             } else if (LibraryService.Items.Count == 0) {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" OnClick="RescanDeltaAsync">
                     Scan Library Now
@@ -1200,6 +1210,30 @@
     </DialogActions>
 </MudDialog>
 
+<!-- Set Folder Path Dialog (Remote / RDP Fallback) -->
+<MudDialog @bind-Visible="_manualFolderDialogOpen" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true }">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Primary" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">Set LoRA Library Folder</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+            Enter or paste the full directory path where your <code>.safetensors</code> models are stored on this server:
+        </MudText>
+        <MudTextField @bind-Value="_manualFolderPath" Label="Storage Directory" Placeholder="e.g. C:\AI\models\loras or D:\models\Lora"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" FullWidth="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => _manualFolderDialogOpen = false)">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="@string.IsNullOrWhiteSpace(_manualFolderPath)" OnClick="@(() => ApplySelectedFolder(_manualFolderPath.Trim()))">
+            Scan &amp; Index Folder
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private bool _drawerOpen;
     private LoraMetadata? _selectedLora;
@@ -1221,6 +1255,9 @@
     private bool _manageCollectionsDialogOpen;
     private string _createColName = string.Empty;
     private string _createColDesc = string.Empty;
+
+    private bool _manualFolderDialogOpen;
+    private string _manualFolderPath = string.Empty;
 
     private bool _showAllFlat;
     private string _viewMode = "grid";
@@ -1666,21 +1703,49 @@
     }
 
     private async Task BrowseLoraFileAsync() {
-        string? file = await FileDialogService.PickSafeTensorsFileAsync();
-        if (!string.IsNullOrEmpty(file)) {
-            await LoadSingleLoraAsync(file);
+        try {
+            string? file = await FileDialogService.PickSafeTensorsFileAsync();
+            if (!string.IsNullOrEmpty(file)) {
+                await LoadSingleLoraAsync(file);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"File picker error: {ex.Message}", Severity.Warning);
         }
     }
 
     private async Task BrowseLibraryFolderAsync() {
-        string? folder = await FileDialogService.PickFolderAsync("Select LoRA Storage Directory");
-        if (!string.IsNullOrEmpty(folder)) {
-            _showAllFlat = false;
-            _currentPage = 1;
-            LibraryService.StartScan(folder, forceClear: false);
-            UpdateFilteredList();
-            Snackbar.Add($"Indexing {Path.GetFileName(folder)} in background...", Severity.Info);
+        try {
+            string? folder = await FileDialogService.PickFolderAsync("Select LoRA Storage Directory");
+            if (!string.IsNullOrEmpty(folder)) {
+                ApplySelectedFolder(folder);
+                return;
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Folder dialog error: {ex.Message}", Severity.Warning);
         }
+
+        // Over RDP or remote server, if native picker returned null or failed, open manual path prompt
+        OpenManualFolderDialog();
+    }
+
+    private void OpenManualFolderDialog() {
+        _manualFolderPath = !string.IsNullOrWhiteSpace(LibraryService.CurrentFolder)
+            ? LibraryService.CurrentFolder
+            : (!string.IsNullOrWhiteSpace(LibraryService.RootFolder) ? LibraryService.RootFolder : string.Empty);
+        _manualFolderDialogOpen = true;
+    }
+
+    private void ApplySelectedFolder(string folder) {
+        if (!Directory.Exists(folder)) {
+            Snackbar.Add($"Directory does not exist: {folder}", Severity.Error);
+            return;
+        }
+        _showAllFlat = false;
+        _currentPage = 1;
+        LibraryService.StartScan(folder, forceClear: false);
+        UpdateFilteredList();
+        Snackbar.Add($"Indexing {Path.GetFileName(folder)} in background...", Severity.Info);
+        _manualFolderDialogOpen = false;
     }
 
     private async Task LoadSingleLoraAsync(string filePath) {

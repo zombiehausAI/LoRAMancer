@@ -163,9 +163,11 @@ public sealed class LoraLibraryService {
 
             string savedActiveId = _settingsService.Current.LastActiveLibraryId;
             var targetLib = _libraries.FirstOrDefault(l => string.Equals(l.Id, savedActiveId, StringComparison.OrdinalIgnoreCase))
-                ?? _libraries[0];
+                ?? _libraries.FirstOrDefault();
 
-            await SwitchLibraryAsync(targetLib.Id);
+            if (targetLib != null) {
+                await SwitchLibraryAsync(targetLib.Id);
+            }
         } catch {
             await LoadFromDatabaseAsync();
         }

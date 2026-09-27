@@ -5,82 +5,119 @@ namespace LoRAMancer.App.Services;
 
 public sealed class NativeFileDialogService {
     public async Task<string?> PickSafeTensorsFileAsync() {
-        FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
-            { DevicePlatform.WinUI, new[] { ".safetensors", ".ckpt", ".pt" } }
-        });
+        try {
+            FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".safetensors", ".ckpt", ".pt" } }
+            });
 
-        PickOptions options = new() {
-            PickerTitle = "Select Donor LoRA (.safetensors)",
-            FileTypes = customFileType
-        };
+            PickOptions options = new() {
+                PickerTitle = "Select Donor LoRA (.safetensors)",
+                FileTypes = customFileType
+            };
 
-        FileResult? result = await FilePicker.Default.PickAsync(options);
-        return result?.FullPath;
+            FileResult? result = await FilePicker.Default.PickAsync(options);
+            return result?.FullPath;
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"[NativeFileDialogService] PickSafeTensorsFileAsync error: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<IReadOnlyList<string>> PickMultipleSafeTensorsFilesAsync() {
-        FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
-            { DevicePlatform.WinUI, new[] { ".safetensors" } }
-        });
+        try {
+            FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".safetensors" } }
+            });
 
-        PickOptions options = new() {
-            PickerTitle = "Select LoRA Files (.safetensors)",
-            FileTypes = customFileType
-        };
+            PickOptions options = new() {
+                PickerTitle = "Select LoRA Files (.safetensors)",
+                FileTypes = customFileType
+            };
 
-        var results = await FilePicker.Default.PickMultipleAsync(options);
-        if (results == null) {
+            var results = await FilePicker.Default.PickMultipleAsync(options);
+            if (results == null) {
+                return Array.Empty<string>();
+            }
+
+            return results.Where(r => r != null).Select(r => r!.FullPath).ToList();
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"[NativeFileDialogService] PickMultipleSafeTensorsFilesAsync error: {ex.Message}");
             return Array.Empty<string>();
         }
-
-        return results.Where(r => r != null).Select(r => r!.FullPath).ToList();
     }
 
     public async Task<string?> PickFolderAsync(string title = "Select Directory") {
-        FolderPicker folderPicker = new();
-        folderPicker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
-        folderPicker.FileTypeFilter.Add("*");
+        try {
+            FolderPicker folderPicker = new();
+            folderPicker.SuggestedStartLocation = PickerLocationId.ComputerFolder;
+            folderPicker.FileTypeFilter.Add("*");
 
-        IntPtr hwnd = GetActiveWindowHandle();
-        InitializeWithWindow.Initialize(folderPicker, hwnd);
+            IntPtr hwnd = GetActiveWindowHandle();
+            if (hwnd != IntPtr.Zero) {
+                InitializeWithWindow.Initialize(folderPicker, hwnd);
+            }
 
-        Windows.Storage.StorageFolder? folder = await folderPicker.PickSingleFolderAsync();
-        return folder?.Path;
+            Windows.Storage.StorageFolder? folder = await folderPicker.PickSingleFolderAsync();
+            return folder?.Path;
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"[NativeFileDialogService] PickFolderAsync error (remote/server session): {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<string?> PickScriptFileAsync() {
-        FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
-            { DevicePlatform.WinUI, new[] { ".ps1", ".bat", ".cmd", ".py" } }
-        });
+        try {
+            FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".ps1", ".bat", ".cmd", ".py" } }
+            });
 
-        PickOptions options = new() {
-            PickerTitle = "Select ComfyUI Startup Script (.ps1/.bat)",
-            FileTypes = customFileType
-        };
+            PickOptions options = new() {
+                PickerTitle = "Select ComfyUI Startup Script (.ps1/.bat)",
+                FileTypes = customFileType
+            };
 
-        FileResult? result = await FilePicker.Default.PickAsync(options);
-        return result?.FullPath;
+            FileResult? result = await FilePicker.Default.PickAsync(options);
+            return result?.FullPath;
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"[NativeFileDialogService] PickScriptFileAsync error: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<string?> PickZipFileAsync(string title = "Select Dataset ZIP Archive") {
-        FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
-            { DevicePlatform.WinUI, new[] { ".zip" } }
-        });
+        try {
+            FilePickerFileType customFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".zip" } }
+            });
 
-        PickOptions options = new() {
-            PickerTitle = title,
-            FileTypes = customFileType
-        };
+            PickOptions options = new() {
+                PickerTitle = title,
+                FileTypes = customFileType
+            };
 
-        FileResult? result = await FilePicker.Default.PickAsync(options);
-        return result?.FullPath;
+            FileResult? result = await FilePicker.Default.PickAsync(options);
+            return result?.FullPath;
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"[NativeFileDialogService] PickZipFileAsync error: {ex.Message}");
+            return null;
+        }
     }
 
     private static IntPtr GetActiveWindowHandle() {
-        var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault();
-        if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window winUIWindow) {
-            return WindowNative.GetWindowHandle(winUIWindow);
+        try {
+            var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault();
+            if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window winUIWindow) {
+                IntPtr hwnd = WindowNative.GetWindowHandle(winUIWindow);
+                if (hwnd != IntPtr.Zero) {
+                    return hwnd;
+                }
+            }
+        } catch { }
+
+        try {
+            return System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+        } catch {
+            return IntPtr.Zero;
         }
-        return IntPtr.Zero;
     }
 }
