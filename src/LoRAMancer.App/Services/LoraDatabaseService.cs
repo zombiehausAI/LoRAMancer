@@ -13,6 +13,16 @@ public sealed class LoraDatabaseService : IDisposable {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _initialized;
 
+    public bool IsPostgreSql => _settingsService != null && 
+        string.Equals(_settingsService.Current.DatabaseProvider, "PostgreSQL", StringComparison.OrdinalIgnoreCase);
+
+    private static void AddParam(DbCommand cmd, string name, object? value) {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value ?? DBNull.Value;
+        cmd.Parameters.Add(p);
+    }
+
     public LoraDatabaseService(SettingsService? settingsService = null) {
         _settingsService = settingsService;
         string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
@@ -36,6 +46,17 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             if (_initialized) {
                 return;
+            }
+
+            if (IsPostgreSql) {
+                try {
+                    var pgConfig = GetCurrentPostgreSqlConfig();
+                    await EnsurePostgreSqlDatabaseAndSchemaAsync(pgConfig);
+                    _initialized = true;
+                    return;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine($"[PostgreSQL] Schema initialization failed: {ex.Message}. Falling back to SQLite.");
+                }
             }
 
             using var connection = new SqliteConnection(_connectionString);
@@ -218,7 +239,18 @@ public sealed class LoraDatabaseService : IDisposable {
         }
     }
 
-    private async Task<SqliteConnection> OpenConnectionAsync() {
+    private async Task<DbConnection> OpenConnectionAsync() {
+        if (IsPostgreSql) {
+            try {
+                var config = GetCurrentPostgreSqlConfig();
+                var conn = new NpgsqlConnection(config.BuildConnectionString());
+                await conn.OpenAsync();
+                return conn;
+            } catch (Exception ex) {
+                System.Diagnostics.Debug.WriteLine($"[PostgreSQL] Connection failed: {ex.Message}. Falling back to SQLite.");
+            }
+        }
+
         var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
         using var cmd = connection.CreateCommand();
@@ -239,7 +271,7 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
+            cmd.CommandText = "SELECT * FROM Loras ORDER BY LOWER(FileName) ASC;";
 
             var list = new List<LoraMetadata>();
             using var reader = await cmd.ExecuteReaderAsync();
@@ -274,8 +306,8 @@ public sealed class LoraDatabaseService : IDisposable {
                         )
                     )
                 )
-                GROUP BY l.Id
-                ORDER BY l.Name COLLATE NOCASE ASC;
+                GROUP BY l.Id, l.Name, l.FolderPath, l.Description, l.CreatedAtUtc, l.UpdatedAtUtc
+                ORDER BY LOWER(l.Name) ASC;
             ";
 
             var list = new List<LoraLibrary>();
@@ -286,9 +318,9 @@ public sealed class LoraDatabaseService : IDisposable {
                     Name = reader.GetString(1),
                     FolderPath = reader.GetString(2),
                     Description = reader.IsDBNull(3) ? null : reader.GetString(3),
-                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
-                    ModelCount = reader.GetInt32(6)
+                    CreatedAtUtc = !reader.IsDBNull(4) && DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
+                    UpdatedAtUtc = !reader.IsDBNull(5) && DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
+                    ModelCount = reader.IsDBNull(6) ? 0 : Convert.ToInt32(reader.GetValue(6))
                 };
                 list.Add(lib);
             }
@@ -311,19 +343,33 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                INSERT OR REPLACE INTO Libraries (
-                    Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc
-                ) VALUES (
-                    $Id, $Name, $FolderPath, $Description, $CreatedAtUtc, $UpdatedAtUtc
-                );
-            ";
-            cmd.Parameters.AddWithValue("$Id", library.Id);
-            cmd.Parameters.AddWithValue("$Name", library.Name);
-            cmd.Parameters.AddWithValue("$FolderPath", library.FolderPath);
-            cmd.Parameters.AddWithValue("$Description", (object?)library.Description ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$CreatedAtUtc", library.CreatedAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            if (connection is NpgsqlConnection) {
+                cmd.CommandText = @"
+                    INSERT INTO Libraries (
+                        Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc
+                    ) VALUES (
+                        @Id, @Name, @FolderPath, @Description, @CreatedAtUtc, @UpdatedAtUtc
+                    ) ON CONFLICT (Id) DO UPDATE SET
+                        Name = EXCLUDED.Name,
+                        FolderPath = EXCLUDED.FolderPath,
+                        Description = EXCLUDED.Description,
+                        UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+                ";
+            } else {
+                cmd.CommandText = @"
+                    INSERT OR REPLACE INTO Libraries (
+                        Id, Name, FolderPath, Description, CreatedAtUtc, UpdatedAtUtc
+                    ) VALUES (
+                        @Id, @Name, @FolderPath, @Description, @CreatedAtUtc, @UpdatedAtUtc
+                    );
+                ";
+            }
+            AddParam(cmd, "@Id", library.Id);
+            AddParam(cmd, "@Name", library.Name);
+            AddParam(cmd, "@FolderPath", library.FolderPath);
+            AddParam(cmd, "@Description", (object?)library.Description ?? DBNull.Value);
+            AddParam(cmd, "@CreatedAtUtc", library.CreatedAtUtc.ToString("O"));
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
 
             await cmd.ExecuteNonQueryAsync();
         } finally {
@@ -338,8 +384,8 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Libraries WHERE Id = $Id;";
-            cmd.Parameters.AddWithValue("$Id", id);
+            cmd.CommandText = "DELETE FROM Libraries WHERE Id = @Id;";
+            AddParam(cmd, "@Id", id);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -352,18 +398,18 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Categories ORDER BY Name COLLATE NOCASE ASC;";
+            cmd.CommandText = "SELECT * FROM Categories ORDER BY LOWER(Name) ASC;";
             var list = new List<LoraCategory>();
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync()) {
                 list.Add(new LoraCategory {
                     Id = reader.GetString(reader.GetOrdinal("Id")),
                     Name = reader.GetString(reader.GetOrdinal("Name")),
-                    Color = reader.GetString(reader.GetOrdinal("Color")),
+                    Color = reader.IsDBNull(reader.GetOrdinal("Color")) ? "#89b4fa" : reader.GetString(reader.GetOrdinal("Color")),
                     Icon = reader.IsDBNull(reader.GetOrdinal("Icon")) ? null : reader.GetString(reader.GetOrdinal("Icon")),
                     Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? null : reader.GetString(reader.GetOrdinal("Description")),
-                    CreatedAtUtc = DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedAtUtc")), out var c) ? c : DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(reader.GetOrdinal("UpdatedAtUtc")), out var u) ? u : DateTime.UtcNow
+                    CreatedAtUtc = !reader.IsDBNull(reader.GetOrdinal("CreatedAtUtc")) && DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedAtUtc")), out var c) ? c : DateTime.UtcNow,
+                    UpdatedAtUtc = !reader.IsDBNull(reader.GetOrdinal("UpdatedAtUtc")) && DateTime.TryParse(reader.GetString(reader.GetOrdinal("UpdatedAtUtc")), out var u) ? u : DateTime.UtcNow
                 });
             }
             return list;
@@ -378,23 +424,31 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                INSERT INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
-                VALUES ($Id, $Name, $Color, $Icon, $Description, $CreatedAtUtc, $UpdatedAtUtc)
-                ON CONFLICT(Id) DO UPDATE SET
-                    Name = excluded.Name,
-                    Color = excluded.Color,
-                    Icon = excluded.Icon,
-                    Description = excluded.Description,
-                    UpdatedAtUtc = excluded.UpdatedAtUtc;
-            ";
-            cmd.Parameters.AddWithValue("$Id", cat.Id);
-            cmd.Parameters.AddWithValue("$Name", cat.Name);
-            cmd.Parameters.AddWithValue("$Color", cat.Color);
-            cmd.Parameters.AddWithValue("$Icon", (object?)cat.Icon ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$Description", (object?)cat.Description ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$CreatedAtUtc", cat.CreatedAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            if (connection is NpgsqlConnection) {
+                cmd.CommandText = @"
+                    INSERT INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (@Id, @Name, @Color, @Icon, @Description, @CreatedAtUtc, @UpdatedAtUtc)
+                    ON CONFLICT (Id) DO UPDATE SET
+                        Name = EXCLUDED.Name,
+                        Color = EXCLUDED.Color,
+                        Icon = EXCLUDED.Icon,
+                        Description = EXCLUDED.Description,
+                        UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+                ";
+            } else {
+                cmd.CommandText = @"
+                    INSERT OR REPLACE INTO Categories (Id, Name, Color, Icon, Description, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (@Id, @Name, @Color, @Icon, @Description, @CreatedAtUtc, @UpdatedAtUtc);
+                ";
+            }
+            AddParam(cmd, "@Id", cat.Id);
+            AddParam(cmd, "@Name", cat.Name);
+            AddParam(cmd, "@Color", string.IsNullOrWhiteSpace(cat.Color) ? "#89b4fa" : cat.Color);
+            AddParam(cmd, "@Icon", (object?)cat.Icon ?? DBNull.Value);
+            AddParam(cmd, "@Description", (object?)cat.Description ?? DBNull.Value);
+            AddParam(cmd, "@CreatedAtUtc", cat.CreatedAtUtc.ToString("O"));
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -411,8 +465,8 @@ public sealed class LoraDatabaseService : IDisposable {
             string? catName = null;
             using (var selectCmd = connection.CreateCommand()) {
                 selectCmd.Transaction = trans;
-                selectCmd.CommandText = "SELECT Name FROM Categories WHERE Id = $Id;";
-                selectCmd.Parameters.AddWithValue("$Id", id);
+                selectCmd.CommandText = "SELECT Name FROM Categories WHERE Id = @Id;";
+                AddParam(selectCmd, "@Id", id);
                 var obj = await selectCmd.ExecuteScalarAsync();
                 if (obj != null && obj != DBNull.Value) {
                     catName = obj.ToString();
@@ -422,16 +476,16 @@ public sealed class LoraDatabaseService : IDisposable {
             if (!string.IsNullOrWhiteSpace(catName)) {
                 using var updateCmd = connection.CreateCommand();
                 updateCmd.Transaction = trans;
-                updateCmd.CommandText = "UPDATE Loras SET Category = $Reassign WHERE Category = $OldName COLLATE NOCASE;";
-                updateCmd.Parameters.AddWithValue("$Reassign", (object?)reassignTo ?? DBNull.Value);
-                updateCmd.Parameters.AddWithValue("$OldName", catName);
+                updateCmd.CommandText = "UPDATE Loras SET Category = @Reassign WHERE LOWER(Category) = LOWER(@OldName);";
+                AddParam(updateCmd, "@Reassign", (object?)reassignTo ?? DBNull.Value);
+                AddParam(updateCmd, "@OldName", catName);
                 await updateCmd.ExecuteNonQueryAsync();
             }
 
             using (var delCmd = connection.CreateCommand()) {
                 delCmd.Transaction = trans;
-                delCmd.CommandText = "DELETE FROM Categories WHERE Id = $Id;";
-                delCmd.Parameters.AddWithValue("$Id", id);
+                delCmd.CommandText = "DELETE FROM Categories WHERE Id = @Id;";
+                AddParam(delCmd, "@Id", id);
                 await delCmd.ExecuteNonQueryAsync();
             }
 
@@ -452,8 +506,8 @@ public sealed class LoraDatabaseService : IDisposable {
                        COUNT(ci.FilePath) as ModelCount
                 FROM Collections c
                 LEFT JOIN CollectionItems ci ON ci.CollectionId = c.Id
-                GROUP BY c.Id
-                ORDER BY c.Name COLLATE NOCASE ASC;
+                GROUP BY c.Id, c.Name, c.Description, c.Color, c.CreatedAtUtc, c.UpdatedAtUtc
+                ORDER BY LOWER(c.Name) ASC;
             ";
             var list = new List<LoraCollection>();
             using var reader = await cmd.ExecuteReaderAsync();
@@ -463,9 +517,9 @@ public sealed class LoraDatabaseService : IDisposable {
                     Name = reader.GetString(1),
                     Description = reader.IsDBNull(2) ? null : reader.GetString(2),
                     Color = reader.IsDBNull(3) ? null : reader.GetString(3),
-                    CreatedAtUtc = DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
-                    UpdatedAtUtc = DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
-                    ModelCount = reader.GetInt32(6)
+                    CreatedAtUtc = !reader.IsDBNull(4) && DateTime.TryParse(reader.GetString(4), out var cat) ? cat : DateTime.UtcNow,
+                    UpdatedAtUtc = !reader.IsDBNull(5) && DateTime.TryParse(reader.GetString(5), out var uat) ? uat : DateTime.UtcNow,
+                    ModelCount = reader.IsDBNull(6) ? 0 : Convert.ToInt32(reader.GetValue(6))
                 });
             }
             return list;
@@ -481,16 +535,28 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                INSERT OR REPLACE INTO Collections (Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc)
-                VALUES ($Id, $Name, $Description, $Color, $CreatedAtUtc, $UpdatedAtUtc);
-            ";
-            cmd.Parameters.AddWithValue("$Id", collection.Id);
-            cmd.Parameters.AddWithValue("$Name", collection.Name);
-            cmd.Parameters.AddWithValue("$Description", (object?)collection.Description ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$Color", (object?)collection.Color ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$CreatedAtUtc", collection.CreatedAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            if (connection is NpgsqlConnection) {
+                cmd.CommandText = @"
+                    INSERT INTO Collections (Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (@Id, @Name, @Description, @Color, @CreatedAtUtc, @UpdatedAtUtc)
+                    ON CONFLICT (Id) DO UPDATE SET
+                        Name = EXCLUDED.Name,
+                        Description = EXCLUDED.Description,
+                        Color = EXCLUDED.Color,
+                        UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+                ";
+            } else {
+                cmd.CommandText = @"
+                    INSERT OR REPLACE INTO Collections (Id, Name, Description, Color, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (@Id, @Name, @Description, @Color, @CreatedAtUtc, @UpdatedAtUtc);
+                ";
+            }
+            AddParam(cmd, "@Id", collection.Id);
+            AddParam(cmd, "@Name", collection.Name);
+            AddParam(cmd, "@Description", (object?)collection.Description ?? DBNull.Value);
+            AddParam(cmd, "@Color", (object?)collection.Color ?? DBNull.Value);
+            AddParam(cmd, "@CreatedAtUtc", collection.CreatedAtUtc.ToString("O"));
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -506,10 +572,10 @@ public sealed class LoraDatabaseService : IDisposable {
             using var cmd = connection.CreateCommand();
             cmd.Transaction = trans;
             cmd.CommandText = @"
-                DELETE FROM CollectionItems WHERE CollectionId = $Id;
-                DELETE FROM Collections WHERE Id = $Id;
+                DELETE FROM CollectionItems WHERE CollectionId = @Id;
+                DELETE FROM Collections WHERE Id = @Id;
             ";
-            cmd.Parameters.AddWithValue("$Id", id);
+            AddParam(cmd, "@Id", id);
             await cmd.ExecuteNonQueryAsync();
             trans.Commit();
         } finally {
@@ -525,13 +591,21 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = @"
-                INSERT OR IGNORE INTO CollectionItems (CollectionId, FilePath, AddedAtUtc)
-                VALUES ($CollectionId, $FilePath, $AddedAtUtc);
-            ";
-            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
-            cmd.Parameters.AddWithValue("$AddedAtUtc", DateTime.UtcNow.ToString("O"));
+            if (connection is NpgsqlConnection) {
+                cmd.CommandText = @"
+                    INSERT INTO CollectionItems (CollectionId, FilePath, AddedAtUtc)
+                    VALUES (@CollectionId, @FilePath, @AddedAtUtc)
+                    ON CONFLICT (CollectionId, FilePath) DO NOTHING;
+                ";
+            } else {
+                cmd.CommandText = @"
+                    INSERT OR IGNORE INTO CollectionItems (CollectionId, FilePath, AddedAtUtc)
+                    VALUES (@CollectionId, @FilePath, @AddedAtUtc);
+                ";
+            }
+            AddParam(cmd, "@CollectionId", collectionId);
+            AddParam(cmd, "@FilePath", filePath);
+            AddParam(cmd, "@AddedAtUtc", DateTime.UtcNow.ToString("O"));
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -546,9 +620,9 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM CollectionItems WHERE CollectionId = $CollectionId AND FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "DELETE FROM CollectionItems WHERE CollectionId = @CollectionId AND FilePath = @FilePath;";
+            AddParam(cmd, "@CollectionId", collectionId);
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -562,8 +636,8 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT CollectionId FROM CollectionItems WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "SELECT CollectionId FROM CollectionItems WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@FilePath", filePath);
             var list = new List<string>();
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync()) {
@@ -585,10 +659,10 @@ public sealed class LoraDatabaseService : IDisposable {
             cmd.CommandText = @"
                 SELECT m.* FROM Loras m
                 INNER JOIN CollectionItems ci ON ci.FilePath = m.FilePath
-                WHERE ci.CollectionId = $CollectionId
-                ORDER BY m.FileName COLLATE NOCASE ASC;
+                WHERE ci.CollectionId = @CollectionId
+                ORDER BY LOWER(m.FileName) ASC;
             ";
-            cmd.Parameters.AddWithValue("$CollectionId", collectionId);
+            AddParam(cmd, "@CollectionId", collectionId);
             var list = new List<LoraMetadata>();
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync()) {
@@ -606,10 +680,10 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE Loras SET Category = $Category, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$Category", (object?)category ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "UPDATE Loras SET Category = @Category, UpdatedAtUtc = @UpdatedAt WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@Category", (object?)category ?? DBNull.Value);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -622,11 +696,11 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE Loras SET TagsJson = $TagsJson, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
+            cmd.CommandText = "UPDATE Loras SET TagsJson = @TagsJson, UpdatedAtUtc = @UpdatedAt WHERE FilePath = @FilePath;";
             var list = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
-            cmd.Parameters.AddWithValue("$TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            AddParam(cmd, "@TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -639,12 +713,12 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE Loras SET Category = $Category, TagsJson = $TagsJson, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$Category", (object?)category ?? DBNull.Value);
+            cmd.CommandText = "UPDATE Loras SET Category = @Category, TagsJson = @TagsJson, UpdatedAtUtc = @UpdatedAt WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@Category", (object?)category ?? DBNull.Value);
             var list = tags?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
-            cmd.Parameters.AddWithValue("$TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            AddParam(cmd, "@TagsJson", list.Count > 0 ? JsonSerializer.Serialize(list) : (object)DBNull.Value);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -662,41 +736,41 @@ public sealed class LoraDatabaseService : IDisposable {
                 string normFolder = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
                 cmd.CommandText = @"
                     SELECT * FROM Loras 
-                    WHERE LibraryId = $LibraryId 
-                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
-                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix
-                    ORDER BY FileName COLLATE NOCASE ASC;
+                    WHERE LibraryId = @LibraryId 
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = @NormFolder
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE @NormFolderPrefix
+                    ORDER BY LOWER(FileName) ASC;
                 ";
-                cmd.Parameters.AddWithValue("$LibraryId", libraryId);
-                cmd.Parameters.AddWithValue("$NormFolder", normFolder);
-                cmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
+                AddParam(cmd, "@LibraryId", libraryId);
+                AddParam(cmd, "@NormFolder", normFolder);
+                AddParam(cmd, "@NormFolderPrefix", normFolder + "/%");
             } else if (!string.IsNullOrWhiteSpace(libraryId)) {
                 cmd.CommandText = @"
                     SELECT * FROM Loras 
-                    WHERE LibraryId = $LibraryId 
+                    WHERE LibraryId = @LibraryId 
                        OR (DirectoryPath IS NOT NULL AND EXISTS (
                            SELECT 1 FROM Libraries l 
-                           WHERE l.Id = $LibraryId 
+                           WHERE l.Id = @LibraryId 
                              AND (
                                  REPLACE(RTRIM(Loras.DirectoryPath, '/\'), '\', '/') = REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/')
                                  OR REPLACE(RTRIM(Loras.DirectoryPath, '/\'), '\', '/') LIKE REPLACE(RTRIM(l.FolderPath, '/\'), '\', '/') || '/%'
                              )
                        ))
-                    ORDER BY FileName COLLATE NOCASE ASC;
+                    ORDER BY LOWER(FileName) ASC;
                 ";
-                cmd.Parameters.AddWithValue("$LibraryId", libraryId);
+                AddParam(cmd, "@LibraryId", libraryId);
             } else if (!string.IsNullOrWhiteSpace(folderPath)) {
                 string normFolder = folderPath.Trim().TrimEnd('/', '\\').Replace('\\', '/');
                 cmd.CommandText = @"
                     SELECT * FROM Loras 
-                    WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
-                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix
-                    ORDER BY FileName COLLATE NOCASE ASC;
+                    WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = @NormFolder
+                       OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE @NormFolderPrefix
+                    ORDER BY LOWER(FileName) ASC;
                 ";
-                cmd.Parameters.AddWithValue("$NormFolder", normFolder);
-                cmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
+                AddParam(cmd, "@NormFolder", normFolder);
+                AddParam(cmd, "@NormFolderPrefix", normFolder + "/%");
             } else {
-                cmd.CommandText = "SELECT * FROM Loras ORDER BY FileName COLLATE NOCASE ASC;";
+                cmd.CommandText = "SELECT * FROM Loras ORDER BY LOWER(FileName) ASC;";
             }
 
             var list = new List<LoraMetadata>();
@@ -739,7 +813,79 @@ public sealed class LoraDatabaseService : IDisposable {
         await _lock.WaitAsync();
         try {
             using var connection = await OpenConnectionAsync();
-            using var transaction = connection.BeginTransaction();
+
+            if (connection is NpgsqlConnection npgsqlConn) {
+                const string pgSql = @"
+                    INSERT INTO Loras (
+                        FilePath, FileName, DirectoryPath, BaseModel, UserBaseModel, IsFavorite,
+                        NetworkDim, NetworkAlpha, NetworkModule, LearningRate, UnetLearningRate, TextEncoderLearningRate,
+                        Optimizer, LrScheduler, Epochs, TotalSteps, Resolution, Precision,
+                        FileSizeBytes, LastModifiedUtc, ThumbnailPath, Sha256Hash, TrainedWordsJson, RawMetadataJson,
+                        CivitaiModelId, CivitaiVersionId, CivitaiModelName, CivitaiVersionName, CivitaiBaseModel,
+                        CivitaiDescription, CivitaiDownloadUrl, CivitaiUrl, CivitaiPreviewImageUrl, CivitaiSamplePromptsJson,
+                        LibraryId, Category, TagsJson, CreatedAtUtc, UpdatedAtUtc
+                    ) VALUES (
+                        @FilePath, @FileName, @DirectoryPath, @BaseModel, @UserBaseModel, @IsFavorite,
+                        @NetworkDim, @NetworkAlpha, @NetworkModule, @LearningRate, @UnetLearningRate, @TextEncoderLearningRate,
+                        @Optimizer, @LrScheduler, @Epochs, @TotalSteps, @Resolution, @Precision,
+                        @FileSizeBytes, @LastModifiedUtc, @ThumbnailPath, @Sha256Hash, @TrainedWordsJson, @RawMetadataJson,
+                        @CivitaiModelId, @CivitaiVersionId, @CivitaiModelName, @CivitaiVersionName, @CivitaiBaseModel,
+                        @CivitaiDescription, @CivitaiDownloadUrl, @CivitaiUrl, @CivitaiPreviewImageUrl, @CivitaiSamplePromptsJson,
+                        @LibraryId, @Category, @TagsJson, @CreatedAtUtc, @UpdatedAtUtc
+                    )
+                    ON CONFLICT (FilePath) DO UPDATE SET
+                        FileName = EXCLUDED.FileName,
+                        DirectoryPath = EXCLUDED.DirectoryPath,
+                        BaseModel = EXCLUDED.BaseModel,
+                        UserBaseModel = COALESCE(Loras.UserBaseModel, EXCLUDED.UserBaseModel),
+                        IsFavorite = Loras.IsFavorite,
+                        NetworkDim = EXCLUDED.NetworkDim,
+                        NetworkAlpha = EXCLUDED.NetworkAlpha,
+                        NetworkModule = EXCLUDED.NetworkModule,
+                        LearningRate = EXCLUDED.LearningRate,
+                        UnetLearningRate = EXCLUDED.UnetLearningRate,
+                        TextEncoderLearningRate = EXCLUDED.TextEncoderLearningRate,
+                        Optimizer = EXCLUDED.Optimizer,
+                        LrScheduler = EXCLUDED.LrScheduler,
+                        Epochs = EXCLUDED.Epochs,
+                        TotalSteps = EXCLUDED.TotalSteps,
+                        Resolution = EXCLUDED.Resolution,
+                        Precision = EXCLUDED.Precision,
+                        FileSizeBytes = EXCLUDED.FileSizeBytes,
+                        LastModifiedUtc = EXCLUDED.LastModifiedUtc,
+                        ThumbnailPath = COALESCE(EXCLUDED.ThumbnailPath, Loras.ThumbnailPath),
+                        Sha256Hash = COALESCE(EXCLUDED.Sha256Hash, Loras.Sha256Hash),
+                        TrainedWordsJson = EXCLUDED.TrainedWordsJson,
+                        RawMetadataJson = EXCLUDED.RawMetadataJson,
+                        CivitaiModelId = COALESCE(EXCLUDED.CivitaiModelId, Loras.CivitaiModelId),
+                        CivitaiVersionId = COALESCE(EXCLUDED.CivitaiVersionId, Loras.CivitaiVersionId),
+                        CivitaiModelName = COALESCE(EXCLUDED.CivitaiModelName, Loras.CivitaiModelName),
+                        CivitaiVersionName = COALESCE(EXCLUDED.CivitaiVersionName, Loras.CivitaiVersionName),
+                        CivitaiBaseModel = COALESCE(EXCLUDED.CivitaiBaseModel, Loras.CivitaiBaseModel),
+                        CivitaiDescription = COALESCE(EXCLUDED.CivitaiDescription, Loras.CivitaiDescription),
+                        CivitaiDownloadUrl = COALESCE(EXCLUDED.CivitaiDownloadUrl, Loras.CivitaiDownloadUrl),
+                        CivitaiUrl = COALESCE(EXCLUDED.CivitaiUrl, Loras.CivitaiUrl),
+                        CivitaiPreviewImageUrl = COALESCE(EXCLUDED.CivitaiPreviewImageUrl, Loras.CivitaiPreviewImageUrl),
+                        CivitaiSamplePromptsJson = COALESCE(EXCLUDED.CivitaiSamplePromptsJson, Loras.CivitaiSamplePromptsJson),
+                        LibraryId = COALESCE(EXCLUDED.LibraryId, Loras.LibraryId),
+                        Category = COALESCE(Loras.Category, EXCLUDED.Category),
+                        TagsJson = COALESCE(Loras.TagsJson, EXCLUDED.TagsJson),
+                        UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+                ";
+                using var tx = await npgsqlConn.BeginTransactionAsync();
+                foreach (var meta in items) {
+                    using var cmd = npgsqlConn.CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = pgSql;
+                    BindNpgsqlLoraParameters(cmd, meta);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                await tx.CommitAsync();
+                return;
+            }
+
+            if (connection is SqliteConnection sqliteConn) {
+                using var transaction = sqliteConn.BeginTransaction();
 
             const string sql = @"
                 INSERT INTO Loras (
@@ -798,7 +944,7 @@ public sealed class LoraDatabaseService : IDisposable {
                     UpdatedAtUtc = excluded.UpdatedAtUtc;
             ";
 
-            using var cmd = connection.CreateCommand();
+            using var cmd = sqliteConn.CreateCommand();
             cmd.Transaction = transaction;
             cmd.CommandText = sql;
 
@@ -904,6 +1050,7 @@ public sealed class LoraDatabaseService : IDisposable {
             }
 
             transaction.Commit();
+            }
         } finally {
             _lock.Release();
         }
@@ -920,10 +1067,10 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE Loras SET IsFavorite = $IsFavorite, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$IsFavorite", isFavorite ? 1 : 0);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "UPDATE Loras SET IsFavorite = @IsFavorite, UpdatedAtUtc = @UpdatedAt WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@IsFavorite", isFavorite ? 1 : 0);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -937,10 +1084,10 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE Loras SET UserBaseModel = $UserBaseModel, UpdatedAtUtc = $UpdatedAt WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$UserBaseModel", (object?)userBaseModel ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "UPDATE Loras SET UserBaseModel = @UserBaseModel, UpdatedAtUtc = @UpdatedAt WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@UserBaseModel", (object?)userBaseModel ?? DBNull.Value);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -954,8 +1101,8 @@ public sealed class LoraDatabaseService : IDisposable {
             using var connection = await OpenConnectionAsync();
 
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Loras WHERE FilePath = $FilePath;";
-            cmd.Parameters.AddWithValue("$FilePath", filePath);
+            cmd.CommandText = "DELETE FROM Loras WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync();
         } finally {
             _lock.Release();
@@ -973,11 +1120,11 @@ public sealed class LoraDatabaseService : IDisposable {
             using var selectCmd = connection.CreateCommand();
             selectCmd.CommandText = @"
                 SELECT FilePath FROM Loras 
-                WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = $NormFolder
-                   OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE $NormFolderPrefix;
+                WHERE REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') = @NormFolder
+                   OR REPLACE(RTRIM(DirectoryPath, '/\'), '\', '/') LIKE @NormFolderPrefix;
             ";
-            selectCmd.Parameters.AddWithValue("$NormFolder", normFolder);
-            selectCmd.Parameters.AddWithValue("$NormFolderPrefix", normFolder + "/%");
+            AddParam(selectCmd, "@NormFolder", normFolder);
+            AddParam(selectCmd, "@NormFolderPrefix", normFolder + "/%");
 
             var toDelete = new List<string>();
             using (var reader = await selectCmd.ExecuteReaderAsync()) {
@@ -993,8 +1140,10 @@ public sealed class LoraDatabaseService : IDisposable {
                 using var trans = connection.BeginTransaction();
                 using var delCmd = connection.CreateCommand();
                 delCmd.Transaction = trans;
-                delCmd.CommandText = "DELETE FROM Loras WHERE FilePath = $FilePath;";
-                var p = delCmd.Parameters.Add("$FilePath", SqliteType.Text);
+                delCmd.CommandText = "DELETE FROM Loras WHERE FilePath = @FilePath;";
+                var p = delCmd.CreateParameter();
+                p.ParameterName = "@FilePath";
+                delCmd.Parameters.Add(p);
                 foreach (string path in toDelete) {
                     p.Value = path;
                     await delCmd.ExecuteNonQueryAsync();
@@ -1071,25 +1220,25 @@ public sealed class LoraDatabaseService : IDisposable {
             cmd.Transaction = trans;
             cmd.CommandText = @"
                 UPDATE Loras 
-                SET FilePath = $NewFilePath,
-                    FileName = $NewFileName,
-                    DirectoryPath = $NewDirectoryPath,
-                    LibraryId = COALESCE($TargetLibraryId, LibraryId),
-                    ThumbnailPath = COALESCE($NewThumbnailPath, ThumbnailPath),
-                    UpdatedAtUtc = $UpdatedAt
-                WHERE FilePath = $OldFilePath;
+                SET FilePath = @NewFilePath,
+                    FileName = @NewFileName,
+                    DirectoryPath = @NewDirectoryPath,
+                    LibraryId = COALESCE(@TargetLibraryId, LibraryId),
+                    ThumbnailPath = COALESCE(@NewThumbnailPath, ThumbnailPath),
+                    UpdatedAtUtc = @UpdatedAt
+                WHERE FilePath = @OldFilePath;
 
                 UPDATE CollectionItems
-                SET FilePath = $NewFilePath
-                WHERE FilePath = $OldFilePath;
+                SET FilePath = @NewFilePath
+                WHERE FilePath = @OldFilePath;
             ";
-            cmd.Parameters.AddWithValue("$NewFilePath", newFilePath);
-            cmd.Parameters.AddWithValue("$NewFileName", fileName);
-            cmd.Parameters.AddWithValue("$NewDirectoryPath", newDir);
-            cmd.Parameters.AddWithValue("$TargetLibraryId", (object?)targetLibraryId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$NewThumbnailPath", (object?)newThumbnailPath ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$UpdatedAt", DateTime.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$OldFilePath", oldFilePath);
+            AddParam(cmd, "@NewFilePath", newFilePath);
+            AddParam(cmd, "@NewFileName", fileName);
+            AddParam(cmd, "@NewDirectoryPath", newDir);
+            AddParam(cmd, "@TargetLibraryId", (object?)targetLibraryId ?? DBNull.Value);
+            AddParam(cmd, "@NewThumbnailPath", (object?)newThumbnailPath ?? DBNull.Value);
+            AddParam(cmd, "@UpdatedAt", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@OldFilePath", oldFilePath);
 
             await cmd.ExecuteNonQueryAsync();
             trans.Commit();
@@ -1106,8 +1255,8 @@ public sealed class LoraDatabaseService : IDisposable {
             FileName = reader.GetString(reader.GetOrdinal("FileName")),
             BaseModel = reader.GetString(reader.GetOrdinal("BaseModel")),
             UserBaseModel = reader.IsDBNull(reader.GetOrdinal("UserBaseModel")) ? null : reader.GetString(reader.GetOrdinal("UserBaseModel")),
-            IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) == 1,
-            FileSizeBytes = reader.GetInt64(reader.GetOrdinal("FileSizeBytes"))
+            IsFavorite = !reader.IsDBNull(reader.GetOrdinal("IsFavorite")) && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("IsFavorite"))) == 1,
+            FileSizeBytes = !reader.IsDBNull(reader.GetOrdinal("FileSizeBytes")) ? Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FileSizeBytes"))) : 0L
         };
 
         try {
@@ -1232,8 +1381,8 @@ public sealed class LoraDatabaseService : IDisposable {
         int civModelIdOrd = reader.GetOrdinal("CivitaiModelId");
         if (!reader.IsDBNull(civModelIdOrd)) {
             var civ = new CivitaiModelVersionInfo {
-                ModelId = reader.GetInt64(civModelIdOrd),
-                VersionId = reader.GetInt64(reader.GetOrdinal("CivitaiVersionId")),
+                ModelId = Convert.ToInt64(reader.GetValue(civModelIdOrd)),
+                VersionId = reader.IsDBNull(reader.GetOrdinal("CivitaiVersionId")) ? 0L : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("CivitaiVersionId"))),
                 ModelName = reader.IsDBNull(reader.GetOrdinal("CivitaiModelName")) ? string.Empty : reader.GetString(reader.GetOrdinal("CivitaiModelName")),
                 VersionName = reader.IsDBNull(reader.GetOrdinal("CivitaiVersionName")) ? string.Empty : reader.GetString(reader.GetOrdinal("CivitaiVersionName")),
                 BaseModel = reader.IsDBNull(reader.GetOrdinal("CivitaiBaseModel")) ? string.Empty : reader.GetString(reader.GetOrdinal("CivitaiBaseModel")),

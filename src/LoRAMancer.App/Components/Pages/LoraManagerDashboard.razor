@@ -1,4 +1,5 @@
 @page "/"
+@page "/vault"
 @implements IDisposable
 @inject SafeTensorsMetadataReader MetadataReader
 @inject LoraLibraryService LibraryService
@@ -177,12 +178,13 @@
             @foreach (var cat in LibraryService.Categories) {
                 int count = LibraryService.Items.Count(m => string.Equals(m.Category, cat.Name, StringComparison.OrdinalIgnoreCase));
                 bool isSelected = string.Equals(_selectedCategoryFilter, cat.Name, StringComparison.OrdinalIgnoreCase);
+                string catColor = string.IsNullOrWhiteSpace(cat.Color) ? "#89b4fa" : cat.Color;
                 <MudChip T="string" 
                          Icon="@cat.Icon" 
                          Size="Size.Small" 
                          Variant="@(isSelected ? Variant.Filled : Variant.Outlined)" 
                          OnClick="@(() => OnCategoryFilterChanged(cat.Name))" 
-                         Style="@($"cursor: pointer; font-size: 0.72rem; font-weight: 600; border-color: {cat.Color}; {(isSelected ? $"background-color: {cat.Color}; color: #ffffff;" : $"color: {cat.Color};")}")">
+                         Style="@($"cursor: pointer; font-size: 0.72rem; font-weight: 600; border-color: {catColor}; {(isSelected ? $"background-color: {catColor}; color: #ffffff;" : $"color: {catColor};")}")">
                     @cat.Name (@count)
                 </MudChip>
             }
@@ -1787,30 +1789,34 @@
     }
 
     protected override async Task OnInitializedAsync() {
-        StudioSession.SetStage(StudioStage.Vault);
         try {
-            ArchitectureRegistry.ScanAiToolkitInstallation();
-        } catch {
-            // Non-critical auto-discovery
-        }
-        LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
-        LibraryService.OnLibrariesChanged += HandleLibrariesChanged;
-        LibraryService.OnScanProgress += HandleScanProgress;
-        LibraryService.OnScanStateChanged += HandleScanStateChanged;
-        LibraryService.OnEnrichStateChanged += HandleEnrichStateChanged;
-        LibraryService.OnEnrichProgress += HandleEnrichProgress;
-        LibraryService.OnLoraEnriched += HandleLoraEnriched;
-        LibraryService.OnCategoriesChanged += HandleCategoriesChanged;
-        LibraryService.OnCollectionsChanged += HandleCollectionsChanged;
-        UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
+            StudioSession.SetStage(StudioStage.Vault);
+            try {
+                ArchitectureRegistry.ScanAiToolkitInstallation();
+            } catch {
+                // Non-critical auto-discovery
+            }
+            LibraryService.OnLibraryUpdated += HandleLibraryUpdated;
+            LibraryService.OnLibrariesChanged += HandleLibrariesChanged;
+            LibraryService.OnScanProgress += HandleScanProgress;
+            LibraryService.OnScanStateChanged += HandleScanStateChanged;
+            LibraryService.OnEnrichStateChanged += HandleEnrichStateChanged;
+            LibraryService.OnEnrichProgress += HandleEnrichProgress;
+            LibraryService.OnLoraEnriched += HandleLoraEnriched;
+            LibraryService.OnCategoriesChanged += HandleCategoriesChanged;
+            LibraryService.OnCollectionsChanged += HandleCollectionsChanged;
+            UpdaterService.OnStateChanged += HandleUpdaterStateChanged;
 
-        // Directly sync from SQLite database if items are not yet in memory
-        if (LibraryService.Items.Count == 0) {
-            await LibraryService.LoadFromDatabaseAsync();
-        }
-        await LibraryService.RefreshLibrariesAsync();
+            // Directly sync from catalog database if items are not yet in memory
+            if (LibraryService.Items.Count == 0) {
+                await LibraryService.LoadFromDatabaseAsync();
+            }
+            await LibraryService.RefreshLibrariesAsync();
 
-        UpdateFilteredList();
+            UpdateFilteredList();
+        } catch (Exception ex) {
+            Snackbar.Add($"Library catalog notice: {ex.Message}", Severity.Warning);
+        }
     }
 
     private void HandleLibrariesChanged() {
@@ -2101,16 +2107,20 @@
             ("favorites", $"❤️ Favorites ({LibraryService.Items.Count(x => x.IsFavorite)})")
         };
 
-        var counts = LibraryService.Items
-            .Where(x => !string.IsNullOrWhiteSpace(x.EffectiveBaseModel))
-            .GroupBy(x => x.EffectiveBaseModel, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        try {
+            var counts = LibraryService.Items
+                .Where(x => !string.IsNullOrWhiteSpace(x.EffectiveBaseModel))
+                .GroupBy(x => x.EffectiveBaseModel, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
 
-        var known = ArchitectureRegistry.GetAll().Select(a => a.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase);
-        var allArchs = counts.Keys.Union(known, StringComparer.OrdinalIgnoreCase).OrderBy(a => a);
-        foreach (var arch in allArchs) {
-            int count = counts.TryGetValue(arch, out int c) ? c : 0;
-            options.Add((arch, $"{arch} ({count})"));
+            var known = ArchitectureRegistry.GetAll().Select(a => a.DisplayName).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase);
+            var allArchs = counts.Keys.Union(known, StringComparer.OrdinalIgnoreCase).OrderBy(a => a);
+            foreach (var arch in allArchs) {
+                int count = counts.TryGetValue(arch, out int c) ? c : 0;
+                options.Add((arch, $"{arch} ({count})"));
+            }
+        } catch {
+            // Defensive fallback
         }
 
         return options;

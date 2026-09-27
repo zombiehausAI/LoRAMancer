@@ -1,6 +1,37 @@
-﻿<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        <ErrorBoundary @ref="_errorBoundary">
+            <ChildContent>
+                <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+                <FocusOnNavigate RouteData="routeData" Selector="h1" />
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <div style="background-color: #11111b; color: #cdd6f4; min-height: 100vh; padding: 2rem; font-family: 'Inter', sans-serif;">
+                    <div style="max-width: 900px; margin: 0 auto; background: #181825; border: 1px solid #f38ba8; border-radius: 12px; padding: 24px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                            <h2 style="color: #f38ba8; margin: 0; font-size: 1.35rem; font-weight: 700;">LoRAMancer Circuit Error</h2>
+                            <button style="background: #89b4fa; color: #11111b; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer;" onclick="@(() => _errorBoundary?.Recover())">
+                                Retry View
+                            </button>
+                        </div>
+                        <p style="color: #a6adc8; margin: 0 0 12px 0;">An unhandled exception occurred while loading this view:</p>
+                        <div style="background: #11111b; border: 1px solid #313244; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.9rem; color: #fab387; margin-bottom: 16px; word-break: break-word;">
+                            <strong>@ex.GetType().Name:</strong> @ex.Message
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(ex.StackTrace)) {
+                            <details style="margin-top: 12px;">
+                                <summary style="color: #89b4fa; cursor: pointer; font-size: 0.85rem; font-weight: 600;">Show Diagnostic Stack Trace</summary>
+                                <pre style="background: #11111b; border: 1px solid #313244; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.78rem; color: #6c7086; margin-top: 8px; overflow-x: auto; max-height: 320px;">@ex.StackTrace</pre>
+                            </details>
+                        }
+                    </div>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
     </Found>
 </Router>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+}
+
