@@ -235,7 +235,11 @@ public sealed class TrainingEstimationService {
                         if (subKey == null) continue;
 
                         string desc = subKey.GetValue("DriverDesc")?.ToString() ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(desc) || desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || desc.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
+                        if (string.IsNullOrWhiteSpace(desc) ||
+                            desc.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Basic", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
+                            desc.Contains("Remote", StringComparison.OrdinalIgnoreCase)) {
                             continue;
                         }
 
@@ -268,7 +272,7 @@ public sealed class TrainingEstimationService {
             } catch { }
         }
 
-        if (amdName != null && amdVram > 0) {
+        if (amdName != null && amdVram >= 4.0) {
             return (amdName, Math.Round(amdVram, 1));
         }
 
@@ -277,7 +281,11 @@ public sealed class TrainingEstimationService {
             using ManagementObjectSearcher searcher = new("SELECT Name, AdapterRAM FROM Win32_VideoController");
             foreach (ManagementObject mo in searcher.Get()) {
                 string name = mo["Name"]?.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(name) || name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("Basic", StringComparison.OrdinalIgnoreCase)) {
+                if (string.IsNullOrWhiteSpace(name) ||
+                    name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Basic", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Remote", StringComparison.OrdinalIgnoreCase)) {
                     continue;
                 }
 
@@ -301,7 +309,7 @@ public sealed class TrainingEstimationService {
             }
         } catch { }
 
-        if (fallbackName != null && fallbackVram > 0) {
+        if (fallbackName != null && fallbackVram >= 4.0) {
             return ($"{fallbackName} (Test Mode)", Math.Round(fallbackVram, 1));
         }
 
