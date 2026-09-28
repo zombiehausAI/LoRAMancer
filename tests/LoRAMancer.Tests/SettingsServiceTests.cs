@@ -25,9 +25,7 @@ public sealed class SettingsServiceTests {
             Assert.Equal("2.10.0+rocm7.3.0", loaded.PyTorchVersion);
             Assert.Equal("https://repo.radeon.com/rocm/windows/rocm-rel-7.3.0/torch-2.10.0+rocm7.3.0-cp312-cp312-win_amd64.whl", loaded.TorchWheelUrl);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -76,9 +74,7 @@ public sealed class SettingsServiceTests {
             Assert.Equal("hf_secret_token_12345", loaded.HuggingFaceToken);
             Assert.Equal("civitai_secret_key_67890", loaded.CivitaiApiKey);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -103,9 +99,7 @@ public sealed class SettingsServiceTests {
             Assert.Equal("datacenter_bearer_token_xyz", loaded.OllamaApiKey);
             Assert.Equal("llava:34b", loaded.OllamaDefaultModel);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -138,9 +132,7 @@ public sealed class SettingsServiceTests {
             Assert.Equal("http://192.168.1.150:9000", loaded.ClientRemoteHostUrl);
             Assert.Equal("secure_pin_1234", loaded.ClientRemoteAccessToken);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -162,9 +154,7 @@ public sealed class SettingsServiceTests {
 
             Assert.False(loaded.MinimizeToTrayOnClose);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -255,9 +245,7 @@ public sealed class SettingsServiceTests {
             SettingsService reloaded = new(null, tempFile);
             Assert.Equal("light", reloaded.Current.ThemePreset);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
-            }
+            SafeDelete(tempFile);
         }
     }
 
@@ -276,8 +264,16 @@ public sealed class SettingsServiceTests {
             Assert.Equal(@"C:\AI\Models\LoRA", reloaded.Current.LoraStorageDirectory);
             Assert.Equal(@"C:\AI\Models\LoRA\Characters", reloaded.Current.LastSubfolderPath);
         } finally {
-            if (File.Exists(tempFile)) {
-                File.Delete(tempFile);
+            SafeDelete(tempFile);
+        }
+    }
+
+    private static void SafeDelete(string? filePath) {
+        if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath)) {
+            try {
+                File.Delete(filePath);
+            } catch {
+                // Ignore transient cleanup locks on Windows
             }
         }
     }

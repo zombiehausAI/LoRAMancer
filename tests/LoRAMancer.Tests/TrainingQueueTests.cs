@@ -19,9 +19,11 @@ public class TrainingQueueTests {
             Assert.Equal("dummy_venv", job.VenvPath);
         } finally {
             runner.ClearQueue();
-            if (File.Exists(dummyConfig)) {
-                File.Delete(dummyConfig);
-            }
+            try {
+                if (File.Exists(dummyConfig)) {
+                    File.Delete(dummyConfig);
+                }
+            } catch { }
         }
     }
 
@@ -50,9 +52,9 @@ public class TrainingQueueTests {
             Assert.True(removed);
         } finally {
             runner.ClearQueue();
-            File.Delete(dummyConfig1);
-            File.Delete(dummyConfig2);
-            File.Delete(dummyConfig3);
+            try { if (File.Exists(dummyConfig1)) File.Delete(dummyConfig1); } catch { }
+            try { if (File.Exists(dummyConfig2)) File.Delete(dummyConfig2); } catch { }
+            try { if (File.Exists(dummyConfig3)) File.Delete(dummyConfig3); } catch { }
         }
     }
 }
