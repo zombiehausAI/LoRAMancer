@@ -1,9 +1,23 @@
 # LoRAMancer 🪄
 
+[![Release Build](https://github.com/dworden42/LoRAMancer/actions/workflows/release.yml/badge.svg)](https://github.com/dworden42/LoRAMancer/actions/workflows/release.yml)
+[![Dev Build](https://github.com/dworden42/LoRAMancer/actions/workflows/dev-build.yml/badge.svg)](https://github.com/dworden42/LoRAMancer/actions/workflows/dev-build.yml)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4)](#requirements--quickstart)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen)](LICENSE)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/zombiehaus)
+
+<p align="left">
+  <a href="https://github.com/dworden42/LoRAMancer/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Installer%20(.exe)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows Installer" />
+  </a>
+  <a href="https://github.com/dworden42/LoRAMancer/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Standalone%20(.zip)-238636?style=for-the-badge&logo=archive&logoColor=white" alt="Download Standalone ZIP" />
+  </a>
+  <a href="https://github.com/dworden42/LoRAMancer/releases/tag/dev-preview">
+    <img src="https://img.shields.io/badge/Preview-Dev%20Builds-D97706?style=for-the-badge&logo=github&logoColor=white" alt="Download Dev Preview" />
+  </a>
+</p>
 
 **LoRAMancer** is a production-grade, highly responsive desktop LoRA Manager, Configuration Cloner, and Training Orchestrator application targeting **.NET 10 (Blazor Hybrid MAUI Desktop)** on Windows, with cross-platform **Remote Web UI** capabilities and universal hardware acceleration across **NVIDIA CUDA**, **AMD ROCm**, **Intel XPU**, and **CPU**.
 
@@ -88,6 +102,10 @@ For AMD creators and developers who wish to train LoRAs directly from the comman
 pwsh -File .\Utilities\Setup-AmdAiToolkit.ps1 -TargetDir "C:\AI\ai-toolkit"
 ```
 See the [Standalone AMD ROCm AI-Toolkit Technical Guide](docs/AMD_AI_TOOLKIT_STANDALONE.md) for full patch specifications and troubleshooting.
+
+### Continuous Integration & Release Pipeline
+
+LoRAMancer uses an automated GitHub Actions pipeline with a two-track branching strategy (`main` for official releases and `dev` for experimental preview builds). Project versions are centralized in `version.json`. See the [CI/CD & Release Pipeline Documentation](docs/CI_CD.md) for full architecture details.
 
 ## Development Transparency
 

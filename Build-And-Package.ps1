@@ -32,6 +32,7 @@ param(
     [switch]$Install,
     [string]$InstallPath = "",
     [string]$OutputDir = "artifacts",
+    [string]$Version = "",
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraArgs
 )
@@ -53,6 +54,8 @@ foreach ($arg in $allPositional) {
         $InstallPath = $Matches[2]
     } elseif ($arg -match '^--(outputdir|output-dir)=(.*)$') {
         $OutputDir = $Matches[2]
+    } elseif ($arg -match '^--(version|v)=(.*)$') {
+        $Version = $Matches[2]
     } elseif ($arg -match '^(Release|Debug)$') {
         $Configuration = $arg
     }
@@ -68,18 +71,27 @@ $appCsproj = Join-Path $repoRoot "src\LoRAMancer.App\LoRAMancer.App.csproj"
 $testsCsproj = Join-Path $repoRoot "tests\LoRAMancer.Tests\LoRAMancer.Tests.csproj"
 $solutionFile = Join-Path $repoRoot "LoRAMancer.slnx"
 
-# Extract Version from version.json or default
-$versionJsonPath = Join-Path $repoRoot "installer\version.json"
-$appVersion = "1.0.0"
-if (Test-Path $versionJsonPath) {
-    try {
-        $vJson = Get-Content $versionJsonPath -Raw | ConvertFrom-Json
-        if ($vJson.version) {
-            $appVersion = $vJson.version
+# Extract Version from -Version param, root version.json, installer\version.json, or default
+$appVersion = $Version
+if (-not $appVersion) {
+    $candidatePaths = @(
+        (Join-Path $repoRoot "version.json"),
+        (Join-Path $repoRoot "installer\version.json")
+    )
+    foreach ($vPath in $candidatePaths) {
+        if (Test-Path $vPath) {
+            try {
+                $vJson = Get-Content $vPath -Raw | ConvertFrom-Json
+                if ($vJson.version) {
+                    $appVersion = $vJson.version
+                    break
+                }
+            } catch { }
         }
-    } catch {
-        # Fall back to default
     }
+}
+if (-not $appVersion) {
+    $appVersion = "0.1.0"
 }
 
 Write-Host "===========================================================" -ForegroundColor Magenta
@@ -148,6 +160,8 @@ $publishArgs = @(
     "-f", "net10.0-windows10.0.19041.0",
     "-r", "win-x64",
     "--no-self-contained",
+    "-p:Version=$appVersion",
+    "-p:ApplicationDisplayVersion=$appVersion",
     "-o", $packageAppDir
 )
 

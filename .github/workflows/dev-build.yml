@@ -1,0 +1,88 @@
+name: LoRAMancer Dev Build
+
+on:
+  push:
+    branches: [ dev ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish-dev:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install .NET MAUI Windows Workload
+        shell: pwsh
+        run: |
+          dotnet workload install maui-windows
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress
+
+      - name: Build, Test & Package Dev Release
+        shell: pwsh
+        run: |
+          $baseVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          if (-not $baseVersion) { $baseVersion = "0.1.0" }
+          $devVersion = if ($baseVersion -match '-(dev|alpha|beta|preview)') { $baseVersion } else { "$baseVersion-dev.$env:GITHUB_RUN_NUMBER" }
+          Write-Host "Building LoRAMancer Dev Version: $devVersion"
+          .\Build-And-Package.ps1 -Version $devVersion -Configuration Release
+
+      - name: Publish Dev Pre-Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $baseVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          if (-not $baseVersion) { $baseVersion = "0.1.0" }
+          $devVersion = if ($baseVersion -match '-(dev|alpha|beta|preview)') { $baseVersion } else { "$baseVersion-dev.$env:GITHUB_RUN_NUMBER" }
+          $tag = "dev-preview"
+          $title = "LoRAMancer Dev Preview ($devVersion)"
+          $notes = "Automated experimental build from the `dev` branch.`n`n- **Commit**: $env:GITHUB_SHA`n- **Build Run**: #$env:GITHUB_RUN_NUMBER"
+
+          $files = @(Get-ChildItem -Path "artifacts" -File | Where-Object { $_.Extension -in '.exe', '.zip', '.sha256' } | Select-Object -ExpandProperty FullName)
+
+          if ($files.Count -eq 0) {
+              Write-Error "No packaged artifacts found in artifacts/ to upload."
+              exit 1
+          }
+
+          Write-Host "Artifacts to upload:"
+          $files | ForEach-Object { Write-Host " - $_" }
+
+          $exists = $false
+          try {
+              gh release view $tag 2>$null
+              if ($LASTEXITCODE -eq 0) { $exists = $true }
+          } catch { }
+
+          if ($exists) {
+              Write-Host "Updating existing pre-release $tag..."
+              gh release edit $tag --title "$title" --notes "$notes" --prerelease
+              gh release upload $tag @files --clobber
+          } else {
+              Write-Host "Creating new pre-release $tag..."
+              gh release create $tag @files --title "$title" --notes "$notes" --prerelease
+          }

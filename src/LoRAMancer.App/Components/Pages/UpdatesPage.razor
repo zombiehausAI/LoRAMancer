@@ -28,10 +28,23 @@
             <MudCardContent>
                 <div class="d-flex align-center justify-space-between mb-3">
                     <MudText Typo="Typo.body2" Color="Color.Secondary">Installed Version:</MudText>
-                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">v@UpdateService.CurrentVersion</MudChip>
+                    <MudChip T="string" Color="@(UpdateService.IsDevBuild ? Color.Warning : Color.Primary)" Size="Size.Small">
+                        v@UpdateService.CurrentVersion @(UpdateService.IsDevBuild ? "(Dev)" : "(Stable)")
+                    </MudChip>
                 </div>
                 <div class="d-flex align-center justify-space-between mb-3">
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Latest Available:</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Update Channel:</MudText>
+                    <MudRadioGroup T="UpdateChannel" Value="UpdateService.CurrentChannel" ValueChanged="OnChannelChanged">
+                        <MudRadio Value="UpdateChannel.Stable" Color="Color.Primary">
+                            <span style="font-size: 0.85rem;">Stable</span>
+                        </MudRadio>
+                        <MudRadio Value="UpdateChannel.Dev" Color="Color.Warning">
+                            <span style="font-size: 0.85rem;">Dev Preview</span>
+                        </MudRadio>
+                    </MudRadioGroup>
+                </div>
+                <div class="d-flex align-center justify-space-between mb-3">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Latest on Channel:</MudText>
                     <MudChip T="string" Color="@(_updateResult?.IsUpdateAvailable == true ? Color.Warning : Color.Success)" Size="Size.Small">
                         v@(_updateResult?.LatestVersion ?? UpdateService.CurrentVersion)
                     </MudChip>
@@ -54,7 +67,7 @@
                     }
                 } else if (_checkedOnce) {
                     <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true" Class="mt-3">
-                        You are running the latest version of LoRAMancer.
+                        You are running the latest @(UpdateService.CurrentChannel == UpdateChannel.Dev ? "Dev Preview" : "Stable") version.
                     </MudAlert>
                 }
             </MudCardContent>
@@ -102,15 +115,22 @@
         };
     }
 
+    private async Task OnChannelChanged(UpdateChannel channel) {
+        UpdateService.CurrentChannel = channel;
+        if (_checkedOnce) {
+            await CheckUpdatesAsync();
+        }
+    }
+
     private async Task CheckUpdatesAsync() {
         _isChecking = true;
         try {
-            _updateResult = await UpdateService.CheckForUpdatesAsync();
+            _updateResult = await UpdateService.CheckForUpdatesAsync(UpdateService.CurrentChannel);
             _checkedOnce = true;
             if (_updateResult.IsUpdateAvailable) {
-                Snackbar.Add($"Update found: v{_updateResult.LatestVersion}", Severity.Info);
+                Snackbar.Add($"Update found on {UpdateService.CurrentChannel} channel: v{_updateResult.LatestVersion}", Severity.Info);
             } else {
-                Snackbar.Add("LoRAMancer is up to date.", Severity.Success);
+                Snackbar.Add($"LoRAMancer is up to date on the {UpdateService.CurrentChannel} channel.", Severity.Success);
             }
         } catch (Exception ex) {
             Snackbar.Add($"Check failed: {ex.Message}", Severity.Error);
