@@ -4,6 +4,7 @@ using LoRAMancer.App.Models;
 namespace LoRAMancer.App.Services;
 
 public sealed class SettingsService {
+    private readonly SemaphoreSlim _fileLock = new(1, 1);
     private readonly string _settingsFilePath;
     private readonly HttpClient _httpClient;
     private AppSettings _currentSettings;
@@ -49,15 +50,23 @@ public sealed class SettingsService {
             return new AppSettings();
         }
 
-        try {
-            string json = File.ReadAllText(_settingsFilePath);
-            AppSettings? settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions {
-                PropertyNameCaseInsensitive = true
-            });
-            return settings ?? new AppSettings();
-        } catch {
-            return new AppSettings();
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                using var stream = new FileStream(_settingsFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream);
+                string json = reader.ReadToEnd();
+                AppSettings? settings = JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions {
+                    PropertyNameCaseInsensitive = true
+                });
+                return settings ?? new AppSettings();
+            } catch (IOException) when (attempt < 4) {
+                Thread.Sleep(50);
+            } catch {
+                return new AppSettings();
+            }
         }
+
+        return new AppSettings();
     }
 
     public async Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default) {
@@ -73,7 +82,20 @@ public sealed class SettingsService {
             Directory.CreateDirectory(dir);
         }
 
-        await File.WriteAllTextAsync(_settingsFilePath, json, cancellationToken);
+        await _fileLock.WaitAsync(cancellationToken);
+        try {
+            for (int attempt = 0; attempt < 5; attempt++) {
+                try {
+                    await File.WriteAllTextAsync(_settingsFilePath, json, cancellationToken);
+                    break;
+                } catch (IOException) when (attempt < 4) {
+                    await Task.Delay(50, cancellationToken);
+                }
+            }
+        } finally {
+            _fileLock.Release();
+        }
+
         OnSettingsChanged?.Invoke(_currentSettings);
     }
 
