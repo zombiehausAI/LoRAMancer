@@ -92,9 +92,9 @@ Scanning massive generation folders or thousands of models runs entirely decoupl
 - **Cached Snapshot Materialization**: Gallery media items and folder trees are cached as pre-sorted, immutable list snapshots (`_cachedSnapshot`), turning collection access from O(N log N) disk/lock operations into instant O(1) zero-allocation reads.
 - **Subdirectory Query Caching**: Synchronous file system probes (`Directory.Exists` and `Directory.GetDirectories`) are cached via high-performance concurrent caches with automatic expiration, eliminating synchronous disk I/O on UI render cycles.
 - **Decoupled View Rebuilding**: Gallery and folder view models in `PostForgePage.razor` maintain cached view lists (`_filteredItems`, `_currentChildFolders`) that update only upon explicit user actions (navigation, filtering, sorting) or scan completion, so progress ticks merely repaint the progress bar without re-evaluating thousands of items.
-- **Persistent State Across Navigation**: Background scans are decoupled from the UI component lifecycle; users can navigate between pages while the scan engine continues indexing in the background.
-- **Graceful Cancellation**: Responsive **Cancel Scan** controls allow users to safely abort background operations at any time via `CancellationTokenSource`.
-- **Live Progress Header**: Visual feedback with current file name, scanned index, total file count, and an animated progress bar.
+- **Incremental Database Batch Persistence**: New images and media metadata are persisted to SQLite or PostgreSQL in batches of 25 during active scans. The UI snapshot updates in real time, and previously extracted items are never lost if a scan is interrupted or canceled.
+- **Differential Metadata Skipping**: On startup and rescans, previously indexed items stored in the database are loaded immediately and skipped during disk extraction, eliminating redundant re-scanning from scratch.
+- **Full PostgreSQL Server Support**: Gallery media records, favorites, categories, tags, and metadata are fully synchronized with PostgreSQL schemas when connected to a remote database server.
 
 ### 9. Persistent Per-Folder Sorting
 Different directories often require different viewing priorities (e.g., sorting epoch comparisons alphabetically, while sorting general outputs by newest first):

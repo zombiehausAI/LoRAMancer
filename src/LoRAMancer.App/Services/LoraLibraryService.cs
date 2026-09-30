@@ -564,7 +564,7 @@ public sealed class LoraLibraryService {
                         long diskSize = new FileInfo(file).Length;
 
                         // Smart Differential Scan: Skip disk header parsing if already indexed & unchanged
-                        if (signatures.TryGetValue(file, out var sig) && sig.LastModified == diskTime && sig.Size == diskSize) {
+                        if (signatures.TryGetValue(file, out var sig) && Math.Abs((sig.LastModified - diskTime).TotalSeconds) < 2 && sig.Size == diskSize) {
                             lock (_lock) {
                                 if (!_items.Any(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase))) {
                                     // Item in DB but not yet in memory

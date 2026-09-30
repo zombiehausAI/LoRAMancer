@@ -258,6 +258,12 @@ public sealed class PostForgeShowcaseService {
     }
 
     public async Task ScanAllAsync(Action<string, int, int>? onProgress = null, CancellationToken cancellationToken = default) {
+        if (_items.Count == 0 && _databaseService != null) {
+            try {
+                await LoadCacheAsync(cancellationToken);
+            } catch { }
+        }
+
         var dirs = GetConfiguredDirectories();
         List<string> candidateFiles = new();
 
@@ -275,6 +281,7 @@ public sealed class PostForgeShowcaseService {
         int current = 0;
         ScanTotalCount = total;
         DateTime lastProgressReport = DateTime.MinValue;
+        List<ShowcaseMediaItem> incrementalBatch = new();
 
         foreach (var file in candidateFiles) {
             cancellationToken.ThrowIfCancellationRequested();
@@ -303,12 +310,35 @@ public sealed class PostForgeShowcaseService {
                 lock (_items) {
                     _items[file] = extracted;
                 }
+                incrementalBatch.Add(extracted);
+
+                // Incremental database save: persist every 25 newly discovered items
+                if (incrementalBatch.Count >= 25) {
+                    if (_databaseService != null) {
+                        try {
+                            await _databaseService.UpsertGalleryMediaBatchAsync(incrementalBatch, cancellationToken);
+                        } catch { }
+                    }
+                    incrementalBatch.Clear();
+                    UpdateSnapshot();
+                    OnShowcaseUpdated?.Invoke();
+                }
             }
 
             // Periodically yield thread time to avoid starving CPU or UI thread
             if (current % 40 == 0) {
                 await Task.Delay(1, cancellationToken);
             }
+        }
+
+        // Flush remaining newly extracted items to the database
+        if (incrementalBatch.Count > 0) {
+            if (_databaseService != null) {
+                try {
+                    await _databaseService.UpsertGalleryMediaBatchAsync(incrementalBatch, cancellationToken);
+                } catch { }
+            }
+            incrementalBatch.Clear();
         }
 
         // Clean up items for files that were deleted from disk

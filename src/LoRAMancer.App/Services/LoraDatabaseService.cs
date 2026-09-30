@@ -873,7 +873,9 @@ public sealed class LoraDatabaseService : IDisposable {
                 string path = reader.GetString(0);
                 string? timeStr = reader.IsDBNull(1) ? null : reader.GetString(1);
                 long size = reader.GetInt64(2);
-                DateTime time = DateTime.TryParse(timeStr, out var dt) ? dt : DateTime.MinValue;
+                DateTime time = DateTime.TryParse(timeStr, null, System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt)
+                    ? dt
+                    : (DateTime.TryParse(timeStr, out var fallback) ? fallback.ToUniversalTime() : DateTime.MinValue);
                 dict[path] = (time, size);
             }
             return dict;
@@ -1664,6 +1666,45 @@ public sealed class LoraDatabaseService : IDisposable {
                 );
                 CREATE INDEX IF NOT EXISTS idx_collection_items_path ON CollectionItems(FilePath);
                 CREATE INDEX IF NOT EXISTS idx_collection_items_col ON CollectionItems(CollectionId);
+
+                CREATE TABLE IF NOT EXISTS GalleryMedia (
+                    FilePath TEXT PRIMARY KEY,
+                    FileName TEXT NOT NULL,
+                    FileExtension TEXT NOT NULL,
+                    MediaType INTEGER NOT NULL DEFAULT 0,
+                    FileSizeBytes BIGINT NOT NULL DEFAULT 0,
+                    FormattedSize TEXT,
+                    CreatedDate TEXT NOT NULL,
+                    FolderPath TEXT NOT NULL,
+                    FolderName TEXT,
+                    FileUrl TEXT,
+                    IsAiGenerated INTEGER NOT NULL DEFAULT 0,
+                    AiGenerator TEXT,
+                    Prompt TEXT,
+                    NegativePrompt TEXT,
+                    Seed BIGINT,
+                    Steps INTEGER,
+                    Sampler TEXT,
+                    Scheduler TEXT,
+                    CfgScale DOUBLE PRECISION,
+                    ModelName TEXT,
+                    UsedLorasJson TEXT,
+                    Width INTEGER,
+                    Height INTEGER,
+                    DurationSeconds DOUBLE PRECISION,
+                    RawMetadataJson TEXT,
+                    Category TEXT,
+                    UserTagsJson TEXT,
+                    IsFavorite INTEGER NOT NULL DEFAULT 0,
+                    UserNotes TEXT,
+                    AssociatedLoraNamesJson TEXT,
+                    AssociatedLoraFilePathsJson TEXT,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_folder ON GalleryMedia(FolderPath);
+                CREATE INDEX IF NOT EXISTS idx_gallery_fav ON GalleryMedia(IsFavorite);
+                CREATE INDEX IF NOT EXISTS idx_gallery_ai ON GalleryMedia(IsAiGenerated);
+                CREATE INDEX IF NOT EXISTS idx_gallery_created ON GalleryMedia(CreatedDate);
             ";
 
             using var cmd = conn.CreateCommand();
@@ -1854,11 +1895,18 @@ public sealed class LoraDatabaseService : IDisposable {
                 migrated++;
             }
             await tx.CommitAsync();
-            double progress = 0.25 + ((double)migrated / total * 0.75);
+            double progress = 0.25 + ((double)migrated / total * 0.70);
             onProgress?.Invoke($"Migrated {migrated} of {total} LoRAs to PostgreSQL...", progress);
         }
 
-        onProgress?.Invoke($"Migration complete! {migrated} LoRAs successfully synced to PostgreSQL.", 1.0);
+        // Migrate GalleryMedia if any exist in SQLite
+        var galleryItems = await GetAllGalleryMediaAsync();
+        if (galleryItems.Count > 0) {
+            onProgress?.Invoke($"Migrating {galleryItems.Count} gallery images to PostgreSQL...", 0.95);
+            await UpsertGalleryMediaBatchToPostgreSqlAsync(pgConn, galleryItems, CancellationToken.None);
+        }
+
+        onProgress?.Invoke($"Migration complete! {migrated} LoRAs & {galleryItems.Count} gallery items successfully synced to PostgreSQL.", 1.0);
         return migrated;
     }
 
@@ -2053,6 +2101,12 @@ public sealed class LoraDatabaseService : IDisposable {
         await _lock.WaitAsync(cancellationToken);
         try {
             using var connection = await OpenConnectionAsync();
+
+            if (connection is NpgsqlConnection npgsqlConn) {
+                await UpsertGalleryMediaBatchToPostgreSqlAsync(npgsqlConn, itemList, cancellationToken);
+                return;
+            }
+
             if (connection is SqliteConnection sqliteConn) {
                 using var tx = sqliteConn.BeginTransaction();
 
@@ -2065,12 +2119,12 @@ public sealed class LoraDatabaseService : IDisposable {
                         UserTagsJson, IsFavorite, UserNotes, AssociatedLoraNamesJson, AssociatedLoraFilePathsJson,
                         UpdatedAtUtc
                     ) VALUES (
-                        $FilePath, $FileName, $FileExtension, $MediaType, $FileSizeBytes, $FormattedSize,
-                        $CreatedDate, $FolderPath, $FolderName, $FileUrl, $IsAiGenerated, $AiGenerator,
-                        $Prompt, $NegativePrompt, $Seed, $Steps, $Sampler, $Scheduler, $CfgScale, $ModelName,
-                        $UsedLorasJson, $Width, $Height, $DurationSeconds, $RawMetadataJson, $Category,
-                        $UserTagsJson, $IsFavorite, $UserNotes, $AssociatedLoraNamesJson, $AssociatedLoraFilePathsJson,
-                        $UpdatedAtUtc
+                        @FilePath, @FileName, @FileExtension, @MediaType, @FileSizeBytes, @FormattedSize,
+                        @CreatedDate, @FolderPath, @FolderName, @FileUrl, @IsAiGenerated, @AiGenerator,
+                        @Prompt, @NegativePrompt, @Seed, @Steps, @Sampler, @Scheduler, @CfgScale, @ModelName,
+                        @UsedLorasJson, @Width, @Height, @DurationSeconds, @RawMetadataJson, @Category,
+                        @UserTagsJson, @IsFavorite, @UserNotes, @AssociatedLoraNamesJson, @AssociatedLoraFilePathsJson,
+                        @UpdatedAtUtc
                     ) ON CONFLICT(FilePath) DO UPDATE SET
                         FileName = excluded.FileName,
                         FileExtension = excluded.FileExtension,
@@ -2109,40 +2163,7 @@ public sealed class LoraDatabaseService : IDisposable {
                     using var cmd = connection.CreateCommand();
                     cmd.Transaction = tx;
                     cmd.CommandText = sql;
-
-                    AddParam(cmd, "$FilePath", item.FilePath);
-                    AddParam(cmd, "$FileName", item.FileName);
-                    AddParam(cmd, "$FileExtension", item.FileExtension);
-                    AddParam(cmd, "$MediaType", (int)item.MediaType);
-                    AddParam(cmd, "$FileSizeBytes", item.FileSizeBytes);
-                    AddParam(cmd, "$FormattedSize", item.FormattedSize);
-                    AddParam(cmd, "$CreatedDate", item.CreatedDate.ToString("O"));
-                    AddParam(cmd, "$FolderPath", item.FolderPath);
-                    AddParam(cmd, "$FolderName", item.FolderName);
-                    AddParam(cmd, "$FileUrl", item.FileUrl);
-                    AddParam(cmd, "$IsAiGenerated", item.IsAiGenerated ? 1 : 0);
-                    AddParam(cmd, "$AiGenerator", item.AiGenerator);
-                    AddParam(cmd, "$Prompt", item.Prompt);
-                    AddParam(cmd, "$NegativePrompt", item.NegativePrompt);
-                    AddParam(cmd, "$Seed", item.Seed);
-                    AddParam(cmd, "$Steps", item.Steps);
-                    AddParam(cmd, "$Sampler", item.Sampler);
-                    AddParam(cmd, "$Scheduler", item.Scheduler);
-                    AddParam(cmd, "$CfgScale", item.CfgScale);
-                    AddParam(cmd, "$ModelName", item.ModelName);
-                    AddParam(cmd, "$UsedLorasJson", item.UsedLoras != null && item.UsedLoras.Count > 0 ? JsonSerializer.Serialize(item.UsedLoras) : null);
-                    AddParam(cmd, "$Width", item.Width);
-                    AddParam(cmd, "$Height", item.Height);
-                    AddParam(cmd, "$DurationSeconds", item.Duration?.TotalSeconds);
-                    AddParam(cmd, "$RawMetadataJson", item.RawMetadata != null && item.RawMetadata.Count > 0 ? JsonSerializer.Serialize(item.RawMetadata) : null);
-                    AddParam(cmd, "$Category", item.Category);
-                    AddParam(cmd, "$UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
-                    AddParam(cmd, "$IsFavorite", item.IsFavorite ? 1 : 0);
-                    AddParam(cmd, "$UserNotes", item.UserNotes);
-                    AddParam(cmd, "$AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
-                    AddParam(cmd, "$AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
-                    AddParam(cmd, "$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
-
+                    BindGalleryMediaParameters(cmd, item);
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
                 }
 
@@ -2151,6 +2172,102 @@ public sealed class LoraDatabaseService : IDisposable {
         } finally {
             _lock.Release();
         }
+    }
+
+    private static async Task UpsertGalleryMediaBatchToPostgreSqlAsync(NpgsqlConnection conn, IEnumerable<ShowcaseMediaItem> items, CancellationToken cancellationToken) {
+        const string pgSql = @"
+            INSERT INTO GalleryMedia (
+                FilePath, FileName, FileExtension, MediaType, FileSizeBytes, FormattedSize,
+                CreatedDate, FolderPath, FolderName, FileUrl, IsAiGenerated, AiGenerator,
+                Prompt, NegativePrompt, Seed, Steps, Sampler, Scheduler, CfgScale, ModelName,
+                UsedLorasJson, Width, Height, DurationSeconds, RawMetadataJson, Category,
+                UserTagsJson, IsFavorite, UserNotes, AssociatedLoraNamesJson, AssociatedLoraFilePathsJson,
+                UpdatedAtUtc
+            ) VALUES (
+                @FilePath, @FileName, @FileExtension, @MediaType, @FileSizeBytes, @FormattedSize,
+                @CreatedDate, @FolderPath, @FolderName, @FileUrl, @IsAiGenerated, @AiGenerator,
+                @Prompt, @NegativePrompt, @Seed, @Steps, @Sampler, @Scheduler, @CfgScale, @ModelName,
+                @UsedLorasJson, @Width, @Height, @DurationSeconds, @RawMetadataJson, @Category,
+                @UserTagsJson, @IsFavorite, @UserNotes, @AssociatedLoraNamesJson, @AssociatedLoraFilePathsJson,
+                @UpdatedAtUtc
+            ) ON CONFLICT (FilePath) DO UPDATE SET
+                FileName = EXCLUDED.FileName,
+                FileExtension = EXCLUDED.FileExtension,
+                MediaType = EXCLUDED.MediaType,
+                FileSizeBytes = EXCLUDED.FileSizeBytes,
+                FormattedSize = EXCLUDED.FormattedSize,
+                CreatedDate = EXCLUDED.CreatedDate,
+                FolderPath = EXCLUDED.FolderPath,
+                FolderName = EXCLUDED.FolderName,
+                FileUrl = EXCLUDED.FileUrl,
+                IsAiGenerated = EXCLUDED.IsAiGenerated,
+                AiGenerator = EXCLUDED.AiGenerator,
+                Prompt = EXCLUDED.Prompt,
+                NegativePrompt = EXCLUDED.NegativePrompt,
+                Seed = EXCLUDED.Seed,
+                Steps = EXCLUDED.Steps,
+                Sampler = EXCLUDED.Sampler,
+                Scheduler = EXCLUDED.Scheduler,
+                CfgScale = EXCLUDED.CfgScale,
+                ModelName = EXCLUDED.ModelName,
+                UsedLorasJson = EXCLUDED.UsedLorasJson,
+                Width = EXCLUDED.Width,
+                Height = EXCLUDED.Height,
+                DurationSeconds = EXCLUDED.DurationSeconds,
+                RawMetadataJson = EXCLUDED.RawMetadataJson,
+                Category = EXCLUDED.Category,
+                UserTagsJson = EXCLUDED.UserTagsJson,
+                IsFavorite = EXCLUDED.IsFavorite,
+                UserNotes = EXCLUDED.UserNotes,
+                AssociatedLoraNamesJson = EXCLUDED.AssociatedLoraNamesJson,
+                AssociatedLoraFilePathsJson = EXCLUDED.AssociatedLoraFilePathsJson,
+                UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+        ";
+
+        using var tx = await conn.BeginTransactionAsync(cancellationToken);
+        foreach (var item in items) {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = pgSql;
+            BindGalleryMediaParameters(cmd, item);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    private static void BindGalleryMediaParameters(DbCommand cmd, ShowcaseMediaItem item) {
+        AddParam(cmd, "@FilePath", item.FilePath);
+        AddParam(cmd, "@FileName", item.FileName);
+        AddParam(cmd, "@FileExtension", item.FileExtension);
+        AddParam(cmd, "@MediaType", (int)item.MediaType);
+        AddParam(cmd, "@FileSizeBytes", item.FileSizeBytes);
+        AddParam(cmd, "@FormattedSize", item.FormattedSize);
+        AddParam(cmd, "@CreatedDate", item.CreatedDate.ToString("O"));
+        AddParam(cmd, "@FolderPath", item.FolderPath);
+        AddParam(cmd, "@FolderName", item.FolderName);
+        AddParam(cmd, "@FileUrl", item.FileUrl);
+        AddParam(cmd, "@IsAiGenerated", item.IsAiGenerated ? 1 : 0);
+        AddParam(cmd, "@AiGenerator", item.AiGenerator);
+        AddParam(cmd, "@Prompt", item.Prompt);
+        AddParam(cmd, "@NegativePrompt", item.NegativePrompt);
+        AddParam(cmd, "@Seed", item.Seed);
+        AddParam(cmd, "@Steps", item.Steps);
+        AddParam(cmd, "@Sampler", item.Sampler);
+        AddParam(cmd, "@Scheduler", item.Scheduler);
+        AddParam(cmd, "@CfgScale", item.CfgScale);
+        AddParam(cmd, "@ModelName", item.ModelName);
+        AddParam(cmd, "@UsedLorasJson", item.UsedLoras != null && item.UsedLoras.Count > 0 ? JsonSerializer.Serialize(item.UsedLoras) : null);
+        AddParam(cmd, "@Width", item.Width);
+        AddParam(cmd, "@Height", item.Height);
+        AddParam(cmd, "@DurationSeconds", item.Duration?.TotalSeconds);
+        AddParam(cmd, "@RawMetadataJson", item.RawMetadata != null && item.RawMetadata.Count > 0 ? JsonSerializer.Serialize(item.RawMetadata) : null);
+        AddParam(cmd, "@Category", item.Category);
+        AddParam(cmd, "@UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
+        AddParam(cmd, "@IsFavorite", item.IsFavorite ? 1 : 0);
+        AddParam(cmd, "@UserNotes", item.UserNotes);
+        AddParam(cmd, "@AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
+        AddParam(cmd, "@AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
+        AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
     }
 
     public async Task ToggleGalleryFavoriteAsync(string filePath, CancellationToken cancellationToken = default) {
@@ -2163,11 +2280,11 @@ public sealed class LoraDatabaseService : IDisposable {
             cmd.CommandText = @"
                 UPDATE GalleryMedia 
                 SET IsFavorite = CASE WHEN IsFavorite = 1 THEN 0 ELSE 1 END,
-                    UpdatedAtUtc = $UpdatedAtUtc
-                WHERE FilePath = $FilePath;
+                    UpdatedAtUtc = @UpdatedAtUtc
+                WHERE FilePath = @FilePath;
             ";
-            AddParam(cmd, "$FilePath", filePath);
-            AddParam(cmd, "$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", filePath);
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         } finally {
             _lock.Release();
@@ -2183,23 +2300,23 @@ public sealed class LoraDatabaseService : IDisposable {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = @"
                 UPDATE GalleryMedia 
-                SET Category = $Category,
-                    UserTagsJson = $UserTagsJson,
-                    IsFavorite = $IsFavorite,
-                    UserNotes = $UserNotes,
-                    AssociatedLoraNamesJson = $AssociatedLoraNamesJson,
-                    AssociatedLoraFilePathsJson = $AssociatedLoraFilePathsJson,
-                    UpdatedAtUtc = $UpdatedAtUtc
-                WHERE FilePath = $FilePath;
+                SET Category = @Category,
+                    UserTagsJson = @UserTagsJson,
+                    IsFavorite = @IsFavorite,
+                    UserNotes = @UserNotes,
+                    AssociatedLoraNamesJson = @AssociatedLoraNamesJson,
+                    AssociatedLoraFilePathsJson = @AssociatedLoraFilePathsJson,
+                    UpdatedAtUtc = @UpdatedAtUtc
+                WHERE FilePath = @FilePath;
             ";
-            AddParam(cmd, "$FilePath", item.FilePath);
-            AddParam(cmd, "$Category", item.Category);
-            AddParam(cmd, "$UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
-            AddParam(cmd, "$IsFavorite", item.IsFavorite ? 1 : 0);
-            AddParam(cmd, "$UserNotes", item.UserNotes);
-            AddParam(cmd, "$AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
-            AddParam(cmd, "$AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
-            AddParam(cmd, "$UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            AddParam(cmd, "@FilePath", item.FilePath);
+            AddParam(cmd, "@Category", item.Category);
+            AddParam(cmd, "@UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
+            AddParam(cmd, "@IsFavorite", item.IsFavorite ? 1 : 0);
+            AddParam(cmd, "@UserNotes", item.UserNotes);
+            AddParam(cmd, "@AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
+            AddParam(cmd, "@AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         } finally {
             _lock.Release();
@@ -2213,8 +2330,8 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FilePath = $FilePath;";
-            AddParam(cmd, "$FilePath", filePath);
+            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@FilePath", filePath);
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         } finally {
             _lock.Release();
@@ -2228,9 +2345,9 @@ public sealed class LoraDatabaseService : IDisposable {
         try {
             using var connection = await OpenConnectionAsync();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FolderPath = $FolderPath OR FilePath LIKE $FolderPrefix;";
-            AddParam(cmd, "$FolderPath", folderPath);
-            AddParam(cmd, "$FolderPrefix", folderPath.TrimEnd('\\', '/') + "%");
+            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FolderPath = @FolderPath OR FilePath LIKE @FolderPrefix;";
+            AddParam(cmd, "@FolderPath", folderPath);
+            AddParam(cmd, "@FolderPrefix", folderPath.TrimEnd('\\', '/') + "%");
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         } finally {
             _lock.Release();

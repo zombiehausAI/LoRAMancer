@@ -48,7 +48,7 @@ The update endpoint serves a lightweight JSON manifest:
 {
   "version": "1.1.0",
   "releaseDate": "2026-10-01T00:00:00Z",
-  "downloadUrl": "https://github.com/loramancer/loramancer/releases/download/v1.1.0/LoRAMancer-Setup-1.1.0.exe",
+  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.1.0/LoRAMancer-Setup-1.1.0.exe",
   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "changelog": "- Added support for FLUX.2 training\n- Enhanced AMD ROCm 7.2.1 memory allocator tuning",
   "mandatory": false

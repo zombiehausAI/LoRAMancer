@@ -29,7 +29,7 @@
                 <div class="d-flex align-center justify-space-between mb-3">
                     <MudText Typo="Typo.body2" Color="Color.Secondary">Installed Version:</MudText>
                     <MudChip T="string" Color="@(UpdateService.IsDevBuild ? Color.Warning : Color.Primary)" Size="Size.Small">
-                        v@UpdateService.CurrentVersion @(UpdateService.IsDevBuild ? "(Dev)" : "(Stable)")
+                        v@(UpdateService.CurrentVersion) @(UpdateService.IsDevBuild ? "(Dev)" : "(Stable)")
                     </MudChip>
                 </div>
                 <div class="d-flex align-center justify-space-between mb-3">
@@ -52,7 +52,7 @@
 
                 @if (_updateResult?.IsUpdateAvailable == true) {
                     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mt-3">
-                        A new update (v@_updateResult.LatestVersion) is ready to install!
+                        A new update (v@(_updateResult.LatestVersion)) is ready to install!
                     </MudAlert>
 
                     @if (_isDownloading) {
