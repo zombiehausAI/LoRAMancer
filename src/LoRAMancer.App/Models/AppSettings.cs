@@ -48,6 +48,22 @@ public sealed class AppSettings {
     public string? CustomPrimaryColor { get; set; }
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
+    // Post-Forge Showcase Gallery Configuration
+    public List<string> ShowcaseDirectories { get; set; } = new();
+    public List<string> ShowcaseCustomTags { get; set; } = new() { "Favorites", "Best Likeness", "Experimental", "Overbaked", "Keeper" };
+    public List<string> ShowcaseCustomCategories { get; set; } = new() { "Portraits", "Styles", "Landscapes", "Characters", "Objects", "Concepts" };
+    public string ShowcaseDefaultSort { get; set; } = "newest";
+    public Dictionary<string, string> ShowcaseFolderSortOrders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // Saved Prompts Directory (Default: ~/.loramancer/saved_prompts or custom path)
+    public string SavedPromptsDirectory { get; set; } = string.Empty;
+
+    // Image Harvester Multi-Provider Configuration
+    public bool HarvestSearchAllProviders { get; set; } = false;
+    public string HarvestLastSelectedProvider { get; set; } = "duckduckgo";
+    public List<string> HarvestDisabledProviderIds { get; set; } = new();
+    public List<HarvestProviderDefinition> HarvestCustomProviders { get; set; } = new();
+
     // Studio Database & PostgreSQL Configuration
     public string DatabaseProvider { get; set; } = "SQLite"; // "SQLite" or "PostgreSQL"
     public string PgHost { get; set; } = "localhost";

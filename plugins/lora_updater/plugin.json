@@ -5,5 +5,11 @@
   "description": "Scans your LoRA directories, checks Civitai for newer model versions using file hashes, verifies base model compatibility, backs up old files, and downloads updates.",
   "author": "LoRAMancer Team",
   "entryPoint": "plugin.py",
-  "pythonVersion": "3.12"
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "menuOrder": 40,
+  "uiSlot": "StudioWorkshop",
+  "uiType": "Command",
+  "navLabel": "Civitai LoRA Updater",
+  "icon": "CloudSync"
 }

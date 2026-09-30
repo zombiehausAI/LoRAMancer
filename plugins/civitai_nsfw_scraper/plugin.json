@@ -1,0 +1,23 @@
+{
+  "id": "civitai-nsfw-scraper",
+  "name": "Civitai NSFW Generations",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting explicit AI artwork, character models, and mature generation feeds from Civitai.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Civitai NSFW Scraper",
+  "icon": "Explicit",
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Civitai API Key",
+      "type": "password",
+      "description": "Optional Civitai personal API token for higher rate limits and unblurred mature generation feeds.",
+      "defaultValue": "",
+      "isRequired": false
+    }
+  ]
+}

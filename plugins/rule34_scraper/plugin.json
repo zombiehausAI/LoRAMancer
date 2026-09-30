@@ -1,0 +1,32 @@
+{
+  "id": "rule34-scraper",
+  "name": "Rule34.xxx Community Archive",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting explicit artwork and character tags from Rule34.xxx API with user authentication.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Rule34 Scraper",
+  "icon": "Explicit",
+  "isEnabled": false,
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Rule34 API Key",
+      "type": "password",
+      "description": "Your personal API key from rule34.xxx user account settings.",
+      "defaultValue": "",
+      "isRequired": true
+    },
+    {
+      "key": "userId",
+      "label": "Rule34 User ID",
+      "type": "text",
+      "description": "Your numerical user ID from your rule34.xxx profile.",
+      "defaultValue": "",
+      "isRequired": true
+    }
+  ]
+}

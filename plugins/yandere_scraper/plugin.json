@@ -1,0 +1,13 @@
+{
+  "id": "yandere-scraper",
+  "name": "Yande.re High-Res Anime Art",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting ultra high-resolution anime artwork, wallpapers, and scans from Yande.re.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Yande.re Scraper",
+  "icon": "Image"
+}

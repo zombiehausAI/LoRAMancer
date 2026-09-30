@@ -5,6 +5,9 @@
 @inject ModelArchitectureRegistry ArchitectureRegistry
 @inject ComfyUiService ComfyService
 @inject SettingsService Settings
+@inject ModusFlowPromptService PromptService
+@inject LoraLibraryService LibraryService
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -77,6 +80,61 @@
                 </div>
             </MudCard>
 
+            <!-- Stacked Auxiliary LoRAs Card -->
+            <MudCard Elevation="0" Class="pa-3" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.PlaylistAddCheck" Size="Size.Small" Color="Color.Tertiary" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">Stacked Auxiliary LoRAs</MudText>
+                        @if (_stackedLoras.Count > 0) {
+                            <MudChip T="string" Color="Color.Tertiary" Size="Size.Small" Variant="Variant.Filled">
+                                @_stackedLoras.Count Active
+                            </MudChip>
+                        }
+                    </div>
+                </div>
+
+                @if (_stackedLoras.Count == 0) {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+                        No auxiliary LoRAs stacked. Stack stylized or character LoRAs from your library or ComfyUI to test combinations.
+                    </MudText>
+                } else {
+                    <div class="d-flex flex-column gap-2 mb-2">
+                        @for (int i = 0; i < _stackedLoras.Count; i++) {
+                            var index = i;
+                            var aux = _stackedLoras[index];
+                            <div class="d-flex align-center justify-space-between gap-3 pa-2" style="background-color: #181825; border: 1px solid #313244; border-radius: 6px;">
+                                <div style="min-width: 140px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    <span style="font-size: 0.85rem; font-weight: 600; color: #cdd6f4;" title="@aux.Name">@aux.Name</span>
+                                </div>
+                                <div class="d-flex align-center gap-2 flex-grow-1" style="max-width: 280px;">
+                                    <span style="font-size: 0.75rem; color: #a6adc8;">Weight:</span>
+                                    <MudSlider T="float" @bind-Value="aux.Weight" Min="0.0f" Max="2.0f" Step="0.05f" Color="Color.Tertiary" Size="Size.Small" Disabled="_isRendering" />
+                                    <span style="font-size: 0.75rem; font-weight: 700; color: #cba6f7; min-width: 32px;">@aux.Weight.ToString("F2")</span>
+                                </div>
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveAuxiliaryLora(index))" Disabled="_isRendering" />
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="d-flex align-center gap-2">
+                    <MudSelect T="string" @bind-Value="_selectedAuxLoraToAdd" Label="Select LoRA to Stack (Library or ComfyUI)"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_isRendering || _isDeploying" FullWidth="true">
+                        <MudSelectItem Value="@("")">-- Select an additional LoRA --</MudSelectItem>
+                        @foreach (var opt in GetAvailableLorasToStack()) {
+                            <MudSelectItem Value="@opt.Id">@opt.Label</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddSelectedAuxiliaryLoraAsync"
+                               Disabled="_isRendering || _isDeploying || string.IsNullOrWhiteSpace(_selectedAuxLoraToAdd)">
+                        Stack
+                    </MudButton>
+                </div>
+            </MudCard>
+
             <MudGrid Spacing="2">
                 <!-- Checkpoint Selection & Architecture -->
                 <MudItem xs="12" md="6">
@@ -97,6 +155,37 @@
                     } else {
                         <MudTextField @bind-Value="_selectedCheckpoint" Label="ComfyUI Checkpoint / UNet" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="flux1-dev.safetensors or sdxl_base_1.0.safetensors" Disabled="_isRendering" />
                     }
+                </MudItem>
+
+                <!-- Saved Prompt Preset Selector -->
+                <MudItem xs="12">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Bookmark" Size="Size.Small" Color="Color.Info" />
+                            <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89dceb; letter-spacing: 0.5px;">SAVED PROMPTS</MudText>
+                        </div>
+                        <div class="d-flex align-center gap-1">
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.BookmarkAdd" OnClick="OpenSavePromptDialogAsync"
+                                       Disabled="_isRendering || (string.IsNullOrWhiteSpace(_prompt) && string.IsNullOrWhiteSpace(_negativePrompt))">
+                                Save Preset
+                            </MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenPromptManagerDialogAsync">
+                                Manage
+                            </MudButton>
+                        </div>
+                    </div>
+                    <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
+                               Label="Load ModusFlow Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                               Disabled="_isRendering">
+                        <MudSelectItem Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
+                        @foreach (var p in _savedPrompts) {
+                            <MudSelectItem Value="@p.Name">
+                                @(!string.IsNullOrWhiteSpace(p.Category) ? $"[{p.Category}] " : "")@p.Name
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
                 </MudItem>
 
                 <!-- Prompt -->
@@ -324,6 +413,8 @@
             _loraWeight = LoraWeight.Value;
         }
 
+        PromptService.OnPromptsUpdated += OnPromptsUpdatedHandler;
+        await LoadSavedPromptsAsync();
         await CheckConnectionAsync();
     }
 
@@ -429,9 +520,9 @@
 
         System.Text.Json.Nodes.JsonObject promptGraph;
         if (isFlux) {
-            promptGraph = ComfyService.GenerateFluxPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _width, _height, _steps);
+            promptGraph = ComfyService.GenerateFluxPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _width, _height, _steps, additionalLoras: _stackedLoras);
         } else {
-            promptGraph = ComfyService.GenerateSdxlPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _negativePrompt, _width, _height, _steps, (float)_cfg);
+            promptGraph = ComfyService.GenerateSdxlPromptGraph(ckptRef, loraRef, (float)_loraWeight, _prompt, _negativePrompt, _width, _height, _steps, (float)_cfg, additionalLoras: _stackedLoras);
         }
 
         _isRendering = true;
@@ -496,8 +587,153 @@
     }
 
     public void Dispose() {
+        PromptService.OnPromptsUpdated -= OnPromptsUpdatedHandler;
         _renderCts?.Cancel();
         _renderCts?.Dispose();
+    }
+
+    private IReadOnlyList<ModusFlowPrompt> _savedPrompts = new List<ModusFlowPrompt>();
+    private string _selectedSavedPromptName = string.Empty;
+    private List<AdditionalLoraItem> _stackedLoras = new();
+    private string _selectedAuxLoraToAdd = string.Empty;
+
+    private async Task LoadSavedPromptsAsync() {
+        try {
+            _savedPrompts = await PromptService.GetAllPromptsAsync();
+        } catch {
+            _savedPrompts = new List<ModusFlowPrompt>();
+        }
+    }
+
+    private void OnPromptsUpdatedHandler() {
+        _ = InvokeAsync(async () => {
+            await LoadSavedPromptsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void OnSavedPromptSelected(string name) {
+        _selectedSavedPromptName = name;
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var match = _savedPrompts.FirstOrDefault(p => p.Name == name);
+        if (match != null) {
+            _prompt = match.Positive;
+            if (!_selectedArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
+                _negativePrompt = match.Negative;
+            }
+            Snackbar.Add($"Loaded prompt '{match.Name}'", Severity.Info);
+        }
+    }
+
+    private async Task OpenSavePromptDialogAsync() {
+        var parameters = new DialogParameters<SaveModusFlowPromptDialog> {
+            { x => x.PositivePrompt, _prompt },
+            { x => x.NegativePrompt, _negativePrompt },
+            { x => x.InitialName, !string.IsNullOrWhiteSpace(LoraName) ? $"{LoraName} Test" : "Prompt Preset" }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<SaveModusFlowPromptDialog>("Save Prompt", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt saved) {
+            await LoadSavedPromptsAsync();
+            _selectedSavedPromptName = saved.Name;
+        }
+    }
+
+    private async Task OpenPromptManagerDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ModusFlowPromptManagerDialog>("Saved Prompts", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt selected) {
+            _prompt = selected.Positive;
+            if (!_selectedArchitecture.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
+                _negativePrompt = selected.Negative;
+            }
+            _selectedSavedPromptName = selected.Name;
+            Snackbar.Add($"Loaded prompt '{selected.Name}'", Severity.Info);
+        }
+        await LoadSavedPromptsAsync();
+    }
+
+    private record LoraStackOption(string Id, string Label, string? FilePath);
+
+    private IEnumerable<LoraStackOption> GetAvailableLorasToStack() {
+        var list = new List<LoraStackOption>();
+        string primaryName = Path.GetFileName(LoraFilePath ?? string.Empty);
+
+        // 1. From ComfyUI instance
+        if (_connStatus?.AvailableLoras != null) {
+            foreach (var cl in _connStatus.AvailableLoras) {
+                if (string.Equals(cl, primaryName, StringComparison.OrdinalIgnoreCase) ||
+                    _stackedLoras.Any(s => string.Equals(s.Name, cl, StringComparison.OrdinalIgnoreCase))) {
+                    continue;
+                }
+                list.Add(new LoraStackOption(cl, $"[ComfyUI] {cl}", null));
+            }
+        }
+
+        // 2. From LoRAMancer Library
+        foreach (var lib in LibraryService.Items) {
+            string displayName = !string.IsNullOrWhiteSpace(lib.CivitaiInfo?.ModelName) ? lib.CivitaiInfo.ModelName : Path.GetFileNameWithoutExtension(lib.FileName);
+            if (string.Equals(lib.FileName, primaryName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(displayName, LoraName, StringComparison.OrdinalIgnoreCase) ||
+                _stackedLoras.Any(s => string.Equals(s.Name, lib.FileName, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(s.Name, displayName, StringComparison.OrdinalIgnoreCase))) {
+                continue;
+            }
+            list.Add(new LoraStackOption(lib.FilePath, $"[Library] {displayName} ({lib.FileName})", lib.FilePath));
+        }
+
+        return list.OrderBy(x => x.Label);
+    }
+
+    private async Task AddSelectedAuxiliaryLoraAsync() {
+        if (string.IsNullOrWhiteSpace(_selectedAuxLoraToAdd)) return;
+
+        string target = _selectedAuxLoraToAdd;
+        string cleanName = target;
+        string? localPath = null;
+
+        var libMatch = LibraryService.Items.FirstOrDefault(l =>
+            string.Equals(l.FilePath, target, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(l.FileName, target, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(l.FileName), target, StringComparison.OrdinalIgnoreCase));
+
+        if (libMatch != null) {
+            cleanName = libMatch.FileName;
+            localPath = libMatch.FilePath;
+
+            if (File.Exists(localPath)) {
+                bool isLocal = _endpoint.Contains("127.0.0.1") || _endpoint.Contains("localhost");
+                if (isLocal) {
+                    var deployed = await ComfyService.DeployLoraLocallyAsync(localPath);
+                    if (deployed != null) {
+                        cleanName = Path.GetFileName(deployed);
+                    }
+                } else {
+                    await ComfyService.UploadLoraToRemoteComfyUiAsync(localPath);
+                }
+            }
+        }
+
+        if (!_stackedLoras.Any(l => string.Equals(l.Name, cleanName, StringComparison.OrdinalIgnoreCase))) {
+            _stackedLoras.Add(new AdditionalLoraItem {
+                Name = cleanName,
+                Weight = 1.0f,
+                FilePath = localPath
+            });
+            Snackbar.Add($"Stacked auxiliary LoRA: {cleanName}", Severity.Success);
+        }
+
+        _selectedAuxLoraToAdd = string.Empty;
+    }
+
+    private void RemoveAuxiliaryLora(int index) {
+        if (index >= 0 && index < _stackedLoras.Count) {
+            var item = _stackedLoras[index];
+            _stackedLoras.RemoveAt(index);
+            Snackbar.Add($"Removed auxiliary LoRA: {item.Name}", Severity.Info);
+        }
     }
     private bool _isActualSize;
     private bool _isLightboxOpen;

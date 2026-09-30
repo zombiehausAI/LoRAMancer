@@ -7,6 +7,8 @@
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 @inject ThemeService ThemeManager
+@inject TrainingRecipeService RecipeService
+@inject ModusFlowPromptService PromptService
 
 <MudDialog Style="background: linear-gradient(180deg, #181825 0%, #11111b 100%); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6); max-width: 1020px; width: 100%; overflow: hidden;">
     <TitleContent>
@@ -26,7 +28,7 @@
                 </MudButton>
                 <div class="d-flex align-center gap-2 pa-1 px-3" style="background-color: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;">
                     <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Style="@($"color: {(_isProMode ? ThemeManager.EffectivePrimaryColor : "#6c7086")};")" />
-                    <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" Dense="true" />
+                    <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
                 </div>
             </div>
         </div>
@@ -41,6 +43,90 @@
                 <b>Editing Training Run:</b> Populated from history record <code>@HistoryRecord.Name</code> (Status: @HistoryRecord.Status). You can adjust any parameters, local model paths, or dataset options and re-run.
             </MudAlert>
         }
+
+        <!-- Favorite & Custom Training Recipes Preset Bar -->
+        <div class="pa-3 mb-4" 
+             style="background: linear-gradient(135deg, rgba(203, 166, 247, 0.08) 0%, rgba(30, 30, 46, 0.6) 100%); border: 1px solid rgba(203, 166, 247, 0.25); border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+            <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+                <div class="d-flex align-center gap-3 flex-grow-1" style="min-width: 280px;">
+                    <div style="@($"width: 36px; height: 36px; border-radius: 10px; background: rgba(203, 166, 247, 0.15); border: 1px solid rgba(203, 166, 247, 0.4); display: flex; align-items: center; justify-content: center;")">
+                        <MudIcon Icon="@Icons.Material.Filled.Bookmarks" Style="color: #cba6f7; font-size: 1.25rem;" />
+                    </div>
+                    <div class="flex-grow-1">
+                        <MudSelect T="string" 
+                                   Value="_selectedRecipeId" 
+                                   ValueChanged="OnRecipeSelected" 
+                                   Label="Favorite &amp; Saved Training Recipes" 
+                                   Variant="Variant.Outlined" 
+                                   Dense="true" 
+                                   AnchorOrigin="Origin.BottomCenter"
+                                   HelperText="Select a saved favorite recipe to populate all hyperparameters">
+                            <MudSelectItem Value="@string.Empty">
+                                <em>-- Select a favorite recipe or custom preset --</em>
+                            </MudSelectItem>
+                            @foreach (var rec in _savedRecipes) {
+                                <MudSelectItem Value="@rec.Id">
+                                    @(rec.IsFavorite ? "⭐ " : "📋 ")@rec.Name (@rec.TargetBaseModel - Rank @rec.NetworkDim)
+                                </MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                </div>
+                <div class="d-flex align-center gap-2">
+                    <MudButton Variant="Variant.Filled" 
+                               Color="Color.Tertiary" 
+                               Size="Size.Small" 
+                               StartIcon="@Icons.Material.Filled.StarRate" 
+                               OnClick="@(() => _showSaveRecipePanel = !_showSaveRecipePanel)" 
+                               Style="border-radius: 8px; font-weight: 700;">
+                        @(_showSaveRecipePanel ? "Cancel" : "Save Favorite Recipe")
+                    </MudButton>
+                    @if (!string.IsNullOrEmpty(_selectedRecipeId)) {
+                        var curRec = _savedRecipes.FirstOrDefault(r => r.Id == _selectedRecipeId);
+                        if (curRec != null) {
+                            <MudTooltip Text="@(curRec.IsFavorite ? "Remove from Favorites" : "Add to Favorites")">
+                                <MudIconButton Icon="@(curRec.IsFavorite ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarOutline)" 
+                                               Color="Color.Warning" 
+                                               Size="Size.Small" 
+                                               OnClick="ToggleRecipeFavoriteAsync" />
+                            </MudTooltip>
+                            @if (!curRec.IsBuiltIn) {
+                                <MudTooltip Text="Delete this custom recipe">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                                                   Color="Color.Error" 
+                                                   Size="Size.Small" 
+                                                   OnClick="DeleteSelectedRecipeAsync" />
+                                </MudTooltip>
+                            }
+                        }
+                    }
+                </div>
+            </div>
+
+            @if (_showSaveRecipePanel) {
+                <div class="mt-3 pa-3" style="background: rgba(17, 17, 27, 0.85); border: 1px solid rgba(203, 166, 247, 0.3); border-radius: 10px;">
+                    <div class="d-flex align-center gap-2 mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.BookmarkAdd" Style="color: #cba6f7;" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">Save Current Settings as Favorite Recipe JSON</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Style="color: #a6adc8; display: block;" Class="mb-3">
+                        Saves architecture (@_targetBaseModel), rank (@_networkDim), alpha (@_networkAlpha), LR (@_learningRate.ToString("0.#####e+00")), optimizer (@_optimizer), prompts, and augmentation settings to <code>~/.loramancer/training_recipes/</code>.
+                    </MudText>
+                    <MudGrid>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_newRecipeName" Label="Recipe Name" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. FLUX Ultra Likeness" Required="true" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="_newRecipeDesc" Label="Description (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="e.g. High-rank settings tuned for realism" />
+                        </MudItem>
+                        <MudItem xs="12" Class="d-flex justify-end gap-2">
+                            <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="@(() => _showSaveRecipePanel = false)">Cancel</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveCurrentAsRecipeAsync" Disabled="string.IsNullOrWhiteSpace(_newRecipeName)">Save Preset</MudButton>
+                        </MudItem>
+                    </MudGrid>
+                </div>
+            }
+        </div>
 
         <!-- Step 1: Subject Type & Architecture Selection -->
         <div class="d-flex align-center gap-2 mb-3">
@@ -390,14 +476,39 @@
 
                     <!-- Tab 4: Sample Generation Prompts & Negative Prompt -->
                     <MudTabPanel Text="Sample Prompts" Icon="@Icons.Material.Filled.Image">
-                        <div class="d-flex align-center justify-space-between mb-2">
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                Periodic visual inference samples generated during training runs to monitor concept quality.
-                            </MudText>
-                            <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetSamplePromptsToDefault">
-                                Reset Defaults
-                            </MudButton>
+                        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 pb-2" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                            <div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Periodic visual inference samples generated during training runs to monitor concept quality.
+                                </MudText>
+                            </div>
+                            <div class="d-flex align-center gap-2">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Bookmark" OnClick="OpenPromptManagerForWizardAsync"
+                                           Style="border-radius: 8px;">
+                                    Saved Prompts Library
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetSamplePromptsToDefault">
+                                    Reset Defaults
+                                </MudButton>
+                            </div>
                         </div>
+
+                        <!-- Saved Prompt Selector Row -->
+                        <div class="d-flex align-center gap-2 mb-3">
+                            <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
+                                       Label="Load from Saved Prompts (ModusFlow Presets)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Class="flex-grow-1">
+                                <MudSelectItem Value="@("")">-- Select a saved prompt to populate samples --</MudSelectItem>
+                                @foreach (var p in _savedPrompts) {
+                                    <MudSelectItem Value="@p.Name">
+                                        @(!string.IsNullOrWhiteSpace(p.Category) ? $"[{p.Category}] " : "")@p.Name
+                                    </MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+
                         <MudGrid>
                             <MudItem xs="12" md="6">
                                 <MudTooltip Text="Sample Prompt 1 (Primary): Evaluates subject recall during training at regular intervals. Use {trigger} to insert your trigger keyword.">
@@ -482,15 +593,28 @@
     private int? _clipSkip;
     private bool _isProMode;
 
+    private List<TrainingRecipe> _savedRecipes = new();
+    private string _selectedRecipeId = string.Empty;
+    private bool _showSaveRecipePanel;
+    private string _newRecipeName = string.Empty;
+    private string _newRecipeDesc = string.Empty;
+
+    private IReadOnlyList<ModusFlowPrompt> _savedPrompts = Array.Empty<ModusFlowPrompt>();
+    private string _selectedSavedPromptName = string.Empty;
+
     private DatasetHealthReport? _datasetReport;
     private TrainingEstimates _estimates = new();
     private PreFlightCheckResult _preFlight = new();
 
-    protected override void OnInitialized() {
+    protected override async Task OnInitializedAsync() {
         try {
             _presets = EstimationService.GetSubjectPresets();
             SubjectPreset defaultPreset = _presets.First();
             ApplyPreset(defaultPreset);
+            _savedRecipes = await RecipeService.GetAllRecipesAsync();
+            try {
+                _savedPrompts = await PromptService.GetAllPromptsAsync();
+            } catch { }
 
             if (DonorLora != null) {
                 _selectedSubject = TrainingSubjectType.Custom;
@@ -655,7 +779,43 @@
         _samplePrompt1 = arch.RecommendedSamplePrompt;
         _samplePrompt2 = arch.RecommendedSamplePrompt2;
         _negativePrompt = arch.RecommendedNegativePrompt;
+        _selectedSavedPromptName = string.Empty;
         Snackbar.Add("Sample and negative prompts reset to model defaults.", Severity.Info);
+    }
+
+    private void OnSavedPromptSelected(string promptName) {
+        _selectedSavedPromptName = promptName;
+        if (string.IsNullOrWhiteSpace(promptName)) return;
+        var match = _savedPrompts.FirstOrDefault(p => string.Equals(p.Name, promptName, StringComparison.OrdinalIgnoreCase));
+        if (match != null) {
+            ApplySavedPrompt(match);
+        }
+    }
+
+    private async Task OpenPromptManagerForWizardAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ModusFlowPromptManagerDialog>("Saved Prompts", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt selected) {
+            ApplySavedPrompt(selected);
+        }
+        try {
+            _savedPrompts = await PromptService.GetAllPromptsAsync();
+        } catch { }
+    }
+
+    private void ApplySavedPrompt(ModusFlowPrompt prompt) {
+        string trigger = !string.IsNullOrWhiteSpace(_triggerWord) ? _triggerWord : "{trigger}";
+        string positive = prompt.Positive;
+        if (!positive.Contains("{trigger}") && !string.IsNullOrWhiteSpace(_triggerWord) && !positive.Contains(_triggerWord, StringComparison.OrdinalIgnoreCase)) {
+            positive = $"{trigger}, {positive}";
+        }
+        _samplePrompt1 = positive;
+        if (!string.IsNullOrWhiteSpace(prompt.Negative)) {
+            _negativePrompt = prompt.Negative;
+        }
+        _selectedSavedPromptName = prompt.Name;
+        Snackbar.Add($"Loaded saved prompt '{prompt.Name}' into Sample Prompt 1 & Negative", Severity.Info);
     }
 
     private void OnTriggerWordChanged(string newTrigger) {
@@ -858,5 +1018,125 @@
             return $"{(int)span.TotalHours}h {span.Minutes}m";
         }
         return $"{Math.Max(1, (int)span.TotalMinutes)} mins";
+    }
+
+    private void OnRecipeSelected(string recipeId) {
+        _selectedRecipeId = recipeId;
+        if (string.IsNullOrEmpty(recipeId)) {
+            return;
+        }
+
+        var recipe = _savedRecipes.FirstOrDefault(r => r.Id == recipeId);
+        if (recipe != null) {
+            ApplyRecipe(recipe);
+        }
+    }
+
+    private void ApplyRecipe(TrainingRecipe recipe) {
+        _selectedSubject = TrainingSubjectType.Custom;
+        _isProMode = true;
+        _targetBaseModel = recipe.TargetBaseModel;
+        _customBaseModelPath = recipe.CustomBaseModelPath ?? string.Empty;
+        _networkDim = recipe.NetworkDim;
+        _networkAlpha = recipe.NetworkAlpha;
+        _learningRate = recipe.LearningRate;
+        _unetLearningRate = recipe.UnetLearningRate;
+        _textEncoderLearningRate = recipe.TextEncoderLearningRate;
+        _optimizer = recipe.Optimizer;
+        _lrScheduler = recipe.LrScheduler;
+        _precision = recipe.Precision;
+        _epochs = recipe.Epochs;
+        _repeats = recipe.Repeats;
+        _batchSize = recipe.BatchSize;
+        _totalSteps = recipe.TotalSteps;
+        _saveEveryNEpochs = recipe.SaveEveryNEpochs;
+        _flipAug = recipe.FlipAug;
+        _shuffleTokens = recipe.ShuffleTokens;
+        _keepTokens = recipe.KeepTokens;
+        _clipSkip = recipe.ClipSkip;
+
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt1)) {
+            _samplePrompt1 = recipe.SamplePrompt1;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt2)) {
+            _samplePrompt2 = recipe.SamplePrompt2;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.NegativePrompt)) {
+            _negativePrompt = recipe.NegativePrompt;
+        }
+
+        RecalculateEstimates();
+        Snackbar.Add($"Loaded recipe: {recipe.Name}", Severity.Success);
+    }
+
+    private async Task SaveCurrentAsRecipeAsync() {
+        if (string.IsNullOrWhiteSpace(_newRecipeName)) {
+            Snackbar.Add("Please enter a recipe name.", Severity.Warning);
+            return;
+        }
+
+        var recipe = new TrainingRecipe {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = _newRecipeName.Trim(),
+            Description = _newRecipeDesc.Trim(),
+            TargetBaseModel = _targetBaseModel,
+            CustomBaseModelPath = _customBaseModelPath,
+            SubjectType = _selectedSubject.ToString(),
+            NetworkDim = _networkDim,
+            NetworkAlpha = _networkAlpha,
+            LearningRate = _learningRate,
+            UnetLearningRate = _unetLearningRate,
+            TextEncoderLearningRate = _textEncoderLearningRate,
+            Optimizer = _optimizer,
+            LrScheduler = _lrScheduler,
+            Precision = _precision,
+            Epochs = _epochs,
+            Repeats = _repeats,
+            BatchSize = _batchSize,
+            TotalSteps = _totalSteps,
+            SaveEveryNEpochs = _saveEveryNEpochs,
+            FlipAug = _flipAug,
+            ShuffleTokens = _shuffleTokens,
+            KeepTokens = _keepTokens,
+            ClipSkip = _clipSkip,
+            SamplePrompt1 = _samplePrompt1,
+            SamplePrompt2 = _samplePrompt2,
+            NegativePrompt = _negativePrompt,
+            IsFavorite = true,
+            IsBuiltIn = false
+        };
+
+        string savedPath = await RecipeService.SaveRecipeAsync(recipe);
+        _savedRecipes = await RecipeService.GetAllRecipesAsync();
+        _selectedRecipeId = recipe.Id;
+        _showSaveRecipePanel = false;
+        _newRecipeName = string.Empty;
+        _newRecipeDesc = string.Empty;
+        Snackbar.Add($"Recipe saved to favorites: {Path.GetFileName(savedPath)}", Severity.Success);
+    }
+
+    private async Task ToggleRecipeFavoriteAsync() {
+        if (string.IsNullOrEmpty(_selectedRecipeId)) return;
+        await RecipeService.ToggleFavoriteAsync(_selectedRecipeId);
+        _savedRecipes = await RecipeService.GetAllRecipesAsync();
+        var cur = _savedRecipes.FirstOrDefault(r => r.Id == _selectedRecipeId);
+        if (cur != null) {
+            Snackbar.Add(cur.IsFavorite ? $"Marked '{cur.Name}' as favorite ⭐" : $"Removed '{cur.Name}' from favorites", Severity.Info);
+        }
+    }
+
+    private async Task DeleteSelectedRecipeAsync() {
+        if (string.IsNullOrEmpty(_selectedRecipeId)) return;
+        var cur = _savedRecipes.FirstOrDefault(r => r.Id == _selectedRecipeId);
+        if (cur == null) return;
+        if (cur.IsBuiltIn) {
+            Snackbar.Add("Built-in presets cannot be deleted.", Severity.Info);
+            return;
+        }
+
+        await RecipeService.DeleteRecipeAsync(cur.Id);
+        _savedRecipes = await RecipeService.GetAllRecipesAsync();
+        _selectedRecipeId = string.Empty;
+        Snackbar.Add($"Deleted recipe preset: {cur.Name}", Severity.Info);
     }
 }

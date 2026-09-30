@@ -14,6 +14,7 @@
 @using LoRAMancer.App.Components.Dialogs
 @using LoRAMancer.App.Engines
 @inject ModelArchitectureRegistry ArchitectureRegistry
+@inject TrainingRecipeService RecipeService
 @using System.Collections.Concurrent
 @using System.Threading
 
@@ -662,6 +663,9 @@
                 <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(lora))">
                     Clone Recipe into Trainer (Stage 2)
                 </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(lora))">
+                    Save as Favorite Recipe
+                </MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(lora))">
                     Seed Concept to Dataset Curator (Stage 1)
                 </MudMenuItem>
@@ -849,6 +853,9 @@
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(context))">
                             Clone Recipe into Trainer (Stage 2)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(context))">
+                            Save as Favorite Recipe
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(context))">
                             Seed Concept to Dataset Curator (Stage 1)
@@ -1999,6 +2006,20 @@
             await DialogService.ShowAsync<TrainingWizardDialog>("New Training Run (Using Cloned Recipe)", parameters, options);
         } catch (Exception ex) {
             Snackbar.Add($"Unable to launch Training Wizard: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveLoraAsFavoriteRecipeAsync(LoraMetadata lora) {
+        if (lora == null) {
+            return;
+        }
+
+        try {
+            var recipe = RecipeService.CreateRecipeFromLora(lora);
+            string savedPath = await RecipeService.SaveRecipeAsync(recipe);
+            Snackbar.Add($"Saved '{recipe.Name}' to favorite recipes ⭐! Selectable anytime in Training Wizard.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save recipe: {ex.Message}", Severity.Error);
         }
     }
 

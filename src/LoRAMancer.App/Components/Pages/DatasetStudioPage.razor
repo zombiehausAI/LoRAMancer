@@ -14,6 +14,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
 @inject ThemeService ThemeManager
+@inject NavigationManager Navigation
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
     <div>
@@ -27,6 +28,9 @@
     </div>
 
     <div class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.TravelExplore" OnClick="@(() => Navigation.NavigateTo("harvester"))">
+            Harvest Images
+        </MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
             Ollama Vision Tagger
         </MudButton>

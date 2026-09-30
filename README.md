@@ -35,7 +35,7 @@
 LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 
 1. **Multi-Library Management, Organizer & Collections**: Index thousands of `.safetensors` models into an instant, SQLite-backed library (`~/.LoRAMancer/loras.db`). Organize models across independent named libraries, convert subfolders into libraries with one click, physically move LoRAs (and companion previews) across libraries with "Move to Library...", group models into arbitrary virtual user-defined Collections without moving files, search globally, and view auto-discovered companion preview thumbnails with zero UI freezing.
-2. **Hyperparameter Recipe Cloning**: Inspect and borrow proven mathematical settings (rank, alpha, learning rates, optimizer, epochs) from any donor LoRA to pre-seed your next training run while preserving your own unique dataset and identity.
+2. **Hyperparameter Recipe Cloning & Favorite Presets**: Inspect and borrow proven mathematical settings (rank, alpha, learning rates, optimizer, epochs) from any donor LoRA, or save your own custom configurations as favorite recipes stored as portable JSON files in your settings (`~/.loramancer/training_recipes/`). Select your favorites anytime from a dropdown when training new LoRAs alongside calibrated presets for FLUX.1, SDXL, Pony, and Chroma.
 3. **Automated AI-Toolkit Orchestration & Training Queue**: Streamlined Easy Use wizard with built-in presets (Characters, Styles, Concepts, Clothing), dataset health auditing, live hardware estimators, sequential single-GPU training queue, and background execution with desktop-wide single-instance protection.
 4. **Permanent Training History & Vault**: Keep permanent records of all training runs, prompt triggers, loss curves, and configurations without cloud retention limits.
 5. **Universal Hardware Provisioning**: Automated detection and provisioning of hardware-matched PyTorch environments for AMD ROCm, NVIDIA CUDA, Intel XPU, and CPU.
@@ -54,8 +54,24 @@ LoRAMancer streamlines the entire LoRA lifecycle for AI creators:
 18. **LoRA Ghost Hunter & Style Decoupler**: Gram-Schmidt orthogonal repulsion to purge bad traits/artifacts from donor models, and cross-attention attenuation to isolate character identity from art style bleed.
 19. **Forensic Reverse-Engineering & De-Anonymizer**: Reconstructs base architectures, effective rank/alpha scaling ratios, trained trigger keywords, and training recipes from raw weights.
 20. **Multi-Provider Metadata Lookup & Gap-Filling**: Queries Civitai (SHA-256), Hugging Face Hub (model cards, tags, and README `instance_prompt`), and Danbooru (tag frequency classification) to enrich LoRAs with trigger words, previews, and descriptions. Completely open and free by default, with optional API keys in Settings to unlock private models and higher rate limits.
+21. **Extensible Plugin Ecosystem & Post-Forge Showcase**: Modular C# and Python plugin architecture with dedicated UI Slots (`StudioWorkshop`, `StudioModalTools`, `PostForge`). Ships with built-in extensions for **Ollama Vision LoRA Tagger** and **Civitai LoRA Updater**, plus a dedicated **Post-Forge Showcase** gallery for output inspection.
+22. **Native ComfyUI-ModusFlow Integration**: 1st-class integration with **[ComfyUI-ModusFlow](https://github.com/zombiehausAI/ComfyUI-ModusFlow)**, the modular ComfyUI node suite maintained by Zombiehaus AI. LoRAMancer's Post-Forge Showcase and ComfyUI Studio natively decode multi-CLIP prompts (`ModusFlowMultiCLIPTextEncode`), text branches (`ModusFlowTextEditor`), Ollama prompt refiners, and power LoRA loader stacks directly from PNGs, JPEGs (EXIF `ImageDescription`), and WebP (Adobe XMP `<dc:description>`), complete with dedicated **ComfyUI (ModusFlow)** verification badging and 1-click preview thumbnail assignment back to your LoRA library.
+23. **Native Multi-Provider Image Harvester**: Concurrent dataset image discovery and harvesting engine in pure C# (.NET 10). Selectively highlight providers via pills, search all enabled providers or custom subsets concurrently in parallel, filter categories (Boorus, General, Scrapers), audit with Ollama vision models, and export directly to Stage 1 Curate & Caption. See the [Native Image Harvester Guide](docs/IMAGE_HARVESTER.md) for full details.
 
-## Documentation Index
+---
+
+## Companion Ecosystem: ComfyUI-ModusFlow 🌊
+
+LoRAMancer works hand-in-hand with **[ComfyUI-ModusFlow](https://github.com/zombiehausAI/ComfyUI-ModusFlow)**, our open-source modular node suite for ComfyUI.
+
+### The Relationship:
+- **Creative Generation in ComfyUI**: ModusFlow handles high-precision modular generation inside ComfyUI—featuring multi-CLIP text encoding (layering up to 4 CLIP inputs with independent enable switches), dual-channel positive/negative text editors, Ollama prompt refiners, audio generation (`ModusFlowAceStepAudio`), and power multi-LoRA loaders.
+- **Embedded Recipe Preservation**: When ModusFlow saves outputs via `ModusFlowSaveImage`, it embeds full prompt graphs and node settings into PNG `PngInfo`, JPEG EXIF (`ImageDescription`), and WebP Adobe XMP metadata packets.
+- **Saved Prompts Manager & Preset Loader**: LoRAMancer features a two-way saved prompt manager fully compatible with ModusFlow's JSON prompt schema (`category`, `positive`, `negative`). Insert saved presets directly into prompt fields via dropdown in both the Stage 4 Test Studio and the ComfyUI Interactive Test Studio, or enter freeform prompts anytime. Users can customize the storage location in Settings (General & Paths), defaulting to the user's home settings directory (`~/.loramancer/saved_prompts/`), with 1-click saving and pre-packaged default presets ready right out of the box.
+- **Multi-LoRA Stacking in ComfyUI Inference**: Test combinations of stylized or character LoRAs by stacking auxiliary LoRAs directly into your inference runs. LoRAs can be sourced from either detected ComfyUI installations or your permanent LoRAMancer library (with automated 1-click deployment / symlinking), complete with independent strength sliders and dynamic graph chaining.
+- **Full-Lifecycle Inspection in LoRAMancer**: LoRAMancer's **Post-Forge Showcase** automatically scans these outputs, extracts complex multi-clip prompts, identifies all injected LoRAs, and badges the media as **`ComfyUI (ModusFlow)`**. Creators can instantly assign any generated image as a permanent preview thumbnail for their trained LoRAs or bounce prompts back into LoRAMancer's Stage 4 ComfyUI Test Studio.
+
+---
 
 Comprehensive guides and architectural specifications are located in the [`docs/`](docs/) folder and can also be viewed directly inside the application under the **Documentation** tab:
 
@@ -69,6 +85,8 @@ Comprehensive guides and architectural specifications are located in the [`docs/
 - 🚀 [Standalone AMD ROCm AI-Toolkit Setup & Patch Guide](docs/AMD_AI_TOOLKIT_STANDALONE.md)
 - 🌐 [Remote Training, PWA Web App & Public Internet Serving](docs/REMOTE_TRAINING.md)
 - 🏛️ [Permanent LoRA Training History & Vault](docs/HISTORY_AND_VAULT.md)
+- 🌐 [Native C# Image Harvester & Dataset Discovery](docs/IMAGE_HARVESTER.md)
+- 🎨 [Post-Forge Showcase & Generation Gallery](docs/POST_FORGE_SHOWCASE.md)
 - 🔌 [Plugin System Guide (C# & Python Extensions)](docs/PLUGINS.md)
 - 🏗️ [Architecture Overview & Core Data Flows](docs/ARCHITECTURE.md)
 - 📦 [Installer & Packaging Specifications](docs/INSTALLER_AND_UPDATES.md)

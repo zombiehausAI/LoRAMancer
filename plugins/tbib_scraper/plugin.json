@@ -1,0 +1,13 @@
+{
+  "id": "tbib-scraper",
+  "name": "TBIB Cosplay & Gravure",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting real cosplay, gravure, swimwear, and Asian idol photography from TBIB.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "TBIB Scraper",
+  "icon": "CameraAlt"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "artic-scraper",
+  "name": "Art Institute of Chicago",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting classical master paintings, fine art, and museum exhibitions from the Art Institute of Chicago.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Art Institute Scraper",
+  "icon": "AccountBalance"
+}

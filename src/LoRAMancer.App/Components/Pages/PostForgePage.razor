@@ -1,0 +1,933 @@
+@page "/post-forge"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@using LoRAMancer.App.Components.Dialogs
+@inject PostForgeShowcaseService ShowcaseService
+@inject ShowcaseThumbnailService ThumbnailService
+@inject PluginManagerService PluginManager
+@inject NativeFileDialogService FileDialogService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+    <div>
+        <div class="d-flex align-center gap-2">
+            <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small" Style="font-weight: 700;">STAGE 5</MudChip>
+            <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">Post-Forge Showcase</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Visual generation vault, prompt reverse-engineering, AI detection badges, and multi-format media gallery (Images, Video, Audio)
+        </MudText>
+    </div>
+
+    <div class="d-flex align-center gap-2 flex-wrap">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="AddFolderAsync" Disabled="ShowcaseService.IsScanning">
+            Add Folder
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.FolderSpecial" OnClick="@(() => _showManageFoldersDialog = !_showManageFoldersDialog)">
+            @(_showManageFoldersDialog ? "Hide Manager" : "Manage Folders")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanLibraryAsync" Disabled="ShowcaseService.IsScanning">
+            @if (ShowcaseService.IsScanning) {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                <span>Scanning...</span>
+            } else {
+                <span>Scan Media</span>
+            }
+        </MudButton>
+        @if (ShowcaseService.IsScanning) {
+            <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CancelScan">
+                Cancel Scan
+            </MudButton>
+        }
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.SmartToy" Href="test">
+            ComfyUI Studio
+        </MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Default" StartIcon="@Icons.Material.Filled.Extension" OnClick="@(() => _showPluginsPanel = !_showPluginsPanel)">
+            @(_showPluginsPanel ? "Hide Plugins" : "Showcase Plugins")
+        </MudButton>
+    </div>
+</div>
+
+@if (ShowcaseService.IsScanning) {
+    <MudCard Elevation="1" Class="mb-4 pa-3" Style="background-color: #181825; border: 1px solid #313244;">
+        <div class="d-flex align-center justify-space-between mb-1">
+            <div class="d-flex align-center gap-2">
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Scanning: <span style="color: #cdd6f4; font-family: 'JetBrains Mono', monospace;">@ShowcaseService.ScanCurrentFile</span>
+                </MudText>
+            </div>
+            <div class="d-flex align-center gap-3">
+                <MudText Typo="Typo.caption" Style="color: #89b4fa; font-weight: 700;">
+                    @ShowcaseService.ScanCurrentIndex / @ShowcaseService.ScanTotalCount
+                </MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Close" OnClick="CancelScan">
+                    Cancel
+                </MudButton>
+            </div>
+        </div>
+        <MudProgressLinear Color="Color.Primary" Value="@ScanPercent" />
+    </MudCard>
+}
+
+@if (_showPluginsPanel && PostForgePlugins.Count > 0) {
+    <MudCard Elevation="2" Class="mb-4 pa-4" Style="background-color: #181825; border: 1px solid #cba6f7;">
+        <div class="d-flex align-center justify-space-between mb-3">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cba6f7;">
+                <MudIcon Icon="@Icons.Material.Filled.Extension" Size="Size.Small" Class="mr-1" />
+                Installed Post-Forge Plugins
+            </MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showPluginsPanel = false)" />
+        </div>
+        <MudGrid>
+            @foreach (var plugin in PostForgePlugins) {
+                <MudItem xs="12" sm="6" md="4" key="@plugin.Id">
+                    <MudCard Elevation="1" Style="background-color: #11111b; border: 1px solid #313244;">
+                        <MudCardHeader>
+                            <CardHeaderAvatar>
+                                <MudAvatar Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small">
+                                    <MudIcon Icon="@GetPluginIcon(plugin)" />
+                                </MudAvatar>
+                            </CardHeaderAvatar>
+                            <CardHeaderContent>
+                                <MudText Typo="Typo.body2" Style="font-weight: 700;">@(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">v@plugin.Version</MudText>
+                            </CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardActions Class="pa-2">
+                            <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" FullWidth="true" Href="@($"plugins/host/{plugin.Id}")">
+                                Launch Tool
+                            </MudButton>
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudCard>
+}
+
+@if (_showManageFoldersDialog) {
+    <MudCard Elevation="3" Class="mb-4 pa-4" Style="background-color: #181825; border: 1px solid #89b4fa; border-radius: 8px;">
+        <div class="d-flex align-center justify-space-between mb-3 flex-wrap gap-2">
+            <div>
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #89b4fa;">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Size="Size.Small" Class="mr-1" />
+                    Manage Showcase Root Libraries
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Add or remove root directories. Thumbnails are automatically generated on the fly and cached in your user settings folder.
+                </MudText>
+            </div>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="AddFolderAsync" Disabled="ShowcaseService.IsScanning">
+                    Add Root Folder
+                </MudButton>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showManageFoldersDialog = false)" />
+            </div>
+        </div>
+
+        <MudTable Items="ConfiguredFolders" Dense="true" Hover="true" Elevation="0" Style="background-color: #11111b; border-radius: 6px;">
+            <HeaderContent>
+                <MudTh Style="color: #cdd6f4;">Library Name</MudTh>
+                <MudTh Style="color: #cdd6f4;">Path</MudTh>
+                <MudTh Style="color: #cdd6f4; text-align: center;">Indexed Media</MudTh>
+                <MudTh Style="color: #cdd6f4; text-align: right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-weight: 600; color: #cdd6f4;">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Size="Size.Small" />
+                        <span>@Path.GetFileName(context)</span>
+                    </div>
+                </MudTd>
+                <MudTd Style="color: #a6adc8; font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;">@context</MudTd>
+                <MudTd Style="text-align: center;">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Dark" Style="font-size: 0.72rem;">
+                        @AllItems.Count(i => i.FolderPath.StartsWith(context, StringComparison.OrdinalIgnoreCase)) items
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align: right;">
+                    <div class="d-flex justify-end gap-1">
+                        <MudTooltip Text="Open in Windows File Explorer">
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" Color="Color.Default" OnClick="@(() => OpenFolderInExplorer(context))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Remove library from Showcase">
+                            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error" OnClick="@(() => RemoveFolderAsync(context))" />
+                        </MudTooltip>
+                    </div>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudCard>
+}
+
+<!-- Filters, Search & Categories Toolbar -->
+<MudCard Elevation="2" Class="pa-3 mb-4" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+        <!-- Search bar -->
+        <MudTextField @bind-Value="_searchQuery"
+                      @bind-Value:after="OnFilterChanged"
+                      Placeholder="Search prompts, models, LoRAs, filenames, tags..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Immediate="true"
+                      Style="background-color: #11111b; min-width: 260px; flex: 1;" />
+
+        <!-- Media Type Filter Chips -->
+        <div class="d-flex gap-1 align-center flex-wrap">
+            <MudChip T="string" Color="@(_selectedMediaType == null ? Color.Primary : Color.Dark)"
+                     Variant="@(_selectedMediaType == null ? Variant.Filled : Variant.Outlined)"
+                     OnClick="@(() => SetMediaTypeFilter(null))"
+                     Size="Size.Small">
+                All (@AllItems.Count)
+            </MudChip>
+            <MudChip T="string" Color="@(_selectedMediaType == ShowcaseMediaType.Image ? Color.Primary : Color.Dark)"
+                     Variant="@(_selectedMediaType == ShowcaseMediaType.Image ? Variant.Filled : Variant.Outlined)"
+                     Icon="@Icons.Material.Filled.Image"
+                     OnClick="@(() => SetMediaTypeFilter(ShowcaseMediaType.Image))"
+                     Size="Size.Small">
+                Images (@ImageCount)
+            </MudChip>
+            <MudChip T="string" Color="@(_selectedMediaType == ShowcaseMediaType.Video ? Color.Primary : Color.Dark)"
+                     Variant="@(_selectedMediaType == ShowcaseMediaType.Video ? Variant.Filled : Variant.Outlined)"
+                     Icon="@Icons.Material.Filled.Videocam"
+                     OnClick="@(() => SetMediaTypeFilter(ShowcaseMediaType.Video))"
+                     Size="Size.Small">
+                Videos (@VideoCount)
+            </MudChip>
+            <MudChip T="string" Color="@(_selectedMediaType == ShowcaseMediaType.Audio ? Color.Primary : Color.Dark)"
+                     Variant="@(_selectedMediaType == ShowcaseMediaType.Audio ? Variant.Filled : Variant.Outlined)"
+                     Icon="@Icons.Material.Filled.Audiotrack"
+                     OnClick="@(() => SetMediaTypeFilter(ShowcaseMediaType.Audio))"
+                     Size="Size.Small">
+                Audio (@AudioCount)
+            </MudChip>
+        </div>
+
+        <!-- Special Filters (AI Only & Favorites) -->
+        <div class="d-flex gap-1 align-center">
+            <MudChip T="string" Color="@(_aiOnly ? Color.Tertiary : Color.Dark)"
+                     Variant="@(_aiOnly ? Variant.Filled : Variant.Outlined)"
+                     Icon="@Icons.Material.Filled.AutoAwesome"
+                     OnClick="ToggleAiFilter"
+                     Size="Size.Small">
+                AI Verified (@AiGeneratedCount)
+            </MudChip>
+            <MudChip T="string" Color="@(_favoritesOnly ? Color.Error : Color.Dark)"
+                     Variant="@(_favoritesOnly ? Variant.Filled : Variant.Outlined)"
+                     Icon="@Icons.Material.Filled.Favorite"
+                     OnClick="ToggleFavoritesFilter"
+                     Size="Size.Small">
+                Favorites (@FavoriteCount)
+            </MudChip>
+        </div>
+    </div>
+
+    <!-- Secondary Filter Bar (Category, Tags, Folders, Sort) -->
+    <div class="d-flex align-center flex-wrap gap-2 mt-3 pt-2" style="border-top: 1px solid #313244;">
+        <div style="min-width: 150px;">
+            <MudSelect T="string" @bind-Value="_selectedCategory" @bind-Value:after="OnFilterChanged" Label="Category" ShrinkLabel="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="background-color: #11111b; font-size: 0.8rem;">
+                <MudSelectItem Value="@string.Empty">All Categories</MudSelectItem>
+                @foreach (var cat in ShowcaseService.CustomCategories) {
+                    <MudSelectItem Value="@cat">@cat</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <div style="min-width: 140px;">
+            <MudSelect T="string" @bind-Value="_selectedTag" @bind-Value:after="OnFilterChanged" Label="Tag" ShrinkLabel="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="background-color: #11111b; font-size: 0.8rem;">
+                <MudSelectItem Value="@string.Empty">All Tags</MudSelectItem>
+                @foreach (var tag in ShowcaseService.CustomTags) {
+                    <MudSelectItem Value="@tag">@tag</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <div style="min-width: 160px;">
+            <MudSelect T="string" @bind-Value="_selectedFolder" @bind-Value:after="OnFilterChanged" Label="Folder Library" ShrinkLabel="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="background-color: #11111b; font-size: 0.8rem;">
+                <MudSelectItem Value="@string.Empty">All Folders</MudSelectItem>
+                @foreach (var folder in ConfiguredFolders) {
+                    <MudSelectItem Value="@folder">@Path.GetFileName(folder)</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        <div style="min-width: 150px;">
+            <MudSelect T="string" Value="_sortBy" ValueChanged="OnSortChanged" Label="Sort By" ShrinkLabel="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="background-color: #11111b; font-size: 0.8rem;">
+                <MudSelectItem Value="@("newest")">Newest First</MudSelectItem>
+                <MudSelectItem Value="@("oldest")">Oldest First</MudSelectItem>
+                <MudSelectItem Value="@("largest")">Largest Size</MudSelectItem>
+                <MudSelectItem Value="@("smallest")">Smallest Size</MudSelectItem>
+                <MudSelectItem Value="@("alphabetical")">Name (A-Z)</MudSelectItem>
+                <MudSelectItem Value="@("reverse_alphabetical")">Name (Z-A)</MudSelectItem>
+            </MudSelect>
+        </div>
+
+        <MudSpacer />
+
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            Showing <strong>@FilteredItems.Count</strong> of <strong>@AllItems.Count</strong> items
+        </MudText>
+    </div>
+</MudCard>
+
+<!-- Folder Hierarchy Navigation & View Mode Bar -->
+<MudCard Elevation="1" Class="pa-2 px-3 mb-3 d-flex align-center justify-space-between flex-wrap gap-2" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+    <div class="d-flex align-center gap-1 flex-wrap" style="flex: 1; min-width: 250px;">
+        @if (!_isFlatView) {
+            <MudTooltip Text="Up one folder level">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                               Size="Size.Small"
+                               Color="Color.Default"
+                               Disabled="@(_currentFolder == null)"
+                               OnClick="NavigateUp"
+                               Class="mr-1" />
+            </MudTooltip>
+
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Variant="@(_currentFolder == null ? Variant.Filled : Variant.Outlined)"
+                     Color="@(_currentFolder == null ? Color.Primary : Color.Default)"
+                     Icon="@Icons.Material.Filled.Home"
+                     OnClick="@(() => NavigateToFolder(null))"
+                     Style="cursor: pointer; font-weight: 600;">
+                All Libraries
+            </MudChip>
+
+            @foreach (var crumb in CurrentBreadcrumbs.Skip(1)) {
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Style="color: #585b70;" />
+                <MudChip T="string"
+                         Size="Size.Small"
+                         Variant="@(crumb.FullPath == _currentFolder ? Variant.Filled : Variant.Outlined)"
+                         Color="@(crumb.FullPath == _currentFolder ? Color.Tertiary : Color.Default)"
+                         OnClick="@(() => NavigateToFolder(crumb.FullPath))"
+                         Style="cursor: pointer; font-weight: 600;">
+                    @crumb.Name
+                </MudChip>
+            }
+        } else {
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.GridView" Size="Size.Small" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Style="font-weight: 700; color: #cdd6f4;">Flat Gallery View (All Media)</MudText>
+            </div>
+        }
+    </div>
+
+    <div class="d-flex align-center gap-2 flex-wrap">
+        @if (!_isFlatView) {
+            <MudCheckBox T="bool" @bind-Value="_includeSubfolders" @bind-Value:after="OnFilterChanged" Color="Color.Primary" Size="Size.Small" Label="Include Subfolders" Style="margin: 0;" />
+        }
+
+        <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined" Color="Color.Dark">
+            <MudButton StartIcon="@Icons.Material.Filled.FolderOpen"
+                       Variant="@(!_isFlatView ? Variant.Filled : Variant.Outlined)"
+                       Color="@(!_isFlatView ? Color.Primary : Color.Dark)"
+                       OnClick="@(() => SetFlatView(false))">
+                Hierarchy
+            </MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.GridView"
+                       Variant="@(_isFlatView ? Variant.Filled : Variant.Outlined)"
+                       Color="@(_isFlatView ? Color.Primary : Color.Dark)"
+                       OnClick="@(() => SetFlatView(true))">
+                Flat
+            </MudButton>
+        </MudButtonGroup>
+    </div>
+</MudCard>
+
+<!-- Subfolders Section (Folder Hierarchy Mode) -->
+@if (!_isFlatView && CurrentChildFolders.Count > 0) {
+    <div class="mb-4">
+        <div class="d-flex align-center gap-2 mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Color="Color.Tertiary" />
+            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">
+                @(_currentFolder == null ? "Libraries / Root Folders" : "Subfolders") (@CurrentChildFolders.Count)
+            </MudText>
+        </div>
+        <MudGrid Spacing="2">
+            @foreach (var folder in CurrentChildFolders) {
+                string folderThumb = GetFolderThumbnailSrc(folder);
+                <MudItem xs="12" sm="6" md="4" lg="3" key="@folder.FullPath">
+                    <div @onclick="@(() => NavigateToFolder(folder.FullPath))" style="cursor: pointer;">
+                        <MudCard Elevation="2" Class="showcase-card showcase-folder-card"
+                                 Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px; padding: 10px; display: flex; align-items: center; gap: 12px; transition: transform 0.15s, border-color 0.15s;">
+                            <div style="position: relative; width: 54px; height: 54px; min-width: 54px; border-radius: 6px; background-color: #11111b; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #313244;">
+                                @if (!string.IsNullOrWhiteSpace(folderThumb)) {
+                                    <img src="@folderThumb" alt="@folder.Name" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.85;" />
+                                    <div style="position: absolute; inset: 0; background: rgba(17, 17, 27, 0.4); display: flex; align-items: center; justify-content: center;">
+                                        <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Size="Size.Medium" />
+                                    </div>
+                                } else {
+                                    <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Tertiary" Size="Size.Large" />
+                                }
+                            </div>
+                            <div style="overflow: hidden; flex: 1;">
+                                <MudText Typo="Typo.body2" Style="font-weight: 700; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    @folder.Name
+                                </MudText>
+                                <div class="d-flex align-center gap-1 mt-1 flex-wrap">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default" Style="font-size: 0.65rem; height: 18px; padding: 0 4px;">
+                                        @folder.TotalMediaCount media
+                                    </MudChip>
+                                    @if (folder.SubfolderCount > 0) {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" Style="font-size: 0.65rem; height: 18px; padding: 0 4px;">
+                                            @folder.SubfolderCount subfolders
+                                        </MudChip>
+                                    }
+                                </div>
+                            </div>
+                            <div class="d-flex align-center gap-1">
+                                @if (_currentFolder == null) {
+                                    <span @onclick:stopPropagation="true">
+                                        <MudTooltip Text="Remove library from Showcase">
+                                            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline"
+                                                           Size="Size.Small"
+                                                           Color="Color.Error"
+                                                           OnClick="@((e) => ConfirmRemoveFolderAsync(folder.FullPath, folder.Name, e))"
+                                                           Style="padding: 4px;" />
+                                        </MudTooltip>
+                                    </span>
+                                }
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Secondary" />
+                            </div>
+                        </MudCard>
+                    </div>
+                </MudItem>
+            }
+        </MudGrid>
+    </div>
+}
+
+<!-- Media Items Header -->
+@if (!_isFlatView && CurrentChildFolders.Count > 0 && DisplayMediaItems.Count > 0) {
+    <div class="d-flex align-center gap-2 mb-2 mt-2">
+        <MudIcon Icon="@Icons.Material.Filled.PhotoLibrary" Size="Size.Small" Color="Color.Primary" />
+        <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">
+            Media in this Folder (@DisplayMediaItems.Count)
+        </MudText>
+    </div>
+}
+
+<!-- Media Gallery Grid -->
+@if (DisplayMediaItems.Count > 0) {
+    <MudGrid>
+        @foreach (var item in DisplayMediaItems) {
+            string thumb = GetThumbnailSrc(item);
+            <MudItem xs="12" sm="6" md="4" lg="3" key="@item.FilePath">
+                <div @onclick="@(() => OpenDetailModal(item))" style="cursor: pointer;">
+                    <MudCard Elevation="2"
+                             Class="showcase-card"
+                             Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px; overflow: hidden; transition: transform 0.15s, border-color 0.15s;">
+                    
+                    <!-- Media Thumbnail Area (Generated on the fly and cached in user settings folder) -->
+                    <div style="position: relative; height: 210px; background-color: #0b0b12; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                        @if (!string.IsNullOrEmpty(thumb)) {
+                            <img src="@thumb"
+                                 alt="@item.FileName"
+                                 loading="lazy"
+                                 style="max-height: 100%; max-width: 100%; object-fit: cover;" />
+                            @if (item.MediaType == ShowcaseMediaType.Video) {
+                                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.65); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+                                    <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Surface" Size="Size.Medium" />
+                                </div>
+                            } else if (item.MediaType == ShowcaseMediaType.Audio) {
+                                <div style="position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.7); border-radius: 4px; padding: 2px 6px;">
+                                    <MudIcon Icon="@Icons.Material.Filled.Audiotrack" Color="Color.Tertiary" Size="Size.Small" />
+                                </div>
+                            }
+                        } else {
+                            @if (item.MediaType == ShowcaseMediaType.Image) {
+                                <div class="d-flex flex-column align-center justify-center" style="width: 100%; height: 100%; opacity: 0.6;">
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                                    <span style="font-size: 0.65rem; color: #a6adc8; margin-top: 6px;">Rendering...</span>
+                                </div>
+                            } else if (item.MediaType == ShowcaseMediaType.Video) {
+                                <div class="d-flex flex-column align-center justify-center" style="width: 100%; height: 100%; opacity: 0.6;">
+                                    <MudIcon Icon="@Icons.Material.Filled.Videocam" Color="Color.Primary" Size="Size.Large" />
+                                    <span style="font-size: 0.65rem; color: #a6adc8; margin-top: 4px;">Video Preview</span>
+                                </div>
+                            } else if (item.MediaType == ShowcaseMediaType.Audio) {
+                                <div class="d-flex flex-column align-center justify-center pa-4 text-center">
+                                    <MudIcon Icon="@Icons.Material.Filled.Audiotrack" Color="Color.Primary" Style="font-size: 3.5rem; opacity: 0.85;" />
+                                    <span style="font-size: 0.75rem; color: #a6adc8; margin-top: 4px;">Audio Waveform</span>
+                                </div>
+                            }
+                        }
+
+                        <!-- Top-Left AI & Preview Badges -->
+                        <div style="position: absolute; top: 8px; left: 8px; display: flex; gap: 4px; align-items: center;">
+                            @if (item.IsAiGenerated) {
+                                <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small" Style="font-size: 0.68rem; height: 20px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.6);" Icon="@Icons.Material.Filled.AutoAwesome">
+                                    AI
+                                </MudChip>
+                            }
+                            @if (item.AssociatedLoraNames.Count > 0) {
+                                <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Size="Size.Small" Style="font-size: 0.68rem; height: 20px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.6);" Icon="@Icons.Material.Filled.BookmarkAdded">
+                                    Preview
+                                </MudChip>
+                            }
+                        </div>
+
+                        <!-- Top-Right Format & Favorite -->
+                        <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; align-items: center;">
+                            <MudChip T="string" Color="Color.Dark" Variant="Variant.Filled" Size="Size.Small" Style="font-size: 0.65rem; height: 20px; background-color: rgba(17,17,27,0.85);">
+                                @item.FileExtension.ToUpperInvariant().TrimStart('.')
+                            </MudChip>
+                            <MudIconButton Icon="@(item.IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)"
+                                           Color="@(item.IsFavorite ? Color.Error : Color.Default)"
+                                           Size="Size.Small"
+                                           Style="background-color: rgba(17,17,27,0.85); width: 24px; height: 24px; padding: 2px;"
+                                           OnClick="@((e) => ToggleFavoriteCard(item, e))" />
+                        </div>
+
+                        <!-- Bottom Duration / Size Overlay -->
+                        <div style="position: absolute; bottom: 6px; right: 8px; background: rgba(0,0,0,0.7); border-radius: 4px; padding: 2px 6px; font-size: 0.68rem; color: #cdd6f4;">
+                            @item.FormattedSize
+                        </div>
+                    </div>
+
+                    <!-- Card Body -->
+                    <MudCardContent Class="pa-3">
+                        <div class="d-flex align-center justify-space-between mb-1">
+                            <MudText Typo="Typo.caption" Style="font-weight: 700; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;">
+                                @item.FileName
+                            </MudText>
+                            <span style="font-size: 0.7rem; color: #6c7086;">
+                                @item.FolderName
+                            </span>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(item.Prompt)) {
+                            <MudText Typo="Typo.caption" Style="color: #a6adc8; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; font-size: 0.72rem; min-height: 28px;">
+                                @item.Prompt
+                            </MudText>
+                        } else {
+                            <span style="font-size: 0.72rem; color: #585b70; font-style: italic; min-height: 28px; display: block;">
+                                No prompt metadata embedded
+                            </span>
+                        }
+
+                        <div class="d-flex align-center justify-space-between mt-2 pt-1" style="border-top: 1px solid #313244; font-size: 0.68rem; color: #6c7086;">
+                            <span>@item.CreatedDate.ToLocalTime().ToString("MMM dd, yyyy")</span>
+                            <div class="d-flex align-center gap-1">
+                                @if (item.AssociatedLoraNames.Count > 0) {
+                                    <MudTooltip Text="@($"Assigned LoRA preview: {string.Join(", ", item.AssociatedLoraNames)}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.BookmarkAdded" Color="Color.Warning" Size="Size.Small" Style="font-size: 0.85rem;" />
+                                    </MudTooltip>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.ModelName)) {
+                                    <span style="color: #a6e3a1; overflow: hidden; text-overflow: ellipsis; max-width: 90px; white-space: nowrap;">
+                                        @item.ModelName
+                                    </span>
+                                }
+                            </div>
+                        </div>
+                    </MudCardContent>
+                </MudCard>
+                </div>
+            </MudItem>
+        }
+    </MudGrid>
+} else if (!_isFlatView && CurrentChildFolders.Count > 0) {
+    <MudCard Elevation="1" Style="background-color: #181825; border: 1px dashed #313244;" Class="pa-6 text-center my-3">
+        <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Secondary" Style="font-size: 2.5rem; opacity: 0.6;" Class="mb-2" />
+        <MudText Typo="Typo.body1" Style="font-weight: 600; color: #cdd6f4;">No media files directly in this folder level</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+            Browse into one of the subfolders above to view media, or enable <strong>"Include Subfolders"</strong> to see all nested files.
+        </MudText>
+    </MudCard>
+} else {
+    <MudCard Elevation="1" Style="background-color: #181825; border: 1px dashed #45475a;" Class="pa-8 text-center my-4">
+        <MudIcon Icon="@Icons.Material.Filled.PhotoLibrary" Color="Color.Secondary" Style="font-size: 4rem; opacity: 0.6;" Class="mb-3" />
+        <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">No Media Found in Showcase</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-4" Style="max-width: 520px; margin: 0 auto;">
+            Click <strong>"Add Folder"</strong> to select your ComfyUI output directory, AI-Toolkit outputs, or any folder containing generated images, videos, and audio.
+        </MudText>
+        <div class="d-flex gap-2 justify-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CreateNewFolder" OnClick="AddFolderAsync">
+                Add Folder / Library
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanLibraryAsync">
+                Scan Output Directories
+            </MudButton>
+        </div>
+    </MudCard>
+}
+
+<style>
+    .showcase-card:hover {
+        transform: translateY(-2px);
+        border-color: #89b4fa !important;
+    }
+    .showcase-folder-card:hover {
+        transform: translateY(-2px);
+        border-color: #cba6f7 !important;
+        background-color: #1e1e2e !important;
+    }
+</style>
+
+@code {
+    private string _searchQuery = string.Empty;
+    private ShowcaseMediaType? _selectedMediaType = null;
+    private bool _aiOnly = false;
+    private bool _favoritesOnly = false;
+    private string _selectedCategory = string.Empty;
+    private string _selectedTag = string.Empty;
+    private string _selectedFolder = string.Empty;
+    private string _sortBy = "newest";
+    private bool _showPluginsPanel = false;
+    private bool _showManageFoldersDialog = false;
+
+    // Folder Hierarchy Navigation
+    private string? _currentFolder = null;
+    private bool _isFlatView = false;
+    private bool _includeSubfolders = false;
+
+    // Background thumbnail generation tracking
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _pendingThumbs = new();
+
+    // Cached view lists for 60fps rendering without re-sorting on every scan tick
+    private List<ShowcaseMediaItem> _filteredItems = new();
+    private List<ShowcaseMediaItem> _displayMediaItems = new();
+    private List<ShowcaseFolderNode> _currentChildFolders = new();
+    private List<ShowcaseBreadcrumb> _currentBreadcrumbs = new();
+    private int _imageCount;
+    private int _videoCount;
+    private int _audioCount;
+    private int _aiGeneratedCount;
+    private int _favoriteCount;
+
+    private double ScanPercent => ShowcaseService.ScanTotalCount > 0 
+        ? (ShowcaseService.ScanCurrentIndex * 100.0 / ShowcaseService.ScanTotalCount) 
+        : 0;
+
+    private IReadOnlyList<ShowcaseMediaItem> AllItems => ShowcaseService.Items;
+    private List<string> ConfiguredFolders => ShowcaseService.GetConfiguredDirectories();
+    private List<ShowcaseFolderNode> CurrentChildFolders => _currentChildFolders;
+    private List<ShowcaseBreadcrumb> CurrentBreadcrumbs => _currentBreadcrumbs;
+    private List<ShowcaseMediaItem> FilteredItems => _filteredItems;
+    private List<ShowcaseMediaItem> DisplayMediaItems => _displayMediaItems;
+
+    private int ImageCount => _imageCount;
+    private int VideoCount => _videoCount;
+    private int AudioCount => _audioCount;
+    private int AiGeneratedCount => _aiGeneratedCount;
+    private int FavoriteCount => _favoriteCount;
+
+    private IReadOnlyList<PluginManifest> PostForgePlugins =>
+        PluginManager.Plugins.Where(p => p.IsEnabled && string.Equals(p.UiSlot, "PostForge", StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private void RebuildView() {
+        var all = AllItems;
+        _imageCount = all.Count(i => i.MediaType == ShowcaseMediaType.Image);
+        _videoCount = all.Count(i => i.MediaType == ShowcaseMediaType.Video);
+        _audioCount = all.Count(i => i.MediaType == ShowcaseMediaType.Audio);
+        _aiGeneratedCount = all.Count(i => i.IsAiGenerated);
+        _favoriteCount = all.Count(i => i.IsFavorite);
+
+        var query = all.AsEnumerable();
+
+        if (_selectedMediaType.HasValue) {
+            query = query.Where(i => i.MediaType == _selectedMediaType.Value);
+        }
+
+        if (_aiOnly) {
+            query = query.Where(i => i.IsAiGenerated);
+        }
+
+        if (_favoritesOnly) {
+            query = query.Where(i => i.IsFavorite);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedCategory)) {
+            query = query.Where(i => string.Equals(i.Category, _selectedCategory, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedTag)) {
+            query = query.Where(i => i.UserTags.Any(t => string.Equals(t, _selectedTag, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedFolder)) {
+            query = query.Where(i => i.FolderPath.StartsWith(_selectedFolder, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery)) {
+            string q = _searchQuery.Trim();
+            query = query.Where(i =>
+                i.FileName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                i.Prompt.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                i.ModelName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                i.UsedLoras.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                i.UserTags.Any(t => t.Contains(q, StringComparison.OrdinalIgnoreCase))
+            );
+        }
+
+        query = _sortBy switch {
+            "oldest" => query.OrderBy(i => i.CreatedDate),
+            "largest" => query.OrderByDescending(i => i.FileSizeBytes),
+            "smallest" => query.OrderBy(i => i.FileSizeBytes),
+            "alphabetical" => query.OrderBy(i => i.FileName),
+            "reverse_alphabetical" => query.OrderByDescending(i => i.FileName),
+            _ => query.OrderByDescending(i => i.CreatedDate)
+        };
+
+        _filteredItems = query.ToList();
+
+        if (_isFlatView) {
+            _displayMediaItems = _filteredItems;
+        } else if (_includeSubfolders) {
+            if (string.IsNullOrWhiteSpace(_currentFolder)) {
+                _displayMediaItems = _filteredItems;
+            } else {
+                string prefix = _currentFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                _displayMediaItems = _filteredItems.Where(i =>
+                    string.Equals(i.FolderPath, _currentFolder, StringComparison.OrdinalIgnoreCase) ||
+                    i.FolderPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+        } else {
+            if (string.IsNullOrWhiteSpace(_currentFolder)) {
+                _displayMediaItems = _filteredItems.Where(i =>
+                    ConfiguredFolders.Any(cf => string.Equals(i.FolderPath, cf, StringComparison.OrdinalIgnoreCase)) ||
+                    !ConfiguredFolders.Any(cf => i.FolderPath.StartsWith(cf, StringComparison.OrdinalIgnoreCase))).ToList();
+            } else {
+                _displayMediaItems = _filteredItems.Where(i => string.Equals(i.FolderPath, _currentFolder, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+        }
+
+        _currentChildFolders = ShowcaseService.GetChildFolders(_currentFolder, _filteredItems);
+        _currentBreadcrumbs = ShowcaseService.GetBreadcrumbs(_currentFolder);
+    }
+
+    private void SetMediaTypeFilter(ShowcaseMediaType? type) {
+        _selectedMediaType = type;
+        OnFilterChanged();
+    }
+
+    private void ToggleAiFilter() {
+        _aiOnly = !_aiOnly;
+        OnFilterChanged();
+    }
+
+    private void ToggleFavoritesFilter() {
+        _favoritesOnly = !_favoritesOnly;
+        OnFilterChanged();
+    }
+
+    private void SetFlatView(bool flat) {
+        _isFlatView = flat;
+        OnFilterChanged();
+    }
+
+    private void OnFilterChanged() {
+        RebuildView();
+        StateHasChanged();
+    }
+
+    protected override void OnInitialized() {
+        _sortBy = ShowcaseService.GetFolderSortOrder(_currentFolder);
+        RebuildView();
+        ShowcaseService.OnShowcaseUpdated += HandleShowcaseUpdated;
+        ShowcaseService.OnScanProgress += HandleScanProgress;
+        ShowcaseService.OnScanCompleted += HandleScanCompleted;
+        if (AllItems.Count == 0 && !ShowcaseService.IsScanning) {
+            _ = ShowcaseService.StartBackgroundScanAsync();
+        }
+    }
+
+    public void Dispose() {
+        ShowcaseService.OnShowcaseUpdated -= HandleShowcaseUpdated;
+        ShowcaseService.OnScanProgress -= HandleScanProgress;
+        ShowcaseService.OnScanCompleted -= HandleScanCompleted;
+    }
+
+    private void HandleShowcaseUpdated() {
+        InvokeAsync(() => {
+            RebuildView();
+            StateHasChanged();
+        });
+    }
+
+    private void HandleScanProgress(string file, int current, int total) {
+        // Fast progress-only render pass: does NOT re-filter or re-sort thousands of items
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleScanCompleted() {
+        InvokeAsync(() => {
+            RebuildView();
+            Snackbar.Add($"Scan complete. Cataloged {AllItems.Count} media items.", Severity.Success);
+            StateHasChanged();
+        });
+    }
+
+    private async Task OnSortChanged(string newSort) {
+        _sortBy = newSort;
+        await ShowcaseService.SetFolderSortOrderAsync(_currentFolder, newSort);
+        OnFilterChanged();
+    }
+
+    private string GetThumbnailSrc(ShowcaseMediaItem item) {
+        if (string.IsNullOrWhiteSpace(item.FilePath)) {
+            return string.Empty;
+        }
+
+        string? cached = ThumbnailService.GetCachedDataUri(item.FilePath);
+        if (!string.IsNullOrEmpty(cached)) {
+            return cached;
+        }
+
+        // Trigger on-the-fly generation in background
+        _ = RequestThumbnailAsync(item);
+        return string.Empty;
+    }
+
+    private async Task RequestThumbnailAsync(ShowcaseMediaItem item) {
+        if (_pendingThumbs.TryAdd(item.FilePath, 0)) {
+            try {
+                string dataUri = await ThumbnailService.GetOrCreateThumbnailDataUriAsync(item);
+                if (!string.IsNullOrEmpty(dataUri)) {
+                    await InvokeAsync(StateHasChanged);
+                }
+            } catch {
+                // Ignore generation exceptions
+            } finally {
+                _pendingThumbs.TryRemove(item.FilePath, out _);
+            }
+        }
+    }
+
+    private string GetFolderThumbnailSrc(ShowcaseFolderNode folder) {
+        if (string.IsNullOrWhiteSpace(folder.PreviewFilePath)) {
+            return string.Empty;
+        }
+
+        string? cached = ThumbnailService.GetCachedDataUri(folder.PreviewFilePath);
+        if (!string.IsNullOrEmpty(cached)) {
+            return cached;
+        }
+
+        var item = AllItems.FirstOrDefault(i => string.Equals(i.FilePath, folder.PreviewFilePath, StringComparison.OrdinalIgnoreCase));
+        if (item != null) {
+            _ = RequestThumbnailAsync(item);
+        }
+
+        return string.Empty;
+    }
+
+    private void NavigateToFolder(string? folder) {
+        _currentFolder = folder;
+        _sortBy = ShowcaseService.GetFolderSortOrder(_currentFolder);
+        if (!string.IsNullOrWhiteSpace(folder) && ConfiguredFolders.Any(cf => folder.StartsWith(cf, StringComparison.OrdinalIgnoreCase))) {
+            _selectedFolder = ConfiguredFolders.FirstOrDefault(cf => folder.StartsWith(cf, StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+        }
+        OnFilterChanged();
+    }
+
+    private void NavigateUp() {
+        if (_currentFolder == null) {
+            return;
+        }
+        var crumbs = CurrentBreadcrumbs;
+        if (crumbs.Count <= 2) {
+            _currentFolder = null;
+        } else {
+            _currentFolder = crumbs[crumbs.Count - 2].FullPath;
+        }
+        _sortBy = ShowcaseService.GetFolderSortOrder(_currentFolder);
+        OnFilterChanged();
+    }
+
+    private async Task AddFolderAsync() {
+        try {
+            string? folder = await FileDialogService.PickFolderAsync();
+            if (!string.IsNullOrWhiteSpace(folder)) {
+                Snackbar.Add($"Adding folder '{Path.GetFileName(folder)}'...", Severity.Info);
+                await ShowcaseService.AddFolderAsync(folder);
+                Snackbar.Add($"Folder added to Showcase Library.", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Could not add folder: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RemoveFolderAsync(string folderPath) {
+        try {
+            string folderName = Path.GetFileName(folderPath);
+            await ShowcaseService.RemoveFolderAsync(folderPath);
+            Snackbar.Add($"Removed '{folderName}' from Showcase libraries.", Severity.Info);
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Could not remove folder: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ConfirmRemoveFolderAsync(string folderPath, string folderName, MouseEventArgs e) {
+        await RemoveFolderAsync(folderPath);
+    }
+
+    private void OpenFolderInExplorer(string folderPath) {
+        if (Directory.Exists(folderPath)) {
+            try {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                    FileName = folderPath,
+                    UseShellExecute = true
+                });
+            } catch (Exception ex) {
+                Snackbar.Add($"Could not open folder in Explorer: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private void ScanLibraryAsync() {
+        if (ShowcaseService.IsScanning) {
+            return;
+        }
+
+        _ = ShowcaseService.StartBackgroundScanAsync();
+        Snackbar.Add("Background media scan started...", Severity.Info);
+    }
+
+    private void CancelScan() {
+        ShowcaseService.CancelScan();
+        Snackbar.Add("Cancelling media scan...", Severity.Warning);
+    }
+
+    private async Task OpenDetailModal(ShowcaseMediaItem item) {
+        var parameters = new DialogParameters { ["Item"] = item };
+        var options = new DialogOptions {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            NoHeader = false
+        };
+
+        var dialog = await DialogService.ShowAsync<ShowcaseDetailDialog>(item.FileName, parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled) {
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleFavoriteCard(ShowcaseMediaItem item, MouseEventArgs e) {
+        await ShowcaseService.ToggleFavoriteAsync(item.FilePath);
+        Snackbar.Add(item.IsFavorite ? "Added to favorites." : "Removed from favorites.", Severity.Info);
+    }
+
+    private string GetPluginIcon(PluginManifest manifest) {
+        if (!string.IsNullOrWhiteSpace(manifest.Icon)) {
+            return manifest.Icon switch {
+                "PhotoLibrary" => Icons.Material.Filled.PhotoLibrary,
+                "Collections" => Icons.Material.Filled.Collections,
+                "AutoAwesome" => Icons.Material.Filled.AutoAwesome,
+                "Insights" => Icons.Material.Filled.Insights,
+                _ => Icons.Material.Filled.Palette
+            };
+        }
+        return Icons.Material.Filled.PhotoLibrary;
+    }
+}
+

@@ -1,0 +1,13 @@
+{
+  "id": "konachan-scraper",
+  "name": "Konachan Anime Wallpapers",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting widescreen and high-resolution anime wallpaper art from Konachan.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Konachan Scraper",
+  "icon": "Wallpaper"
+}

@@ -715,6 +715,21 @@
                 </MudItem>
 
                 <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Saved Prompts Directory</MudText>
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.SavedPromptsDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Defaults to ~/.loramancer/saved_prompts (compatible with ModusFlow)" FullWidth="true" HelperText="Directory where saved prompt JSON files are stored. Defaults to your user settings directory." />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseSavedPromptsFolderAsync">
+                            Browse...
+                        </MudButton>
+                        @if (!string.IsNullOrWhiteSpace(_settings.SavedPromptsDirectory)) {
+                            <MudTooltip Text="Reset to Default">
+                                <MudIconButton Icon="@Icons.Material.Filled.Clear" Color="Color.Default" OnClick="@(() => _settings.SavedPromptsDirectory = string.Empty)" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12">
                     <MudSelect @bind-Value="_settings.StartupSection" Label="Startup Section (Opens on Load)" Variant="Variant.Outlined" HelperText="Choose which studio section opens when the application starts up. Defaults to Section 1 (Curate &amp; Caption).">
                         <MudSelectItem Value="@("curate")">1. Curate &amp; Caption Studio (/curate)</MudSelectItem>
                         <MudSelectItem Value="@("training")">2. Train &amp; Forge Studio (/training)</MudSelectItem>
@@ -1856,6 +1871,13 @@
         string? folder = await FileDialogService.PickFolderAsync("Select Default Output Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _settings.DefaultOutputDirectory = folder;
+        }
+    }
+
+    private async Task BrowseSavedPromptsFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Saved Prompts Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _settings.SavedPromptsDirectory = folder;
         }
     }
 

@@ -1,0 +1,32 @@
+{
+  "id": "danbooru-scraper",
+  "name": "Danbooru Authenticated Archive",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting full-rating anime and character illustrations from Danbooru using user credentials.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Danbooru Scraper",
+  "icon": "FilterVintage",
+  "isEnabled": false,
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Danbooru API Key",
+      "type": "password",
+      "description": "Your Danbooru API key generated from your Danbooru user profile.",
+      "defaultValue": "",
+      "isRequired": true
+    },
+    {
+      "key": "username",
+      "label": "Danbooru Username",
+      "type": "text",
+      "description": "Your Danbooru account login name.",
+      "defaultValue": "",
+      "isRequired": true
+    }
+  ]
+}

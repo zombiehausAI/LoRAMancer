@@ -10,7 +10,11 @@ public sealed class SamplePlugin : ILoRAMancerPlugin {
         Description = "Sample C# plugin analyzing donor learning rates and proposing AMD memory safe adjustments.",
         Author = "LoRAMancer Team",
         PluginType = "CSharp",
-        Capabilities = new[] { "diagnostics", "hyperparameters" }
+        Capabilities = new[] { "diagnostics", "hyperparameters" },
+        UiSlot = "StudioWorkshop",
+        NavLabel = "Optimizer Diagnostics",
+        Icon = "Speed",
+        UiType = "Command"
     };
 
     public Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken) {

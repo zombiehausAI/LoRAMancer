@@ -1,0 +1,13 @@
+{
+  "id": "civitai-scraper",
+  "name": "Civitai Community Showcase",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting top community generation showcase images and prompt metadata from the Civitai API.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Civitai Showcase",
+  "icon": "Brush"
+}

@@ -1,0 +1,199 @@
+@page "/plugins/host/{PluginId}"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject PluginManagerService PluginManager
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+@if (_plugin == null) {
+    <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="my-4">
+        Plugin with ID '<strong>@PluginId</strong>' was not found or is not registered.
+    </MudAlert>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="plugins" StartIcon="@Icons.Material.Filled.ArrowBack">
+        Return to Plugin Manager
+    </MudButton>
+} else {
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-3">
+        <div class="d-flex align-center gap-3">
+            <MudAvatar Color="Color.Primary" Variant="Variant.Filled" Size="Size.Medium">
+                <MudIcon Icon="@GetPluginIcon(_plugin)" />
+            </MudAvatar>
+            <div>
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cdd6f4;">@(!string.IsNullOrWhiteSpace(_plugin.NavLabel) ? _plugin.NavLabel : _plugin.Name)</MudText>
+                    <MudChip T="string" Color="Color.Dark" Size="Size.Small" Variant="Variant.Filled">v@_plugin.Version</MudChip>
+                    @if (IsRunning) {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">
+                            Online (@_serverUrl)
+                        </MudChip>
+                    } else {
+                        <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.PauseCircle">
+                            Offline
+                        </MudChip>
+                    }
+                </div>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    @_plugin.Description
+                </MudText>
+            </div>
+        </div>
+
+        <div class="d-flex align-center gap-2 flex-wrap">
+            @if (IsRunning) {
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInBrowser" OnClick="OpenInBrowser">
+                    Open in Browser
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadIframe">
+                    Reload Frame
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Stop" OnClick="StopServer" Disabled="_isBusy">
+                    Stop Server
+                </MudButton>
+            } else {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="StartServerAsync" Disabled="_isBusy">
+                    @if (_isBusy) {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                        <span>Starting...</span>
+                    } else {
+                        <span>Launch Server</span>
+                    }
+                </MudButton>
+            }
+            <MudTooltip Text="Plugin Settings">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Default" Size="Size.Small" Href="plugins" />
+            </MudTooltip>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage)) {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mb-3" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = string.Empty)">
+            @_errorMessage
+        </MudAlert>
+    }
+
+    @if (IsRunning && !string.IsNullOrWhiteSpace(_serverUrl)) {
+        <div style="width: 100%; height: calc(100vh - 190px); border-radius: 8px; overflow: hidden; background-color: #1e1e2e; border: 1px solid #313244;">
+            <iframe key="@_iframeKey"
+                    src="@_serverUrl"
+                    style="width: 100%; height: 100%; border: none;"
+                    title="@_plugin.Name">
+            </iframe>
+        </div>
+    } else {
+        <MudCard Elevation="2" Style="background-color: #181825; border: 1px solid #313244; min-height: 400px;" Class="d-flex flex-column align-center justify-center pa-8 text-center">
+            <MudIcon Icon="@GetPluginIcon(_plugin)" Color="Color.Primary" Style="font-size: 4rem; opacity: 0.8;" Class="mb-3" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">@_plugin.Name is Ready to Launch</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1 mb-4" Style="max-width: 550px;">
+                @_plugin.Description
+            </MudText>
+            <div class="d-flex gap-2 align-center">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Medium" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="StartServerAsync" Disabled="_isBusy">
+                    @if (_isBusy) {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                        <span>Launching...</span>
+                    } else {
+                        <span>Start Embedded Workspace</span>
+                    }
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Medium" Href="plugins">
+                    Manage Dependencies
+                </MudButton>
+            </div>
+            @if (!_plugin.HasDedicatedVenv && _plugin.PluginType == "Python") {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Text" Class="mt-4" Style="max-width: 600px;">
+                    Notice: This Python plugin has not provisioned a dedicated .venv yet. You can set it up in the Plugin Manager.
+                </MudAlert>
+            }
+        </MudCard>
+    }
+}
+
+@code {
+    [Parameter]
+    public string PluginId { get; set; } = string.Empty;
+
+    private PluginManifest? _plugin;
+    private string? _serverUrl;
+    private bool _isBusy;
+    private string _errorMessage = string.Empty;
+    private string _iframeKey = Guid.NewGuid().ToString("N");
+
+    private bool IsRunning => !string.IsNullOrWhiteSpace(PluginId) && PluginManager.IsWebServerRunning(PluginId);
+
+    protected override async Task OnParametersSetAsync() {
+        _errorMessage = string.Empty;
+        _plugin = PluginManager.Plugins.FirstOrDefault(p => string.Equals(p.Id, PluginId, StringComparison.OrdinalIgnoreCase));
+
+        if (_plugin != null) {
+            _serverUrl = PluginManager.GetWebServerUrl(_plugin.Id);
+            if (!IsRunning && _plugin.IsEnabled && _plugin.UiType == "EmbeddedWeb") {
+                await StartServerAsync();
+            }
+        }
+    }
+
+    private async Task StartServerAsync() {
+        if (_plugin == null || _isBusy) {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = string.Empty;
+
+        try {
+            _serverUrl = await PluginManager.StartPluginServerAsync(_plugin.Id);
+            _iframeKey = Guid.NewGuid().ToString("N");
+            Snackbar.Add($"{_plugin.Name} started at {_serverUrl}", Severity.Success);
+        } catch (Exception ex) {
+            _errorMessage = $"Failed to start plugin server: {ex.Message}";
+            Snackbar.Add(_errorMessage, Severity.Error);
+        } finally {
+            _isBusy = false;
+        }
+    }
+
+    private void StopServer() {
+        if (_plugin == null) {
+            return;
+        }
+
+        PluginManager.StopPluginServer(_plugin.Id);
+        _serverUrl = null;
+        Snackbar.Add($"{_plugin.Name} server stopped.", Severity.Info);
+    }
+
+    private void ReloadIframe() {
+        _iframeKey = Guid.NewGuid().ToString("N");
+        Snackbar.Add("Workspace frame reloaded.", Severity.Normal);
+    }
+
+    private void OpenInBrowser() {
+        if (!string.IsNullOrWhiteSpace(_serverUrl)) {
+            try {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                    FileName = _serverUrl,
+                    UseShellExecute = true
+                });
+            } catch (Exception ex) {
+                Snackbar.Add($"Could not open external browser: {ex.Message}", Severity.Warning);
+            }
+        }
+    }
+
+    private string GetPluginIcon(PluginManifest manifest) {
+        if (!string.IsNullOrWhiteSpace(manifest.Icon)) {
+            return manifest.Icon switch {
+                "TravelExplore" => Icons.Material.Filled.TravelExplore,
+                "AutoAwesome" => Icons.Material.Filled.AutoAwesome,
+                "CloudSync" => Icons.Material.Filled.CloudSync,
+                "Speed" => Icons.Material.Filled.Speed,
+                "FilterAlt" => Icons.Material.Filled.FilterAlt,
+                "Collections" => Icons.Material.Filled.Collections,
+                "PhotoLibrary" => Icons.Material.Filled.PhotoLibrary,
+                "Palette" => Icons.Material.Filled.Palette,
+                _ => Icons.Material.Filled.Extension
+            };
+        }
+        return Icons.Material.Filled.Extension;
+    }
+}

@@ -5,5 +5,9 @@
   "description": "Python plugin running inside dedicated isolated .venv to sanitize tag sets and trigger words.",
   "author": "LoRAMancer Team",
   "entryPoint": "plugin.py",
-  "pythonVersion": "3.12"
+  "pythonVersion": "3.12",
+  "uiSlot": "None",
+  "uiType": "Command",
+  "navLabel": "Caption Sanitizer",
+  "icon": "FilterAlt"
 }

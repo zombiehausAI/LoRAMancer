@@ -1,0 +1,24 @@
+{
+  "id": "pexels-scraper",
+  "name": "Pexels 4K Photography",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting ultra high-resolution, free-to-use photography and real-world reference imagery from Pexels API.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Pexels Scraper",
+  "icon": "CameraAlt",
+  "isEnabled": false,
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Pexels API Key",
+      "type": "password",
+      "description": "Your free personal API key from pexels.com/api.",
+      "defaultValue": "",
+      "isRequired": true
+    }
+  ]
+}

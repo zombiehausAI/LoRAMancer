@@ -8,6 +8,7 @@ public sealed class LoraLibraryServiceTests {
     [Fact]
     public void FindLocalThumbnail_FindsMatchingPreviewImage() {
         string tempDir = Path.Combine(Path.GetTempPath(), $"thumb_test_{Guid.NewGuid():N}");
+        string tempSettingsPath = Path.Combine(Path.GetTempPath(), $"settings_{Guid.NewGuid():N}.json");
         Directory.CreateDirectory(tempDir);
 
         try {
@@ -22,7 +23,7 @@ public sealed class LoraLibraryServiceTests {
                 FilePath = loraPath
             };
 
-            SettingsService settings = new(null, Path.Combine(tempDir, "settings.json"));
+            SettingsService settings = new(null, tempSettingsPath);
             CivitaiService civitai = new(settings);
             SafeTensorsMetadataReader reader = new();
             LoraLibraryService service = new(reader, civitai, settings);
@@ -33,7 +34,23 @@ public sealed class LoraLibraryServiceTests {
             Assert.Equal(previewPath, meta.ThumbnailPath);
         } finally {
             if (Directory.Exists(tempDir)) {
-                Directory.Delete(tempDir, recursive: true);
+                for (int attempt = 0; attempt < 5; attempt++) {
+                    try {
+                        Directory.Delete(tempDir, recursive: true);
+                        break;
+                    } catch (IOException) {
+                        Thread.Sleep(50);
+                    } catch (UnauthorizedAccessException) {
+                        Thread.Sleep(50);
+                    }
+                }
+            }
+            if (File.Exists(tempSettingsPath)) {
+                try {
+                    File.Delete(tempSettingsPath);
+                } catch {
+                    // Suppress transient lock on temp settings file
+                }
             }
         }
     }
@@ -68,7 +85,16 @@ public sealed class LoraLibraryServiceTests {
             Assert.Empty(streamed);
         } finally {
             if (Directory.Exists(tempDir)) {
-                Directory.Delete(tempDir, recursive: true);
+                for (int attempt = 0; attempt < 5; attempt++) {
+                    try {
+                        Directory.Delete(tempDir, recursive: true);
+                        break;
+                    } catch (IOException) {
+                        Thread.Sleep(50);
+                    } catch (UnauthorizedAccessException) {
+                        Thread.Sleep(50);
+                    }
+                }
             }
         }
     }

@@ -1,0 +1,13 @@
+{
+  "id": "e621-scraper",
+  "name": "e621 Anthro & Creature Art",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting anthropomorphic, creature, and fantasy character art from e621.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "e621 Scraper",
+  "icon": "Pets"
+}

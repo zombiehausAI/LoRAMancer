@@ -1,4 +1,7 @@
+@implements IDisposable
 @inject IDialogService DialogService
+@inject LoRAMancer.App.Services.PluginManagerService PluginManager
+@inject NavigationManager Navigation
 
 <MudNavMenu Class="pt-2">
     <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Studio Pipeline</MudText>
@@ -17,23 +20,63 @@
     <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderSpecial">
         5. Library &amp; Vault
     </MudNavLink>
+    @foreach (var plugin in PluginManager.GetPluginsForSection("Studio Pipeline")) {
+        @if (plugin.GetIsModal()) {
+            <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        } else {
+            <MudNavLink Href="@($"plugins/host/{plugin.Id}")" Match="NavLinkMatch.Prefix" Icon="@GetPluginIcon(plugin)">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        }
+    }
 
     <MudDivider Class="my-3" Style="border-color: #313244;" />
 
     <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Studio Workshop</MudText>
+    <MudNavLink Href="harvester" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.TravelExplore">
+        Image Harvester
+    </MudNavLink>
     <MudNavLink Href="chop-shop" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Handyman">
         LoRA Chop-Shop
     </MudNavLink>
     <MudNavLink Href="history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HistoryEdu">
         Training History
     </MudNavLink>
+    @foreach (var plugin in PluginManager.GetPluginsForSection("Studio Workshop")) {
+        @if (plugin.GetIsModal()) {
+            <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        } else {
+            <MudNavLink Href="@($"plugins/host/{plugin.Id}")" Match="NavLinkMatch.Prefix" Icon="@GetPluginIcon(plugin)">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        }
+    }
+
+    <MudDivider Class="my-3" Style="border-color: #313244;" />
+
+    <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Post-Forge Showcase</MudText>
+    <MudNavLink Href="post-forge" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.PhotoLibrary">
+        Generation Gallery
+    </MudNavLink>
+    @foreach (var plugin in PluginManager.GetPluginsForSection("Post-Forge Showcase")) {
+        @if (plugin.GetIsModal()) {
+            <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        } else {
+            <MudNavLink Href="@($"plugins/host/{plugin.Id}")" Match="NavLinkMatch.Prefix" Icon="@GetPluginIcon(plugin)">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        }
+    }
 
     <MudDivider Class="my-3" Style="border-color: #313244;" />
 
     <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Studio Modal Tools</MudText>
-    <MudNavLink Icon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
-        Ollama Vision Tagger
-    </MudNavLink>
     <MudNavLink Icon="@Icons.Material.Filled.ContentCut" OnClick="OpenLoraSurgeryAsync">
         LoRA Surgery &amp; Merger
     </MudNavLink>
@@ -46,6 +89,27 @@
     <MudNavLink Icon="@Icons.Material.Filled.Insights" OnClick="OpenLoraBenchmarkAsync">
         AI Benchmark Matrix
     </MudNavLink>
+    @foreach (var plugin in PluginManager.GetPluginsForSection("Studio Modal Tools")) {
+        <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+            @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+        </MudNavLink>
+    }
+
+    @foreach (var customSection in PluginManager.GetCustomPluginSections()) {
+        <MudDivider Class="my-3" Style="border-color: #313244;" />
+        <MudText Typo="Typo.caption" Class="px-4 text-secondary mb-1" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">@customSection</MudText>
+        @foreach (var plugin in PluginManager.GetPluginsForSection(customSection)) {
+            @if (plugin.GetIsModal()) {
+                <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+                    @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+                </MudNavLink>
+            } else {
+                <MudNavLink Href="@($"plugins/host/{plugin.Id}")" Match="NavLinkMatch.Prefix" Icon="@GetPluginIcon(plugin)">
+                    @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+                </MudNavLink>
+            }
+        }
+    }
 
     <MudDivider Class="my-3" Style="border-color: #313244;" />
 
@@ -65,6 +129,17 @@
     <MudNavLink Href="docs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MenuBook">
         Documentation
     </MudNavLink>
+    @foreach (var plugin in PluginManager.GetPluginsForSection("Subsystems")) {
+        @if (plugin.GetIsModal()) {
+            <MudNavLink Icon="@GetPluginIcon(plugin)" OnClick="@(() => OpenModalPlugin(plugin))">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        } else {
+            <MudNavLink Href="@($"plugins/host/{plugin.Id}")" Match="NavLinkMatch.Prefix" Icon="@GetPluginIcon(plugin)">
+                @(!string.IsNullOrWhiteSpace(plugin.NavLabel) ? plugin.NavLabel : plugin.Name)
+            </MudNavLink>
+        }
+    }
 </MudNavMenu>
 
 @code {
@@ -101,5 +176,63 @@
     private async Task OpenLoraBenchmarkAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
         await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.LoraBenchmarkDialog>("AI Benchmark Matrix & Sweet Spot Finder", options);
+    }
+
+    protected override async Task OnInitializedAsync() {
+        PluginManager.OnPluginsUpdated += OnPluginsChanged;
+        if (PluginManager.Plugins.Count == 0) {
+            await PluginManager.DiscoverAndInitializePluginsAsync();
+        }
+    }
+
+    private void OnPluginsChanged() {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() {
+        PluginManager.OnPluginsUpdated -= OnPluginsChanged;
+    }
+
+    private void OpenModalPlugin(LoRAMancer.App.Models.PluginManifest plugin) {
+        if (plugin.Id == "ollama-lora-tagger") {
+            _ = OpenOllamaTaggerAsync();
+            return;
+        }
+
+        if (plugin.UiType == "EmbeddedWeb" || plugin.WebPort.HasValue || !string.IsNullOrWhiteSpace(plugin.WebUrl)) {
+            Navigation.NavigateTo($"plugins/host/{plugin.Id}");
+        } else {
+            Navigation.NavigateTo($"plugins/host/{plugin.Id}");
+        }
+    }
+
+    private string GetPluginIcon(LoRAMancer.App.Models.PluginManifest manifest) {
+        if (!string.IsNullOrWhiteSpace(manifest.Icon)) {
+            return manifest.Icon.ToLowerInvariant() switch {
+                "travelexplore" or "explore" => Icons.Material.Filled.TravelExplore,
+                "autoawesome" or "sparkles" or "magic" => Icons.Material.Filled.AutoAwesome,
+                "cloudsync" or "sync" => Icons.Material.Filled.CloudSync,
+                "speed" or "fast" => Icons.Material.Filled.Speed,
+                "filteralt" or "filter" => Icons.Material.Filled.FilterAlt,
+                "photolibrary" or "gallery" => Icons.Material.Filled.PhotoLibrary,
+                "collections" or "images" => Icons.Material.Filled.Collections,
+                "palette" or "art" => Icons.Material.Filled.Palette,
+                "camera" or "photocamera" => Icons.Material.Filled.PhotoCamera,
+                "image" => Icons.Material.Filled.Image,
+                "videolibrary" or "video" => Icons.Material.Filled.VideoLibrary,
+                "smarttoy" or "bot" or "ai" => Icons.Material.Filled.SmartToy,
+                "terminal" or "cli" => Icons.Material.Filled.Terminal,
+                "biotech" or "science" or "dna" => Icons.Material.Filled.Biotech,
+                "handyman" or "build" or "tools" => Icons.Material.Filled.Build,
+                "search" or "find" => Icons.Material.Filled.Search,
+                "psychology" or "brain" => Icons.Material.Filled.Psychology,
+                "bolt" or "lightning" => Icons.Material.Filled.Bolt,
+                "dataset" or "storage" => Icons.Material.Filled.Storage,
+                "viewcarousel" or "carousel" => Icons.Material.Filled.ViewCarousel,
+                "download" => Icons.Material.Filled.Download,
+                _ => Icons.Material.Filled.Extension
+            };
+        }
+        return Icons.Material.Filled.Extension;
     }
 }

@@ -82,6 +82,11 @@ public static class MauiProgram {
         builder.Services.AddSingleton<LoraChopShopService>();
         builder.Services.AddSingleton<StudioSessionService>();
         builder.Services.AddSingleton<SystemTrayService>();
+        builder.Services.AddSingleton<PostForgeShowcaseService>();
+        builder.Services.AddSingleton<ShowcaseThumbnailService>();
+        builder.Services.AddSingleton<ModusFlowPromptService>();
+        builder.Services.AddSingleton<TrainingRecipeService>();
+        builder.Services.AddSingleton<ImageHarvesterService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

@@ -1,0 +1,32 @@
+{
+  "id": "gelbooru-scraper",
+  "name": "Gelbooru Authenticated Archive",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting anime, manga, and character art from Gelbooru using user credentials.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Gelbooru Scraper",
+  "icon": "Collections",
+  "isEnabled": false,
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Gelbooru API Key",
+      "type": "password",
+      "description": "Your personal API key from Gelbooru account options.",
+      "defaultValue": "",
+      "isRequired": true
+    },
+    {
+      "key": "userId",
+      "label": "Gelbooru User ID",
+      "type": "text",
+      "description": "Your numerical Gelbooru User ID.",
+      "defaultValue": "",
+      "isRequired": true
+    }
+  ]
+}

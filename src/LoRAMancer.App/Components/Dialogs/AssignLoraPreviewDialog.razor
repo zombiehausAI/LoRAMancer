@@ -1,0 +1,282 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject ISnackbar Snackbar
+@inject PostForgeShowcaseService ShowcaseService
+@inject ShowcaseThumbnailService ThumbnailService
+@inject LoraLibraryService LibraryService
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.CollectionsBookmark" Color="Color.Secondary" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700; color: #cdd6f4;">Assign Image as LoRA Preview</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3" style="max-height: 70vh; overflow-y: auto;">
+            <!-- Media Summary Banner -->
+            <div class="d-flex align-center gap-3 pa-3 rounded-lg" style="background-color: #181825; border: 1px solid #313244;">
+                @if (!string.IsNullOrEmpty(_previewDataUri)) {
+                    <img src="@_previewDataUri"
+                         alt="@MediaItem.FileName"
+                         style="width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a;" />
+                } else {
+                    <div style="width: 72px; height: 72px; border-radius: 6px; background-color: #11111b; display: flex; align-items: center; justify-content: center; border: 1px solid #45475a;">
+                        <MudIcon Icon="@Icons.Material.Filled.Image" Color="Color.Primary" Size="Size.Medium" />
+                    </div>
+                }
+                <div class="d-flex flex-column" style="overflow: hidden;">
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;" Class="text-truncate">@MediaItem.FileName</MudText>
+                    <MudText Typo="Typo.caption" Style="color: #a6adc8;">
+                        @MediaItem.FormattedSize &bull; @MediaItem.FileExtension.ToUpperInvariant() &bull; @(MediaItem.Width.HasValue && MediaItem.Height.HasValue ? $"{MediaItem.Width}x{MediaItem.Height}" : "Image")
+                    </MudText>
+                    @if (MediaItem.AssociatedLoraNames.Count > 0) {
+                        <div class="d-flex align-center gap-1 mt-1 flex-wrap">
+                            <MudText Typo="Typo.caption" Style="color: #fab387; font-weight: 600;">Currently assigned to:</MudText>
+                            @foreach (var lora in MediaItem.AssociatedLoraNames) {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Style="font-size: 0.72rem; height: 20px;">
+                                    @lora
+                                </MudChip>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Quick Selection: Detected in Recipe -->
+            @if (_detectedLoras.Count > 0) {
+                <div class="pa-3 rounded-lg" style="background-color: #1e1e2e; border: 1px solid #cba6f7;">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Tertiary" Size="Size.Small" />
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cba6f7;">
+                                Detected in Generation Recipe (@_detectedLoras.Count)
+                            </MudText>
+                        </div>
+                        <MudButton Size="Size.Small"
+                                   Variant="Variant.Text"
+                                   Color="Color.Tertiary"
+                                   OnClick="SelectAllDetected">
+                            Select All Detected
+                        </MudButton>
+                    </div>
+
+                    <div class="d-flex flex-column gap-1">
+                        @foreach (var lora in _detectedLoras) {
+                            bool isSelected = _selectedLoraPaths.Contains(lora.FilePath);
+                            <div class="d-flex align-center justify-space-between pa-2 rounded cursor-pointer"
+                                 style="background-color: @(isSelected ? "#2b2a4a" : "#181825"); border: 1px solid @(isSelected ? "#cba6f7" : "#313244");"
+                                 @onclick="@(() => ToggleSelection(lora.FilePath))">
+                                <div class="d-flex align-center gap-2" style="overflow: hidden;">
+                                    <MudCheckBox T="bool"
+                                                 Value="@isSelected"
+                                                 ValueChanged="@((bool val) => SetSelection(lora.FilePath, val))"
+                                                 Color="Color.Tertiary"
+                                                 StopClickPropagation="true" />
+                                    <div class="d-flex flex-column text-truncate">
+                                        <MudText Typo="Typo.body2" Style="font-weight: 600; color: #cdd6f4;">
+                                            @GetLoraDisplayName(lora)
+                                        </MudText>
+                                        <MudText Typo="Typo.caption" Style="color: #6c7086;">
+                                            @lora.EffectiveBaseModel &bull; @lora.FormattedSize
+                                        </MudText>
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(lora.ThumbnailPath)) {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Style="font-size: 0.7rem;">
+                                        Has preview
+                                    </MudChip>
+                                } else {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" Style="font-size: 0.7rem;">
+                                        No preview
+                                    </MudChip>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <!-- All LoRAs Library Browser -->
+            <div class="pa-3 rounded-lg" style="background-color: #181825; border: 1px solid #313244;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cdd6f4;">
+                        Select from LoRA Library (@_allLoras.Count total)
+                    </MudText>
+                    <MudText Typo="Typo.caption" Style="color: #89b4fa; font-weight: 600;">
+                        @_selectedLoraPaths.Count selected
+                    </MudText>
+                </div>
+
+                <MudTextField @bind-Value="_searchQuery"
+                              Placeholder="Filter LoRAs by name or base model..."
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true"
+                              Clearable="true"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Class="mb-2" />
+
+                <div class="d-flex flex-column gap-1" style="max-height: 240px; overflow-y: auto;">
+                    @if (FilteredLoras.Count == 0) {
+                        <div class="d-flex align-center justify-center pa-4 text-center">
+                            <MudText Typo="Typo.caption" Style="color: #6c7086;">No LoRAs match search query.</MudText>
+                        </div>
+                    } else {
+                        @foreach (var lora in FilteredLoras) {
+                            bool isSelected = _selectedLoraPaths.Contains(lora.FilePath);
+                            <div class="d-flex align-center justify-space-between pa-2 rounded cursor-pointer"
+                                 style="background-color: @(isSelected ? "#1e2840" : "#11111b"); border: 1px solid @(isSelected ? "#89b4fa" : "#313244");"
+                                 @onclick="@(() => ToggleSelection(lora.FilePath))">
+                                <div class="d-flex align-center gap-2" style="overflow: hidden;">
+                                    <MudCheckBox T="bool"
+                                                 Value="@isSelected"
+                                                 ValueChanged="@((bool val) => SetSelection(lora.FilePath, val))"
+                                                 Color="Color.Primary"
+                                                 StopClickPropagation="true" />
+                                    <div class="d-flex flex-column text-truncate">
+                                        <MudText Typo="Typo.body2" Style="font-weight: 600; color: #cdd6f4;">
+                                            @GetLoraDisplayName(lora)
+                                        </MudText>
+                                        <MudText Typo="Typo.caption" Style="color: #6c7086;">
+                                            @lora.EffectiveBaseModel &bull; @lora.FormattedSize &bull; @lora.DisplayCategory
+                                        </MudText>
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(lora.ThumbnailPath)) {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Style="font-size: 0.7rem;">
+                                        Has preview
+                                    </MudChip>
+                                } else {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" Style="font-size: 0.7rem;">
+                                        No preview
+                                    </MudChip>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <!-- Options -->
+            <div class="d-flex align-center justify-space-between px-1">
+                <div>
+                    <MudText Typo="Typo.body2" Style="color: #cdd6f4; font-weight: 600;">Save companion preview alongside file</MudText>
+                    <MudText Typo="Typo.caption" Style="color: #6c7086;">Copies image as {lora_name}.preview.png for ComfyUI and Forge</MudText>
+                </div>
+                <MudSwitch @bind-Value="_copyCompanion" Color="Color.Primary" />
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">
+            Cancel
+        </MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="@(_selectedLoraPaths.Count == 0 || _isAssigning)"
+                   OnClick="AssignPreviewsAsync">
+            @if (_isAssigning) {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                <span>Assigning...</span>
+            } else {
+                <span>Assign to @(_selectedLoraPaths.Count) LoRA@(_selectedLoraPaths.Count == 1 ? "" : "s")</span>
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public ShowcaseMediaItem MediaItem { get; set; } = default!;
+
+    private readonly HashSet<string> _selectedLoraPaths = new(StringComparer.OrdinalIgnoreCase);
+    private List<LoraMetadata> _allLoras = new();
+    private List<LoraMetadata> _detectedLoras = new();
+    private string _searchQuery = string.Empty;
+    private bool _copyCompanion = true;
+    private bool _isAssigning;
+    private string _previewDataUri = string.Empty;
+
+    protected override async Task OnInitializedAsync() {
+        _allLoras = LibraryService?.Items?.ToList() ?? new();
+        _detectedLoras = ShowcaseService.FindMatchingLorasForMedia(MediaItem);
+
+        // Pre-select any detected LoRAs by default for user convenience
+        foreach (var detected in _detectedLoras) {
+            _selectedLoraPaths.Add(detected.FilePath);
+        }
+
+        _previewDataUri = ThumbnailService.GetCachedDataUri(MediaItem.FilePath) ?? string.Empty;
+        if (string.IsNullOrEmpty(_previewDataUri)) {
+            _previewDataUri = await ThumbnailService.GetOrCreateThumbnailDataUriAsync(MediaItem);
+        }
+    }
+
+    private List<LoraMetadata> FilteredLoras {
+        get {
+            if (string.IsNullOrWhiteSpace(_searchQuery)) {
+                return _allLoras;
+            }
+            string q = _searchQuery.Trim();
+            return _allLoras.Where(l =>
+                l.FileName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                l.EffectiveBaseModel.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                l.DisplayCategory.Contains(q, StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+        }
+    }
+
+    private void ToggleSelection(string filePath) {
+        if (!_selectedLoraPaths.Add(filePath)) {
+            _selectedLoraPaths.Remove(filePath);
+        }
+    }
+
+    private void SetSelection(string filePath, bool select) {
+        if (select) {
+            _selectedLoraPaths.Add(filePath);
+        } else {
+            _selectedLoraPaths.Remove(filePath);
+        }
+    }
+
+    private void SelectAllDetected() {
+        foreach (var lora in _detectedLoras) {
+            _selectedLoraPaths.Add(lora.FilePath);
+        }
+    }
+
+    private string GetLoraDisplayName(LoraMetadata lora) {
+        string name = Path.GetFileNameWithoutExtension(lora.FileName);
+        return string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(lora.FilePath) : name;
+    }
+
+    private async Task AssignPreviewsAsync() {
+        if (_selectedLoraPaths.Count == 0) {
+            return;
+        }
+
+        _isAssigning = true;
+        try {
+            var targetLoras = _allLoras.Where(l => _selectedLoraPaths.Contains(l.FilePath)).ToList();
+            int count = await ShowcaseService.AssignImageAsLoraPreviewAsync(MediaItem, targetLoras, _copyCompanion);
+
+            Snackbar.Add($"Assigned preview image to {count} LoRA{(count == 1 ? "" : "s")}!", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to assign preview: {ex.Message}", Severity.Error);
+        } finally {
+            _isAssigning = false;
+        }
+    }
+
+    private void Cancel() {
+        MudDialog.Cancel();
+    }
+}

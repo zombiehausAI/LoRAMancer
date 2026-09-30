@@ -1,0 +1,13 @@
+{
+  "id": "loc-scraper",
+  "name": "Library of Congress Archive",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting vintage historical photography, portraits, architectural archives, and retro prints from the Library of Congress.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Library of Congress Scraper",
+  "icon": "HistoryEdu"
+}
