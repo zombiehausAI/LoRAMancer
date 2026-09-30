@@ -89,6 +89,7 @@ public sealed class AppSettings {
     public string OllamaEndpointUrl { get; set; } = "http://localhost:11434";
     public string OllamaApiKey { get; set; } = string.Empty;
     public string OllamaDefaultModel { get; set; } = "llama3.2-vision";
+    public List<string> OllamaDiscoveredModels { get; set; } = new();
 
     // ComfyUI Integration (Local, LAN, or WAN)
     public string ComfyUiEndpointUrl { get; set; } = "http://127.0.0.1:8188";

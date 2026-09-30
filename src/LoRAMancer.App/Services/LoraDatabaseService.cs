@@ -23,13 +23,48 @@ public sealed class LoraDatabaseService : IDisposable {
         cmd.Parameters.Add(p);
     }
 
+    public string DatabasePath => _dbPath;
+
     public LoraDatabaseService(SettingsService? settingsService = null) {
         _settingsService = settingsService;
         string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
         if (!Directory.Exists(appDir)) {
             Directory.CreateDirectory(appDir);
         }
-        _dbPath = Path.Combine(appDir, "loras.db");
+        _dbPath = Path.Combine(appDir, "loramancer_studio.db");
+
+        // Automatic Migration: detect legacy loras.db or lora.db and migrate to loramancer_studio.db
+        string legacyLorasDb = Path.Combine(appDir, "loras.db");
+        string legacyLoraDb = Path.Combine(appDir, "lora.db");
+        string? legacySource = File.Exists(legacyLorasDb) ? legacyLorasDb : (File.Exists(legacyLoraDb) ? legacyLoraDb : null);
+
+        if (!File.Exists(_dbPath) && legacySource != null) {
+            try {
+                File.Copy(legacySource, _dbPath, overwrite: false);
+                if (File.Exists(legacySource + "-wal")) {
+                    File.Copy(legacySource + "-wal", _dbPath + "-wal", overwrite: true);
+                }
+                if (File.Exists(legacySource + "-shm")) {
+                    File.Copy(legacySource + "-shm", _dbPath + "-shm", overwrite: true);
+                }
+                try {
+                    File.Delete(legacySource);
+                    if (File.Exists(legacySource + "-wal")) {
+                        File.Delete(legacySource + "-wal");
+                    }
+                    if (File.Exists(legacySource + "-shm")) {
+                        File.Delete(legacySource + "-shm");
+                    }
+                } catch {
+                    try {
+                        File.Move(legacySource, legacySource + ".bak", overwrite: true);
+                    } catch { }
+                }
+            } catch {
+                // If migration fails, proceed to clean database initialization
+            }
+        }
+
         _connectionString = new SqliteConnectionStringBuilder {
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
@@ -2274,7 +2309,281 @@ public sealed class LoraDatabaseService : IDisposable {
         return item;
     }
 
+    public async Task ExportDatabaseAsync(string targetFilePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetFilePath);
+        await EnsureInitializedAsync();
+
+        string? dir = Path.GetDirectoryName(targetFilePath);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) {
+            Directory.CreateDirectory(dir);
+        }
+
+        if (File.Exists(targetFilePath)) {
+            File.Delete(targetFilePath);
+        }
+
+        if (IsPostgreSql) {
+            if (File.Exists(_dbPath)) {
+                File.Copy(_dbPath, targetFilePath, overwrite: true);
+            }
+            return;
+        }
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"VACUUM INTO '{targetFilePath.Replace("'", "''")}';";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<DatabaseImportAnalysis> AnalyzeDatabaseForImportAsync(string sourceDbPath) {
+        var analysis = new DatabaseImportAnalysis();
+        if (!File.Exists(sourceDbPath)) {
+            analysis.IsValid = false;
+            analysis.ErrorMessage = $"Source file not found at '{sourceDbPath}'.";
+            return analysis;
+        }
+
+        analysis.FileSizeBytes = new FileInfo(sourceDbPath).Length;
+        await EnsureInitializedAsync();
+
+        try {
+            var srcBuilder = new SqliteConnectionStringBuilder {
+                DataSource = sourceDbPath,
+                Mode = SqliteOpenMode.ReadOnly
+            };
+
+            using var srcConn = new SqliteConnection(srcBuilder.ToString());
+            await srcConn.OpenAsync();
+
+            var srcTables = new List<string>();
+            using (var cmd = srcConn.CreateCommand()) {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) {
+                    srcTables.Add(reader.GetString(0));
+                }
+            }
+
+            var destTables = new List<string>();
+            using var destConn = new SqliteConnection(_connectionString);
+            await destConn.OpenAsync();
+            using (var cmd = destConn.CreateCommand()) {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) {
+                    destTables.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (var tbl in srcTables) {
+                if (destTables.Contains(tbl, StringComparer.OrdinalIgnoreCase)) {
+                    analysis.MatchingTables.Add(tbl);
+                } else {
+                    analysis.ExtraTables.Add(tbl);
+                }
+
+                try {
+                    using var countCmd = srcConn.CreateCommand();
+                    countCmd.CommandText = $"SELECT COUNT(*) FROM \"{tbl.Replace("\"", "\"\"")}\";";
+                    var count = await countCmd.ExecuteScalarAsync();
+                    analysis.SourceRowCounts[tbl] = Convert.ToInt32(count);
+                } catch {
+                    analysis.SourceRowCounts[tbl] = 0;
+                }
+            }
+
+            foreach (var tbl in destTables) {
+                if (!srcTables.Contains(tbl, StringComparer.OrdinalIgnoreCase)) {
+                    analysis.MissingTables.Add(tbl);
+                }
+            }
+
+            foreach (var tbl in analysis.MatchingTables) {
+                var srcCols = await GetTableColumnsAsync(srcConn, tbl);
+                var destCols = await GetTableColumnsAsync(destConn, tbl);
+
+                var srcColNames = srcCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var destColNames = destCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var missingInDest = srcCols.Where(c => !destColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+                if (missingInDest.Count > 0) {
+                    analysis.MissingColumnsInDestination[tbl] = missingInDest;
+                }
+
+                var missingInSrc = destCols.Where(c => !srcColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+                if (missingInSrc.Count > 0) {
+                    analysis.MissingColumnsInSource[tbl] = missingInSrc;
+                }
+            }
+
+            analysis.IsValid = analysis.MatchingTables.Count > 0;
+            if (!analysis.IsValid) {
+                analysis.ErrorMessage = "The selected file does not appear to be a valid LoRAMancer SQLite database (no matching tables found).";
+            }
+        } catch (Exception ex) {
+            analysis.IsValid = false;
+            analysis.ErrorMessage = $"Failed to analyze database: {ex.Message}";
+        }
+
+        return analysis;
+    }
+
+    private static async Task<List<(string Name, string Type)>> GetTableColumnsAsync(SqliteConnection conn, string tableName) {
+        var cols = new List<(string Name, string Type)>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info(\"{tableName.Replace("\"", "\"\"")}\");";
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) {
+            string name = reader.GetString(1);
+            string type = reader.IsDBNull(2) ? "TEXT" : reader.GetString(2);
+            cols.Add((name, type));
+        }
+        return cols;
+    }
+
+    public async Task<(int TablesImported, int RowsImported, List<string> AppliedResolutions)> ImportAndMergeDatabaseAsync(string sourceDbPath, bool autoAddMissingColumns = true) {
+        var resolutions = new List<string>();
+        int totalTables = 0;
+        int totalRows = 0;
+
+        await EnsureInitializedAsync();
+        var analysis = await AnalyzeDatabaseForImportAsync(sourceDbPath);
+        if (!analysis.IsValid) {
+            throw new InvalidOperationException(analysis.ErrorMessage);
+        }
+
+        var srcBuilder = new SqliteConnectionStringBuilder {
+            DataSource = sourceDbPath,
+            Mode = SqliteOpenMode.ReadOnly
+        };
+
+        using var srcConn = new SqliteConnection(srcBuilder.ToString());
+        await srcConn.OpenAsync();
+
+        using var destConn = new SqliteConnection(_connectionString);
+        await destConn.OpenAsync();
+
+        if (autoAddMissingColumns && analysis.MissingColumnsInDestination.Count > 0) {
+            foreach (var kvp in analysis.MissingColumnsInDestination) {
+                string tableName = kvp.Key;
+                var srcCols = await GetTableColumnsAsync(srcConn, tableName);
+                foreach (string colName in kvp.Value) {
+                    var colDef = srcCols.FirstOrDefault(c => string.Equals(c.Name, colName, StringComparison.OrdinalIgnoreCase));
+                    string colType = !string.IsNullOrWhiteSpace(colDef.Type) ? colDef.Type : "TEXT";
+                    try {
+                        using var alterCmd = destConn.CreateCommand();
+                        alterCmd.CommandText = $"ALTER TABLE \"{tableName.Replace("\"", "\"\"")}\" ADD COLUMN \"{colName.Replace("\"", "\"\"")}\" {colType};";
+                        await alterCmd.ExecuteNonQueryAsync();
+                        resolutions.Add($"Added column '{colName}' ({colType}) to '{tableName}'");
+                    } catch (Exception ex) {
+                        resolutions.Add($"Could not add column '{colName}' to '{tableName}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        foreach (string tableName in analysis.MatchingTables) {
+            var srcCols = await GetTableColumnsAsync(srcConn, tableName);
+            var destCols = await GetTableColumnsAsync(destConn, tableName);
+
+            var destColNames = destCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var commonCols = srcCols.Where(c => destColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+
+            if (commonCols.Count == 0) {
+                continue;
+            }
+
+            string escapedTable = $"\"{tableName.Replace("\"", "\"\"")}\"";
+            string colList = string.Join(", ", commonCols.Select(c => $"\"{c.Replace("\"", "\"\"")}\""));
+            string paramList = string.Join(", ", commonCols.Select((_, idx) => $"@p{idx}"));
+
+            using var selectCmd = srcConn.CreateCommand();
+            selectCmd.CommandText = $"SELECT {colList} FROM {escapedTable};";
+            using var reader = await selectCmd.ExecuteReaderAsync();
+
+            using var tx = destConn.BeginTransaction();
+            try {
+                using var insertCmd = destConn.CreateCommand();
+                insertCmd.Transaction = tx;
+                insertCmd.CommandText = $"INSERT OR REPLACE INTO {escapedTable} ({colList}) VALUES ({paramList});";
+
+                var parameters = new List<SqliteParameter>();
+                for (int i = 0; i < commonCols.Count; i++) {
+                    var p = insertCmd.CreateParameter();
+                    p.ParameterName = $"@p{i}";
+                    insertCmd.Parameters.Add(p);
+                    parameters.Add(p);
+                }
+
+                int tableRowCount = 0;
+                while (await reader.ReadAsync()) {
+                    for (int i = 0; i < commonCols.Count; i++) {
+                        parameters[i].Value = reader.IsDBNull(i) ? DBNull.Value : reader.GetValue(i);
+                    }
+                    await insertCmd.ExecuteNonQueryAsync();
+                    tableRowCount++;
+                }
+
+                await tx.CommitAsync();
+                totalTables++;
+                totalRows += tableRowCount;
+            } catch {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
+        return (totalTables, totalRows, resolutions);
+    }
+
+    public async Task<bool> ReplaceDatabaseAsync(string sourceDbPath) {
+        if (!File.Exists(sourceDbPath)) {
+            throw new FileNotFoundException("Source database file not found.", sourceDbPath);
+        }
+
+        await EnsureInitializedAsync();
+
+        string backupPath = _dbPath + $".backup_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+        try {
+            if (File.Exists(_dbPath)) {
+                File.Copy(_dbPath, backupPath, overwrite: true);
+            }
+        } catch { }
+
+        SqliteConnection.ClearAllPools();
+
+        File.Copy(sourceDbPath, _dbPath, overwrite: true);
+        if (File.Exists(_dbPath + "-wal")) {
+            try {
+                File.Delete(_dbPath + "-wal");
+            } catch { }
+        }
+        if (File.Exists(_dbPath + "-shm")) {
+            try {
+                File.Delete(_dbPath + "-shm");
+            } catch { }
+        }
+
+        _initialized = false;
+        await EnsureInitializedAsync();
+
+        return true;
+    }
+
     public void Dispose() {
         _lock.Dispose();
     }
+}
+
+public sealed class DatabaseImportAnalysis {
+    public bool IsValid { get; set; }
+    public string ErrorMessage { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public List<string> MatchingTables { get; set; } = new();
+    public List<string> ExtraTables { get; set; } = new();
+    public List<string> MissingTables { get; set; } = new();
+    public Dictionary<string, int> SourceRowCounts { get; set; } = new();
+    public Dictionary<string, List<string>> MissingColumnsInDestination { get; set; } = new();
+    public Dictionary<string, List<string>> MissingColumnsInSource { get; set; } = new();
 }

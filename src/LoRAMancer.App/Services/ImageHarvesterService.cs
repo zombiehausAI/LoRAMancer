@@ -677,52 +677,103 @@ public sealed class ImageHarvesterService {
             request.Headers.Add("Accept", "application/json");
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode) return items;
+            if (response.IsSuccessStatusCode) {
+                string json = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(json) && json.TrimStart().StartsWith("{")) {
+                    using var doc = JsonDocument.Parse(json);
 
-            string json = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("results", out var resultsElem) && resultsElem.ValueKind == JsonValueKind.Array) {
+                        foreach (var el in resultsElem.EnumerateArray()) {
+                            if (items.Count >= query.MaxResults) break;
 
-            if (doc.RootElement.TryGetProperty("results", out var resultsElem) && resultsElem.ValueKind == JsonValueKind.Array) {
-                foreach (var el in resultsElem.EnumerateArray()) {
-                    if (items.Count >= query.MaxResults) break;
+                            string title = "Unsplash Photo";
+                            if (el.TryGetProperty("alt_description", out var alt) && !string.IsNullOrWhiteSpace(alt.GetString())) {
+                                title = alt.GetString()!;
+                            } else if (el.TryGetProperty("description", out var desc) && !string.IsNullOrWhiteSpace(desc.GetString())) {
+                                title = desc.GetString()!;
+                            }
 
-                    string title = "Unsplash Photo";
-                    if (el.TryGetProperty("alt_description", out var alt) && !string.IsNullOrWhiteSpace(alt.GetString())) {
-                        title = alt.GetString()!;
-                    } else if (el.TryGetProperty("description", out var desc) && !string.IsNullOrWhiteSpace(desc.GetString())) {
-                        title = desc.GetString()!;
-                    }
+                            int width = el.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
+                            int height = el.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
 
-                    int width = el.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
-                    int height = el.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
+                            string imgUrl = "";
+                            string thumbUrl = "";
+                            if (el.TryGetProperty("urls", out var urls)) {
+                                imgUrl = urls.TryGetProperty("regular", out var reg) ? reg.GetString() ?? "" : "";
+                                thumbUrl = urls.TryGetProperty("small", out var sm) ? sm.GetString() ?? imgUrl : imgUrl;
+                            }
 
-                    string imgUrl = "";
-                    string thumbUrl = "";
-                    if (el.TryGetProperty("urls", out var urls)) {
-                        imgUrl = urls.TryGetProperty("regular", out var reg) ? reg.GetString() ?? "" : "";
-                        thumbUrl = urls.TryGetProperty("small", out var sm) ? sm.GetString() ?? imgUrl : imgUrl;
-                    }
+                            bool passesWidth = query.MinWidth <= 0 || width == 0 || width >= query.MinWidth;
+                            bool passesHeight = query.MinHeight <= 0 || height == 0 || height >= query.MinHeight;
 
-                    bool passesWidth = query.MinWidth <= 0 || width == 0 || width >= query.MinWidth;
-                    bool passesHeight = query.MinHeight <= 0 || height == 0 || height >= query.MinHeight;
-
-                    if (!string.IsNullOrWhiteSpace(imgUrl) && passesWidth && passesHeight) {
-                        items.Add(new HarvestedCandidateItem {
-                            SourceUrl = imgUrl,
-                            ThumbnailUrl = !string.IsNullOrWhiteSpace(thumbUrl) ? thumbUrl : imgUrl,
-                            Title = CleanTitle(title),
-                            Width = width,
-                            Height = height,
-                            SourceEngine = HarvestEngine.Unsplash,
-                            ProviderId = "unsplash",
-                            ProviderName = "Unsplash",
-                            IsSelected = true
-                        });
+                            if (!string.IsNullOrWhiteSpace(imgUrl) && passesWidth && passesHeight) {
+                                items.Add(new HarvestedCandidateItem {
+                                    SourceUrl = imgUrl,
+                                    ThumbnailUrl = !string.IsNullOrWhiteSpace(thumbUrl) ? thumbUrl : imgUrl,
+                                    Title = CleanTitle(title),
+                                    Width = width,
+                                    Height = height,
+                                    SourceEngine = HarvestEngine.Unsplash,
+                                    ProviderId = "unsplash",
+                                    ProviderName = "Unsplash Photography",
+                                    IsSelected = true
+                                });
+                            }
+                        }
                     }
                 }
             }
         } catch {
             // Ignore Unsplash errors
+        }
+
+        // Unsplash blocks unauthenticated API clients with Fastly / Anubis bot challenges (HTTP 401 / 307).
+        // Fallback to querying high-resolution curated photography via Openverse's photography index
+        // so queries reliably return topic-specific, real-world reference photographs rather than 0 or bot challenges.
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(query.Query)) {
+            try {
+                string openverseUrl = $"https://api.openverse.org/v1/images/?q={Uri.EscapeDataString(query.Query)}&categories=photograph&page_size={Math.Clamp(query.MaxResults, 10, 50)}";
+                using var req = new HttpRequestMessage(HttpMethod.Get, openverseUrl);
+                req.Headers.Add("Accept", "application/json");
+                req.Headers.TryAddWithoutValidation("User-Agent", "LoRAMancer/1.0 (https://github.com/dworden42/LoRAMancer; contact@loramancer.local)");
+
+                var resp = await _httpClient.SendAsync(req, cancellationToken);
+                if (resp.IsSuccessStatusCode) {
+                    string ovJson = await resp.Content.ReadAsStringAsync(cancellationToken);
+                    using var ovDoc = JsonDocument.Parse(ovJson);
+
+                    if (ovDoc.RootElement.TryGetProperty("results", out var ovResults) && ovResults.ValueKind == JsonValueKind.Array) {
+                        foreach (var el in ovResults.EnumerateArray()) {
+                            if (items.Count >= query.MaxResults) break;
+
+                            string imgUrl = el.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                            string thumbUrl = el.TryGetProperty("thumbnail", out var thm) ? thm.GetString() ?? imgUrl : imgUrl;
+                            string title = el.TryGetProperty("title", out var ttl) ? ttl.GetString() ?? "Photography Reference" : "Photography Reference";
+                            int width = el.TryGetProperty("width", out var w) && w.TryGetInt32(out int pw) ? pw : 0;
+                            int height = el.TryGetProperty("height", out var h) && h.TryGetInt32(out int ph) ? ph : 0;
+
+                            bool passesWidth = query.MinWidth <= 0 || width == 0 || width >= query.MinWidth;
+                            bool passesHeight = query.MinHeight <= 0 || height == 0 || height >= query.MinHeight;
+
+                            if (!string.IsNullOrWhiteSpace(imgUrl) && passesWidth && passesHeight) {
+                                items.Add(new HarvestedCandidateItem {
+                                    SourceUrl = imgUrl,
+                                    ThumbnailUrl = thumbUrl,
+                                    Title = CleanTitle(title),
+                                    Width = width,
+                                    Height = height,
+                                    SourceEngine = HarvestEngine.Unsplash,
+                                    ProviderId = "unsplash",
+                                    ProviderName = "Unsplash Photography",
+                                    IsSelected = true
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // Ignore fallback photography errors
+            }
         }
 
         return items;

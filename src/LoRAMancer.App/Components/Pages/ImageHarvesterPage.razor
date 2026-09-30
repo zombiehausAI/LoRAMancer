@@ -200,6 +200,13 @@
             </div>
 
             <div class="d-flex align-center gap-2 flex-wrap">
+                <!-- Ollama Vision Model Selector -->
+                <MudSelect T="string" @bind-Value="_selectedOllamaModel" Label="Vision Model" Dense="true" Margin="Margin.Dense" Style="min-width: 175px;" Variant="Variant.Outlined">
+                    @foreach (var m in GetOllamaModelOptions()) {
+                        <MudSelectItem Value="@m">@m</MudSelectItem>
+                    }
+                </MudSelect>
+
                 <!-- Ollama Vision Cleanse Dropdown -->
                 <MudSelect T="string" @bind-Value="_selectedOllamaPreset" Label="Ollama Filter" Dense="true" Margin="Margin.Dense" Style="min-width: 220px;" Variant="Variant.Outlined">
                     <MudSelectItem Value="@("watermarks")">🔤 Watermarks &amp; Overlays</MudSelectItem>
@@ -411,6 +418,7 @@
     private string _destinationFolder = string.Empty;
     private HarvestDownloadProgress? _progress = null;
     private string _progressStatusText = string.Empty;
+    private string _selectedOllamaModel = string.Empty;
     private string _selectedOllamaPreset = "watermarks";
     private HarvestedCandidateItem? _previewItem = null;
     private List<HarvestProviderDefinition> _providers = new();
@@ -423,8 +431,32 @@
         HarvesterService.OnStateChanged += HandleStateChanged;
         RefreshProviders();
 
+        _selectedOllamaModel = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+            ? SettingsService.Current.OllamaDefaultModel
+            : "llama3.2-vision";
+
         string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _destinationFolder = Path.Combine(userHome, ".loramancer", "harvested_datasets");
+    }
+
+    private IEnumerable<string> GetOllamaModelOptions() {
+        var list = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_selectedOllamaModel)) {
+            list.Add(_selectedOllamaModel.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)) {
+            string def = SettingsService.Current.OllamaDefaultModel.Trim();
+            if (!list.Contains(def, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(def);
+            }
+        }
+        string[] presets = { "llama3.2-vision", "llama3.2-vision:11b", "llava", "qwen2-vl", "minicpm-v" };
+        foreach (var p in presets) {
+            if (!list.Contains(p, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(p);
+            }
+        }
+        return list;
     }
 
     public void Dispose() {
@@ -624,8 +656,15 @@
             _ => "Does this image have severe visual artifacts, watermarks, or quality flaws?"
         };
 
-        string ollamaUrl = Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434";
-        string modelName = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision";
+        string ollamaUrl = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaEndpointUrl)
+            ? SettingsService.Current.OllamaEndpointUrl.Trim().TrimEnd('/')
+            : (Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434");
+
+        string modelName = !string.IsNullOrWhiteSpace(_selectedOllamaModel)
+            ? _selectedOllamaModel.Trim()
+            : (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+                ? SettingsService.Current.OllamaDefaultModel.Trim()
+                : (Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision"));
 
         _progressStatusText = $"Auditing with Ollama ({modelName})...";
         var progressHandler = new Progress<HarvestDownloadProgress>(p => {

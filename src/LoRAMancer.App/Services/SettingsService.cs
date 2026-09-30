@@ -134,4 +134,70 @@ public sealed class SettingsService {
             return (false, $"Connection Failed: {ex.Message}");
         }
     }
+
+    public async Task<List<string>> ProbeOllamaModelsAsync(CancellationToken cancellationToken = default) {
+        string cleanUrl = (_currentSettings.OllamaEndpointUrl ?? "http://localhost:11434").Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(cleanUrl)) {
+            cleanUrl = "http://localhost:11434";
+        }
+
+        var candidates = new List<string> { cleanUrl };
+        if (cleanUrl.Contains("localhost")) {
+            candidates.Add(cleanUrl.Replace("localhost", "127.0.0.1"));
+        } else if (cleanUrl.Contains("127.0.0.1")) {
+            candidates.Add(cleanUrl.Replace("127.0.0.1", "localhost"));
+        }
+
+        var discovered = new List<string>();
+
+        foreach (var url in candidates) {
+            try {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(3));
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{url}/api/tags");
+                if (!string.IsNullOrWhiteSpace(_currentSettings.OllamaApiKey)) {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _currentSettings.OllamaApiKey.Trim());
+                }
+
+                using var response = await _httpClient.SendAsync(request, cts.Token);
+                if (response.IsSuccessStatusCode) {
+                    string json = await response.Content.ReadAsStringAsync(cts.Token);
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("models", out var modelsElem) && modelsElem.ValueKind == JsonValueKind.Array) {
+                        foreach (var m in modelsElem.EnumerateArray()) {
+                            string name = m.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(name) && !discovered.Contains(name, StringComparer.OrdinalIgnoreCase)) {
+                                discovered.Add(name);
+                            }
+                        }
+                    }
+                    break;
+                }
+            } catch {
+                // Try next candidate
+            }
+        }
+
+        if (discovered.Count > 0) {
+            _currentSettings.OllamaDiscoveredModels = discovered;
+
+            // Retain saved default model across sessions:
+            // Only assign if OllamaDefaultModel is empty or whitespace
+            if (string.IsNullOrWhiteSpace(_currentSettings.OllamaDefaultModel)) {
+                string? best = discovered.FirstOrDefault(m => m.Contains("vision", StringComparison.OrdinalIgnoreCase) || m.Contains("llava", StringComparison.OrdinalIgnoreCase) || m.Contains("vl", StringComparison.OrdinalIgnoreCase))
+                             ?? discovered.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(best)) {
+                    _currentSettings.OllamaDefaultModel = best;
+                }
+            }
+
+            try {
+                await SaveSettingsAsync(_currentSettings, cancellationToken);
+            } catch {
+                // Suppress save issues during background probe
+            }
+        }
+
+        return discovered;
+    }
 }
