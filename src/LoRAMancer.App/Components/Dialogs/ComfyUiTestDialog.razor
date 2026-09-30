@@ -262,6 +262,15 @@
     [Parameter]
     public string? TriggerWords { get; set; }
 
+    [Parameter]
+    public string? Prompt { get; set; }
+
+    [Parameter]
+    public string? NegativePrompt { get; set; }
+
+    [Parameter]
+    public double? LoraWeight { get; set; }
+
     private string _endpoint = "";
     private ComfyUiConnectionStatus? _connStatus;
     private bool _isConnecting;
@@ -300,8 +309,20 @@
 
         ApplyArchitectureSettings(_selectedArchitecture);
 
-        string loraTag = !string.IsNullOrWhiteSpace(TriggerWords) ? TriggerWords.Trim() : (LoraName ?? "subject");
-        _prompt = $"A high quality photo of {loraTag}, detailed, professional lighting";
+        if (!string.IsNullOrWhiteSpace(Prompt)) {
+            _prompt = Prompt;
+        } else {
+            string loraTag = !string.IsNullOrWhiteSpace(TriggerWords) ? TriggerWords.Trim() : (LoraName ?? "subject");
+            _prompt = $"A high quality photo of {loraTag}, detailed, professional lighting";
+        }
+
+        if (NegativePrompt != null) {
+            _negativePrompt = NegativePrompt;
+        }
+
+        if (LoraWeight.HasValue) {
+            _loraWeight = LoraWeight.Value;
+        }
 
         await CheckConnectionAsync();
     }
@@ -470,7 +491,8 @@
     }
 
     private void CloseDialog() {
-        MudDialog.Close(DialogResult.Ok(true));
+        var result = new ComfyUiTestDialogResult(_renderedBase64Image, _prompt, _negativePrompt, _loraWeight);
+        MudDialog.Close(DialogResult.Ok(result));
     }
 
     public void Dispose() {
@@ -579,4 +601,11 @@
             }
         }
     }
+
+    public sealed record ComfyUiTestDialogResult(
+        string? RenderedBase64Image,
+        string Prompt,
+        string NegativePrompt,
+        double LoraWeight
+    );
 }

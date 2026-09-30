@@ -269,23 +269,68 @@
                         </div>
 
                         @if (!string.IsNullOrEmpty(_toolkitCommit)) {
-                            <div style="font-size:0.75rem; color:#89b4fa;" class="mb-3">
+                            <div style="font-size:0.75rem; color:#89b4fa;" class="mb-2">
                                 Commit: <code>@_toolkitCommit</code>
                             </div>
-                        } else {
-                            <div class="mb-3"></div>
                         }
 
-                        <div class="d-flex gap-2">
+                        <div style="font-size:0.75rem; color:#cdd6f4;" class="mb-1">
+                            Active Git Branch: <code style="color: #a6e3a1;">@(string.IsNullOrWhiteSpace(_currentGitBranch) ? "unknown" : _currentGitBranch)</code>
+                        </div>
+                        <div style="font-size:0.75rem; color:#a6adc8;" class="mb-3">
+                            Configured Target: <code style="color: #89b4fa;">@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)</code>
+                        </div>
+
+                        @if (IsBranchSwitchPending) {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.AltRoute">
+                                <div><b>Branch switch required:</b> Repository is currently on <code>@_currentGitBranch</code>, but target is set to <code>@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)</code>.</div>
+                                <div style="font-size: 0.75rem; opacity: 0.9;" class="mt-1">
+                                    Click <b>"Switch to '@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)' & Pull"</b> below to automatically change branches and pull the latest code.
+                                </div>
+                            </MudAlert>
+                        }
+
+                        @if (_toolkitUpdateResult != null && !IsBranchSwitchPending) {
+                            @if (_toolkitUpdateResult.HasUpdate) {
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.SystemUpdate">
+                                    Update available! <b>@_toolkitUpdateResult.CommitsBehind</b> commit(s) behind <code>origin/@_toolkitUpdateResult.Branch</code>.
+                                    @if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.RemoteCommit)) {
+                                        <div style="font-size: 0.75rem; opacity: 0.9;" class="mt-1">Latest: @_toolkitUpdateResult.RemoteCommit</div>
+                                    }
+                                </MudAlert>
+                            } else if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.ErrorMessage)) {
+                                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                    @_toolkitUpdateResult.ErrorMessage
+                                </MudAlert>
+                            } else {
+                                <div style="font-size:0.75rem; color:#a6e3a1;" class="d-flex align-center gap-1 mb-3">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                                    <span>Up to date with origin/@_toolkitUpdateResult.Branch</span>
+                                </div>
+                            }
+                        }
+
+                        <div class="d-flex gap-2 flex-wrap">
                             @if (ToolkitSetup.IsInstalled()) {
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="UpdateAiToolkitAsync">
-                                    @(_isUpdatingToolkit ? "Updating AI-Toolkit..." : "Update AI-Toolkit (git pull)")
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Search" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="CheckAiToolkitUpdatesAsync">
+                                    @(_isCheckingToolkitUpdates ? "Checking..." : "Check for Updates")
                                 </MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                <MudButton Variant="Variant.Filled" 
+                                           Color="@(IsBranchSwitchPending ? Color.Warning : Color.Primary)" 
+                                           StartIcon="@(IsBranchSwitchPending ? Icons.Material.Filled.AltRoute : Icons.Material.Filled.Sync)" 
+                                           Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" 
+                                           OnClick="UpdateAiToolkitAsync">
+                                    @if (_isUpdatingToolkit) {
+                                        <span>@(IsBranchSwitchPending ? $"Switching to '{_settings.AiToolkitBranch}'..." : "Updating AI-Toolkit...")</span>
+                                    } else {
+                                        <span>@(IsBranchSwitchPending ? $"Switch to '{_settings.AiToolkitBranch}' & Pull" : "Update AI-Toolkit (git pull)")</span>
+                                    }
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="AutoSetupAiToolkitAsync">
                                     Reinstall / Clean Setup
                                 </MudButton>
                             } else {
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="AutoSetupAiToolkitAsync">
                                     @(_isSettingUpToolkit ? "Setting Up AI-Toolkit..." : "Auto-Setup / Clone AI-Toolkit")
                                 </MudButton>
                             }
@@ -295,6 +340,7 @@
 
                 <MudItem xs="12" md="6">
                     <MudTextField @bind-Value="_settings.AiToolkitRepoUrl" Label="Git Repository URL" Variant="Variant.Outlined" HelperText="Official or custom AI-Toolkit fork" Class="mb-3" />
+                    <MudTextField T="string" Value="_settings.AiToolkitBranch" ValueChanged="OnBranchChanged" Label="Git Branch" Variant="Variant.Outlined" HelperText="Target branch to track, check, and pull from (default: main)" Class="mb-3" />
                     <MudTextField @bind-Value="_settings.AiToolkitPath" Label="Custom Installation Directory (Optional)" Variant="Variant.Outlined" Placeholder="Leave blank for default (tools/ai-toolkit)" />
                 </MudItem>
 
@@ -1354,8 +1400,21 @@
 
     private bool _isSettingUpToolkit;
     private bool _isUpdatingToolkit;
+    private bool _isCheckingToolkitUpdates;
     private string _toolkitCommit = string.Empty;
+    private string _currentGitBranch = string.Empty;
+    private AiToolkitUpdateCheckResult? _toolkitUpdateResult;
     private readonly List<string> _toolkitLogs = new();
+
+    private bool IsBranchSwitchPending {
+        get {
+            if (string.IsNullOrWhiteSpace(_currentGitBranch)) {
+                return false;
+            }
+            string target = string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch.Trim();
+            return !string.Equals(_currentGitBranch, target, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     private bool _isValidatingHf;
     private bool _hfTokenValid;
@@ -1393,6 +1452,8 @@
         _settings = Settings.Current;
         if (ToolkitSetup.IsInstalled()) {
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
         }
 
         SyncRgbFromHex(ThemeManager.EffectivePrimaryColor);
@@ -1689,21 +1750,62 @@
         }
     }
 
+    private async Task CheckAiToolkitUpdatesAsync() {
+        _isCheckingToolkitUpdates = true;
+        _toolkitLogs.Clear();
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Checking for AI-Toolkit updates on branch '{branch}'...");
+
+        try {
+            _toolkitUpdateResult = await ToolkitSetup.CheckForUpdatesAsync(branch);
+            if (_toolkitUpdateResult.HasUpdate) {
+                _toolkitLogs.Add($"[LoRAMancer] Update available! {_toolkitUpdateResult.CommitsBehind} new commit(s) on branch '{branch}'.");
+                if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.RemoteCommit)) {
+                    _toolkitLogs.Add($"[LoRAMancer] Latest commit: {_toolkitUpdateResult.RemoteCommit}");
+                }
+                Snackbar.Add($"AI-Toolkit update available ({_toolkitUpdateResult.CommitsBehind} commit(s)) on branch '{branch}'!", Severity.Info);
+            } else if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.ErrorMessage)) {
+                _toolkitLogs.Add($"[ERROR] {_toolkitUpdateResult.ErrorMessage}");
+                Snackbar.Add($"Update check failed: {_toolkitUpdateResult.ErrorMessage}", Severity.Warning);
+            } else {
+                _toolkitLogs.Add($"[LoRAMancer] Up to date with origin/{branch}.");
+                Snackbar.Add($"AI-Toolkit is up to date on branch '{branch}'.", Severity.Success);
+            }
+        } catch (Exception ex) {
+            _toolkitLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Failed to check updates: {ex.Message}", Severity.Error);
+        } finally {
+            _isCheckingToolkitUpdates = false;
+        }
+    }
+
+    private void OnBranchChanged(string newBranch) {
+        _settings.AiToolkitBranch = newBranch;
+        string target = string.IsNullOrWhiteSpace(newBranch) ? "main" : newBranch.Trim();
+        if (!string.IsNullOrWhiteSpace(_currentGitBranch) && !string.Equals(_currentGitBranch, target, StringComparison.OrdinalIgnoreCase)) {
+            Snackbar.Add($"Target branch set to '{target}'. Click \"Switch to '{target}' & Pull\" to checkout the branch and update.", Severity.Warning);
+        }
+        StateHasChanged();
+    }
+
     private async Task UpdateAiToolkitAsync() {
         _isUpdatingToolkit = true;
         _toolkitLogs.Clear();
-        _toolkitLogs.Add("[LoRAMancer] Updating AI-Toolkit via Git...");
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Updating AI-Toolkit via Git on branch '{branch}'...");
 
         try {
             string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
-            await ToolkitSetup.UpdateAiToolkitAsync(venvPath, line => {
+            await ToolkitSetup.UpdateAiToolkitAsync(venvPath, branch, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);
                     StateHasChanged();
                 });
             });
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
-            Snackbar.Add("AI-Toolkit updated to latest version!", Severity.Success);
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
+            Snackbar.Add($"AI-Toolkit switched to branch '{branch}' and updated to latest code!", Severity.Success);
         } catch (Exception ex) {
             _toolkitLogs.Add($"[ERROR] {ex.Message}");
             Snackbar.Add($"AI-Toolkit update failed: {ex.Message}", Severity.Error);
@@ -1715,18 +1817,21 @@
     private async Task AutoSetupAiToolkitAsync() {
         _isSettingUpToolkit = true;
         _toolkitLogs.Clear();
-        _toolkitLogs.Add("[LoRAMancer] Initiating AI-Toolkit automated setup...");
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Initiating AI-Toolkit automated setup on branch '{branch}'...");
 
         try {
             string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
-            await ToolkitSetup.SetupAiToolkitAsync(venvPath, line => {
+            await ToolkitSetup.SetupAiToolkitAsync(venvPath, branch, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);
                     StateHasChanged();
                 });
             });
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
-            Snackbar.Add("AI-Toolkit setup completed successfully!", Severity.Success);
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
+            Snackbar.Add($"AI-Toolkit setup completed successfully on branch '{branch}'!", Severity.Success);
         } catch (Exception ex) {
             _toolkitLogs.Add($"[ERROR] {ex.Message}");
             Snackbar.Add($"AI-Toolkit setup failed: {ex.Message}", Severity.Error);

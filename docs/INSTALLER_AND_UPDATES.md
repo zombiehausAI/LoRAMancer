@@ -4,7 +4,7 @@
 
 LoRAMancer includes automated deployment packaging and in-app update mechanisms:
 1. **PowerShell Bootstrap Installer (`installer/Install-LoRAMancer.ps1`)**:
-   - **Prerequisite Detection**: Verifies .NET 10, Python 3.12+, and AMD ROCm GPU drivers.
+   - **Prerequisite Detection**: Verifies .NET 10, Python 3.12+, Git for Windows, and GPU accelerator drivers.
    - **Existing Install Detection**: Checks `HKCU:\Software\LoRAMancer` (`InstallPath`), Inno Setup uninstall registry keys, desktop shortcuts, and default directories.
    - **Streamlined Update Mode**: When an existing install is detected, prompts to update in-place with `[Enter]` (or automatically in unattended mode), bypassing directory re-entry while still offering `[C]` to pick a different folder or drive.
    - **Disk Space Telemetry**: Queries free space on the destination drive before deploying.
@@ -68,7 +68,12 @@ Users have complete autonomy to manage their underlying Python environment direc
 1. **Pip Package Manager**: One-click **"Upgrade Pip"** button to keep pip at the latest version.
 2. **PyTorch Version Switcher**: Upgrade, downgrade, or switch distributions on demand (AMD ROCm 7.2.1, ROCm 7.1.0, NVIDIA CUDA 12.4, CUDA 12.1, Intel XPU, CPU, or custom wheel URLs).
 3. **ROCm Driver Stubs**: One-click **"Reapply Patch"** button to verify and fix Windows `rocm_sdk` library stubs if the environment is modified.
-4. **AI-Toolkit In-App Git Updates**: In **Settings & Admin Console** -> **AI-Toolkit Engine**, one-click **"Update AI-Toolkit (git pull)"** pulls upstream changes, updates submodules recursively, and synchronizes `.venv` dependencies with full transitive package resolution while protecting existing PyTorch wheels.
+4. **AI-Toolkit In-App Git Updates & Branch Tracking**:
+   - **Branch Specification**: Users can specify the exact Git branch to track (default: `main`, with options for `dev` or custom branches) in **Settings** -> **AI-Toolkit Engine**.
+   - **Startup & Background Checks**: On application launch, LoRAMancer checks in the background if the tracked branch has new upstream commits.
+   - **Header Notification Badge**: When new commits are detected on the tracked branch, an update badge pulsates in the main app bar with commit counts and a quick dropdown to review commits, update immediately, or defer.
+   - **Manual "Check for Updates" Button**: Users can manually verify upstream status at any time in **Settings** -> **AI-Toolkit Engine** without initiating a pull.
+   - **One-Click Update**: Pulls upstream changes for the selected branch, switches branches if necessary, updates submodules recursively, and synchronizes `.venv` dependencies with full transitive package resolution while protecting existing PyTorch wheels.
 
 ## Future Roadmap & TODO (Post-Heavy Development)
 

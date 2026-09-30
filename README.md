@@ -78,6 +78,7 @@ Comprehensive guides and architectural specifications are located in the [`docs/
 - **Operating System**: Windows 10/11 (x64) for desktop host; modern web browser for remote clients.
 - **.NET SDK**: .NET 10 SDK (`net10.0-windows10.0.19041.0`).
 - **Python**: Python 3.12 (automatically managed or local).
+- **Git**: Git for Windows (required for cloning, branch tracking, and updating the AI-Toolkit training engine).
 - **GPU Acceleration**: NVIDIA GeForce/RTX, AMD Radeon, Intel Arc/Xe, or CPU fallback.
 
 ### Building & Running

@@ -224,14 +224,26 @@
                 { x => x.LoraFilePath, _activeLoraPath },
                 { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
                 { x => x.BaseArchitecture, GetEffectiveArchitecture() },
-                { x => x.TriggerWords, StudioSession.TriggerWord }
+                { x => x.TriggerWords, StudioSession.TriggerWord },
+                { x => x.Prompt, _prompt },
+                { x => x.NegativePrompt, _negativePrompt },
+                { x => x.LoraWeight, _loraWeight }
             };
             var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
             var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
             var result = await dialog.Result;
-            if (result != null && !result.Canceled && result.Data is string imagePath && File.Exists(imagePath)) {
-                byte[] bytes = await File.ReadAllBytesAsync(imagePath);
-                _renderedImageBase64 = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+            if (result != null && !result.Canceled) {
+                if (result.Data is LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog.ComfyUiTestDialogResult dialogResult) {
+                    _prompt = dialogResult.Prompt;
+                    _negativePrompt = dialogResult.NegativePrompt;
+                    _loraWeight = dialogResult.LoraWeight;
+                    if (!string.IsNullOrWhiteSpace(dialogResult.RenderedBase64Image)) {
+                        _renderedImageBase64 = $"data:image/png;base64,{dialogResult.RenderedBase64Image}";
+                    }
+                } else if (result.Data is string imagePath && File.Exists(imagePath)) {
+                    byte[] bytes = await File.ReadAllBytesAsync(imagePath);
+                    _renderedImageBase64 = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+                }
             }
         } catch (Exception ex) {
             Snackbar.Add($"Render error: {ex.Message}", Severity.Error);
@@ -248,10 +260,23 @@
             { x => x.LoraFilePath, _activeLoraPath },
             { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
             { x => x.BaseArchitecture, GetEffectiveArchitecture() },
-            { x => x.TriggerWords, StudioSession.TriggerWord }
+            { x => x.TriggerWords, StudioSession.TriggerWord },
+            { x => x.Prompt, _prompt },
+            { x => x.NegativePrompt, _negativePrompt },
+            { x => x.LoraWeight, _loraWeight }
         };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+        var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog.ComfyUiTestDialogResult dialogResult) {
+            _prompt = dialogResult.Prompt;
+            _negativePrompt = dialogResult.NegativePrompt;
+            _loraWeight = dialogResult.LoraWeight;
+            if (!string.IsNullOrWhiteSpace(dialogResult.RenderedBase64Image)) {
+                _renderedImageBase64 = $"data:image/png;base64,{dialogResult.RenderedBase64Image}";
+            }
+            StateHasChanged();
+        }
     }
 
     private async Task OpenBenchmarkDialogAsync() {

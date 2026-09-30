@@ -60,6 +60,7 @@ public sealed class AppSettings {
     // AI-Toolkit & Training Environment
     public string AiToolkitRepoUrl { get; set; } = "https://github.com/ostris/ai-toolkit.git";
     public string AiToolkitPath { get; set; } = string.Empty;
+    public string AiToolkitBranch { get; set; } = "main";
     public string HfHomeCachePath { get; set; } = string.Empty;
 
     // User Profile & Identifiable Information
