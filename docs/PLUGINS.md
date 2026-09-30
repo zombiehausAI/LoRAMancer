@@ -465,6 +465,58 @@ For plugins that provide automated background capabilities, batch CLI operations
    - The plugin responds to CLI commands (`ping`, `audit`, etc.) using the standard JSON contract.
    - Users can test, run, and inspect output directly from the **Plugin Manager** (`/plugins`) with real-time logs, without needing navigation bar real estate.
 
+#### Pattern E: Image Scraper Plugins (`uiSlot: "HarvesterScraper"`)
+For community search engines, media archives, and reference image discovery extensions that integrate directly into the **Image Harvester** (`/harvester`):
+
+1. **Declare in `plugin.json`**:
+   ```json
+   {
+     "id": "my_custom_scraper",
+     "name": "My Custom Scraper",
+     "version": "1.0.0",
+     "description": "Scrapes reference imagery from MySource API",
+     "entryPoint": "plugin.py",
+     "uiSlot": "HarvesterScraper",
+     "menuSection": "Harvester Scraper",
+     "icon": "TravelExplore",
+     "configSchema": [
+       { "key": "apiKey", "label": "API Key", "type": "password", "required": false },
+       { "key": "username", "label": "User ID / Account", "type": "text", "required": false }
+     ]
+   }
+   ```
+
+2. **Harvester Integration & Execution Contract**:
+   - Scrapers are automatically discovered by `ImageHarvesterService` and registered as selectable provider pills in `/harvester`.
+   - To save disk space, all scraper plugins share a consolidated environment at `~/.loramancer/scraper_venv` pre-configured with `requests`, `beautifulsoup4`, `cloudscraper`, and `urllib3`.
+   - Credentials and settings configured via the gear icon (⚙️) are persisted to `~/.loramancer/scrapers/<id>.json`.
+   - When a harvest search executes, LoRAMancer invokes the scraper via standardized CLI arguments:
+     ```bash
+     python plugin.py --query "<search phrase>" --limit <maxResults> --json
+     ```
+
+3. **Mandatory Search Value Retention & Relevance Requirements**:
+   All scraper plugins **MUST strictly retain, respect, and apply the search value** passed via `--query`:
+   - **No Discarding or Silently Ignoring Queries**: Under no circumstances should a scraper drop the `--query` value or fall back to an unconstrained, all-time popular, or front-page image dump when a search query is provided.
+   - **Zero-Match Integrity**: If the upstream provider has 0 results for the query, the scraper **must return an empty JSON array `[]`**. Scrapers must *never* return unrelated "fallback masterpieces" or static default feeds when a user has entered a search phrase.
+   - **Query Translation & Routing**: If the upstream API does not support search on general image endpoints (for example, Civitai's `/api/v1/images` ignores queries), the scraper must route the query to an endpoint that supports keyword matching (such as Civitai's `/api/v1/models?query=...`) and extract images from the matching entities.
+   - **Score Thresholds for Fuzzy Engines**: When querying search engines with fuzzy/fallback matching (such as museum ElasticSearch APIs like ArtIC), scrapers must enforce a minimum relevance score cutoff (e.g. `score >= 1.0`) to avoid leaking zero-relevance fallback entries.
+   - **Default Queries**: Default keywords (such as `"concept art"` or `"portrait"`) should *only* be used if `--query` is completely empty or omitted by the caller.
+
+4. **Standard JSON Output Format**:
+   The scraper must print a JSON array to `stdout` containing candidate objects with the following fields:
+   ```json
+   [
+     {
+       "sourceUrl": "https://example.com/highres.jpg",
+       "thumbnailUrl": "https://example.com/thumb.jpg",
+       "title": "Descriptive title or prompt matching search query",
+       "width": 1920,
+       "height": 1080
+     }
+   ]
+   ```
+
 ---
 
 ### 4. Hardware Acceleration & PyTorch Matching
