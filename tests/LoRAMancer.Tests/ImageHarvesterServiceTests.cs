@@ -220,6 +220,64 @@ public sealed class ImageHarvesterServiceTests {
         Assert.Equal("civitai-scraper", civitai.PluginId);
     }
 
+    [Fact]
+    public void CatalogHistory_SavesAndLoadsDownloadHistoryCorrectly() {
+        var service = new ImageHarvesterService();
+        string tempDir = Path.Combine(Path.GetTempPath(), $"catalog_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try {
+            var urls = new[] { "https://example.com/img1.png", "https://example.com/img2.jpg" };
+            service.SaveCatalogHistory(tempDir, urls);
+
+            var loaded = service.LoadCatalogHistoryUrls(tempDir);
+            Assert.Equal(2, loaded.Count);
+            Assert.Contains("https://example.com/img1.png", loaded);
+            Assert.Contains("https://example.com/img2.jpg", loaded);
+
+            // Append another URL and ensure no duplicate entries
+            service.SaveCatalogHistory(tempDir, new[] { "https://example.com/img2.jpg", "https://example.com/img3.webp" });
+            var updated = service.LoadCatalogHistoryUrls(tempDir);
+            Assert.Equal(3, updated.Count);
+            Assert.Contains("https://example.com/img3.webp", updated);
+        } finally {
+            if (Directory.Exists(tempDir)) {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithCatalogDeduplication_OmitsExistingImages() {
+        var service = new ImageHarvesterService();
+        string tempDir = Path.Combine(Path.GetTempPath(), $"catalog_dedup_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try {
+            // Seed history with img1.png
+            service.SaveCatalogHistory(tempDir, new[] { "https://example.com/img1.png" });
+
+            var query = new HarvestSearchQuery {
+                Engine = HarvestEngine.DirectUrls,
+                DirectUrlsText = "https://example.com/img1.png\nhttps://example.com/img2.png\nhttps://example.com/img3.png",
+                CatalogDestinationFolder = tempDir,
+                OmitExistingInCatalog = true
+            };
+
+            var results = await service.SearchAsync(query);
+
+            // img1.png should be omitted because it's already in history!
+            Assert.Equal(2, results.Count);
+            Assert.DoesNotContain(results, r => r.SourceUrl == "https://example.com/img1.png");
+            Assert.Contains(results, r => r.SourceUrl == "https://example.com/img2.png");
+            Assert.Contains(results, r => r.SourceUrl == "https://example.com/img3.png");
+        } finally {
+            if (Directory.Exists(tempDir)) {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
     private sealed class MockHttpHandler : HttpMessageHandler {
         private readonly byte[] _content;
 

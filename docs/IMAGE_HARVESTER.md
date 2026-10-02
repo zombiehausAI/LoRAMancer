@@ -68,7 +68,15 @@ Audit candidate images with local Ollama vision models (`llama3.2-vision`, `llav
 - **Bulk Selection Tools**: 1-click **Select All**, **Deselect All**, and **Invert Selection**.
 - **Full-Resolution Lightbox**: Click any thumbnail to inspect high-resolution imagery, dimensions, source URLs, and Ollama audit details in an overlay modal.
 
-### 6. Seamless Stage 1 (Curate & Caption) Integration
-- **Direct Dataset Delivery**: Download selected files straight into the default `~/.loramancer/harvested_datasets/` cache or any custom folder selected via native Windows file dialogs.
-- **1-Click Stage 1 Transfer**: Click **"Send to Stage 1 (Curate)"** from the Harvester header to jump directly to `/curate` with the downloaded images ready for cropping, auto-captioning, and training prep.
+### 6. Catalogs & Saved Searches (Continuous Dataset Harvester)
+Inspired by the `imagetaker` workflow, the Image Harvester allows creators to save searches as permanent **Catalogs**:
+- **Persistent Catalogs**: Save search queries, target provider selections, and destination folders into persistent catalogs stored in `~/.loramancer/harvest_catalogs.json`.
+- **Automatic History Tracking & Deduplication**: Each catalog folder maintains a `download_history.json` tracking all previously downloaded image URLs and scanned local filenames.
+- **Omit Existing Images**: When searching or syncing against a catalog (or any chosen destination folder), the harvester automatically checks history and local files on disk. Previously downloaded images are automatically omitted so you only see newly discovered candidates.
+- **Continuous 1-Click Sync**: Click **"Sync New"** on any catalog in the Catalogs Manager to immediately scrape fresh images across your saved providers, omit duplicates, download the new additions directly into the catalog folder, and update the catalog count.
+- **100% ImageTaker Compatibility**: Uses standard `download_history.json` array format compatible with existing `imagetaker` project folders.
+
+### 7. Seamless Stage 1 (Curate & Caption) Integration
+- **Direct Dataset Delivery**: Download selected files straight into the default `~/.loramancer/harvested_datasets/` cache, custom folders, or organized catalog directories.
+- **1-Click Stage 1 Transfer**: Click **"Send to Stage 1 (Curate)"** from the Harvester header (or from any catalog card) to jump directly to `/curate` with the downloaded images ready for cropping, auto-captioning, and training prep.
 - **Quick-Launch from Stage 1**: Click the **"📥 Harvest Images"** button in Stage 1's header toolbar to jump straight to the Harvester at any point during dataset preparation.

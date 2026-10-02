@@ -178,6 +178,29 @@ public sealed class ImageHarvesterService {
                 results = await SearchSingleProviderAsync(query, linkedCts.Token);
             }
 
+            // Deduplicate against catalog history and existing local image files
+            string? destFolder = query.CatalogDestinationFolder;
+            if (!string.IsNullOrWhiteSpace(destFolder) && Directory.Exists(destFolder)) {
+                var historyUrls = LoadCatalogHistoryUrls(destFolder);
+                var localNames = GetExistingLocalFileNames(destFolder);
+
+                foreach (var item in results) {
+                    bool urlMatches = (!string.IsNullOrWhiteSpace(item.SourceUrl) && historyUrls.Contains(item.SourceUrl)) ||
+                                      (!string.IsNullOrWhiteSpace(item.ThumbnailUrl) && historyUrls.Contains(item.ThumbnailUrl));
+                    string clean = CleanTitle(item.Title);
+                    bool nameMatches = localNames.Contains(clean);
+
+                    if (urlMatches || nameMatches) {
+                        item.IsAlreadyDownloaded = true;
+                        item.IsSelected = false;
+                    }
+                }
+
+                if (query.OmitExistingInCatalog) {
+                    results.RemoveAll(r => r.IsAlreadyDownloaded);
+                }
+            }
+
             lock (_lock) {
                 _candidates.Clear();
                 _candidates.AddRange(results);
@@ -324,7 +347,9 @@ public sealed class ImageHarvesterService {
 
     private async Task<List<HarvestedCandidateItem>> ExecuteProviderSearchAsync(HarvestProviderDefinition provider, HarvestSearchQuery query, CancellationToken cancellationToken) {
         return provider.Engine switch {
-            HarvestEngine.DuckDuckGo => await SearchDuckDuckGoAsync(query, cancellationToken),
+            HarvestEngine.DuckDuckGo => string.Equals(provider.Id, "bing", StringComparison.OrdinalIgnoreCase)
+                ? await SearchBingImagesAsync(query, cancellationToken)
+                : await SearchWebUnifiedAsync(query, cancellationToken),
             HarvestEngine.Reddit => await SearchRedditAsync(query, cancellationToken),
             HarvestEngine.Wikimedia => await SearchWikimediaAsync(query, cancellationToken),
             HarvestEngine.Unsplash => await SearchUnsplashAsync(query, cancellationToken),
@@ -335,24 +360,66 @@ public sealed class ImageHarvesterService {
             HarvestEngine.DirectUrls => ParseDirectUrls(query),
             HarvestEngine.CustomRest => await SearchCustomRestAsync(provider, query, cancellationToken),
             HarvestEngine.PythonPlugin => await SearchPythonPluginAsync(provider, query, cancellationToken),
-            _ => await SearchDuckDuckGoAsync(query, cancellationToken)
+            _ => await SearchWebUnifiedAsync(query, cancellationToken)
         };
+    }
+
+    public async Task<List<HarvestedCandidateItem>> SearchWebUnifiedAsync(HarvestSearchQuery query, CancellationToken cancellationToken = default) {
+        if (string.IsNullOrWhiteSpace(query.Query)) return new List<HarvestedCandidateItem>();
+
+        var bingTask = SearchBingImagesAsync(query, cancellationToken);
+        var ddgTask = SearchDuckDuckGoAsync(query, cancellationToken);
+
+        try {
+            await Task.WhenAll(bingTask, ddgTask);
+        } catch {
+            // Individual scrapers handle their own errors
+        }
+
+        var results = new List<HarvestedCandidateItem>();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var bingList = bingTask.IsCompletedSuccessfully ? bingTask.Result : new List<HarvestedCandidateItem>();
+        var ddgList = ddgTask.IsCompletedSuccessfully ? ddgTask.Result : new List<HarvestedCandidateItem>();
+
+        int bIdx = 0, dIdx = 0;
+        int maxPerEngine = Math.Max(15, (int)(query.MaxResults * 0.65));
+
+        // Interleave results from Bing and DuckDuckGo for rich diversity and high volume
+        while ((bIdx < bingList.Count || dIdx < ddgList.Count) && results.Count < query.MaxResults) {
+            if (bIdx < bingList.Count && bIdx < maxPerEngine) {
+                var item = bingList[bIdx++];
+                if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+            }
+            if (dIdx < ddgList.Count && dIdx < maxPerEngine && results.Count < query.MaxResults) {
+                var item = ddgList[dIdx++];
+                if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+            }
+            if (bIdx >= maxPerEngine && dIdx >= maxPerEngine) break;
+        }
+
+        while (bIdx < bingList.Count && results.Count < query.MaxResults) {
+            var item = bingList[bIdx++];
+            if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+        }
+        while (dIdx < ddgList.Count && results.Count < query.MaxResults) {
+            var item = ddgList[dIdx++];
+            if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+        }
+
+        return results;
     }
 
     public async Task<List<HarvestedCandidateItem>> SearchDuckDuckGoAsync(HarvestSearchQuery query, CancellationToken cancellationToken = default) {
         if (string.IsNullOrWhiteSpace(query.Query)) return new List<HarvestedCandidateItem>();
 
-        // Query Bing first: robust, high-resolution, instant response times, and immune to DDG's i.js 403 bot challenges
-        var bingItems = await SearchBingImagesAsync(query, cancellationToken);
-        if (bingItems.Count > 0) {
-            return bingItems;
-        }
-
         var items = new List<HarvestedCandidateItem>();
         try {
             string searchUrl = $"https://duckduckgo.com/?q={Uri.EscapeDataString(query.Query)}";
             using var initRequest = new HttpRequestMessage(HttpMethod.Get, searchUrl);
-            initRequest.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            initRequest.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
+            initRequest.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            initRequest.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
             var initResponse = await _httpClient.SendAsync(initRequest, cancellationToken);
             string initHtml = await initResponse.Content.ReadAsStringAsync(cancellationToken);
 
@@ -403,7 +470,7 @@ public sealed class ImageHarvesterService {
                                     Height = height,
                                     SourceEngine = HarvestEngine.DuckDuckGo,
                                     ProviderId = "duckduckgo",
-                                    ProviderName = "DuckDuckGo / Web Search",
+                                    ProviderName = "DuckDuckGo",
                                     IsSelected = true
                                 });
                             }
@@ -477,8 +544,8 @@ public sealed class ImageHarvesterService {
                             Width = width,
                             Height = height,
                             SourceEngine = HarvestEngine.DuckDuckGo,
-                            ProviderId = "duckduckgo",
-                            ProviderName = "DuckDuckGo / Web Search",
+                            ProviderId = "bing",
+                            ProviderName = "Bing Images",
                             IsSelected = true
                         });
                     }
@@ -1228,6 +1295,12 @@ public sealed class ImageHarvesterService {
 
                     string fileName = $"{prefix}_{idx:D4}_{sanitizedTitle}{ext}";
                     string fullPath = Path.Combine(destinationFolder, fileName);
+                    int counter = 1;
+                    while (File.Exists(fullPath)) {
+                        fileName = $"{prefix}_{idx:D4}_{sanitizedTitle}_{counter}{ext}";
+                        fullPath = Path.Combine(destinationFolder, fileName);
+                        counter++;
+                    }
 
                     using var response = await _httpClient.GetAsync(item.SourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     if (response.IsSuccessStatusCode) {
@@ -1236,6 +1309,7 @@ public sealed class ImageHarvesterService {
                         await stream.CopyToAsync(fileStream, cancellationToken);
 
                         item.DownloadedFilePath = fullPath;
+                        item.IsAlreadyDownloaded = true;
                         lock (downloadedPaths) {
                             downloadedPaths.Add(fullPath);
                         }
@@ -1260,6 +1334,16 @@ public sealed class ImageHarvesterService {
         } finally {
             IsDownloading = false;
             OnStateChanged?.Invoke();
+        }
+
+        // Record successfully downloaded URLs into catalog history
+        var successfulUrls = selectedItems
+            .Where(i => !string.IsNullOrWhiteSpace(i.DownloadedFilePath))
+            .Select(i => i.SourceUrl)
+            .ToList();
+
+        if (successfulUrls.Count > 0) {
+            SaveCatalogHistory(destinationFolder, successfulUrls);
         }
 
         return downloadedPaths;
@@ -1420,9 +1504,17 @@ public sealed class ImageHarvesterService {
             },
             new() {
                 Id = "duckduckgo",
-                Name = "Web Image Search (DuckDuckGo/Bing)",
-                Description = "High-resolution global web search with safe-search filtering",
+                Name = "Web Image Search (DuckDuckGo + Bing)",
+                Description = "High-resolution combined web search with multi-engine deduplication",
                 Icon = "Search",
+                Engine = HarvestEngine.DuckDuckGo,
+                IsEnabled = true
+            },
+            new() {
+                Id = "bing",
+                Name = "Bing Images (Direct)",
+                Description = "Direct Microsoft Bing high-resolution image index",
+                Icon = "ImageSearch",
                 Engine = HarvestEngine.DuckDuckGo,
                 IsEnabled = true
             },
@@ -1473,5 +1565,142 @@ public sealed class ImageHarvesterService {
             cleaned = Path.GetFileNameWithoutExtension(cleaned);
         }
         return string.IsNullOrWhiteSpace(cleaned) ? "Image" : cleaned;
+    }
+
+    public static string GetCatalogsFilePath() {
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userHome, ".loramancer", "harvest_catalogs.json");
+    }
+
+    public async Task<List<HarvestCatalog>> GetCatalogsAsync() {
+        string filePath = GetCatalogsFilePath();
+        if (!File.Exists(filePath)) return new List<HarvestCatalog>();
+
+        try {
+            string json = await File.ReadAllTextAsync(filePath);
+            var list = JsonSerializer.Deserialize<List<HarvestCatalog>>(json);
+            return list ?? new List<HarvestCatalog>();
+        } catch {
+            return new List<HarvestCatalog>();
+        }
+    }
+
+    public async Task SaveCatalogAsync(HarvestCatalog catalog) {
+        var catalogs = await GetCatalogsAsync();
+        int idx = catalogs.FindIndex(c => string.Equals(c.Id, catalog.Id, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0) {
+            catalogs[idx] = catalog;
+        } else {
+            catalogs.Add(catalog);
+        }
+
+        string filePath = GetCatalogsFilePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        string json = JsonSerializer.Serialize(catalogs, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(filePath, json);
+        OnStateChanged?.Invoke();
+    }
+
+    public async Task DeleteCatalogAsync(string catalogId) {
+        var catalogs = await GetCatalogsAsync();
+        catalogs.RemoveAll(c => string.Equals(c.Id, catalogId, StringComparison.OrdinalIgnoreCase));
+
+        string filePath = GetCatalogsFilePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        string json = JsonSerializer.Serialize(catalogs, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(filePath, json);
+        OnStateChanged?.Invoke();
+    }
+
+    public async Task<int> SyncCatalogAsync(HarvestCatalog catalog, IProgress<HarvestDownloadProgress>? progress = null, CancellationToken cancellationToken = default) {
+        var query = new HarvestSearchQuery {
+            Query = catalog.Query,
+            SelectedProviderIds = catalog.SelectedProviderIds != null && catalog.SelectedProviderIds.Count > 0
+                ? catalog.SelectedProviderIds
+                : new List<string> { "duckduckgo" },
+            MaxResults = catalog.MaxResultsPerSync > 0 ? catalog.MaxResultsPerSync : 100,
+            CatalogId = catalog.Id,
+            CatalogDestinationFolder = catalog.DestinationFolder,
+            OmitExistingInCatalog = catalog.AutoOmitExisting
+        };
+
+        var candidates = await SearchAsync(query, cancellationToken);
+        if (candidates.Count == 0) return 0;
+
+        foreach (var c in candidates) {
+            c.IsSelected = true;
+        }
+
+        var downloaded = await DownloadSelectedAsync(
+            catalog.DestinationFolder,
+            catalog.Name,
+            progress,
+            cancellationToken);
+
+        catalog.LastSyncedAt = DateTime.UtcNow;
+        catalog.TotalDownloadedCount += downloaded.Count;
+        await SaveCatalogAsync(catalog);
+
+        return downloaded.Count;
+    }
+
+    public HashSet<string> LoadCatalogHistoryUrls(string destinationFolder) {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(destinationFolder) || !Directory.Exists(destinationFolder)) return set;
+
+        string historyFile = Path.Combine(destinationFolder, "download_history.json");
+        if (File.Exists(historyFile)) {
+            try {
+                string json = File.ReadAllText(historyFile);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array) {
+                    foreach (var el in doc.RootElement.EnumerateArray()) {
+                        string? u = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(u)) set.Add(u.Trim());
+                    }
+                } else if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("downloadedUrls", out var arr)) {
+                    foreach (var el in arr.EnumerateArray()) {
+                        string? u = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(u)) set.Add(u.Trim());
+                    }
+                }
+            } catch {
+                // Ignore history read error
+            }
+        }
+        return set;
+    }
+
+    public void SaveCatalogHistory(string destinationFolder, IEnumerable<string> urls) {
+        if (string.IsNullOrWhiteSpace(destinationFolder)) return;
+        Directory.CreateDirectory(destinationFolder);
+        string historyFile = Path.Combine(destinationFolder, "download_history.json");
+
+        var existing = LoadCatalogHistoryUrls(destinationFolder);
+        foreach (var u in urls) {
+            if (!string.IsNullOrWhiteSpace(u)) existing.Add(u.Trim());
+        }
+
+        try {
+            string json = JsonSerializer.Serialize(existing.ToList(), new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(historyFile, json);
+        } catch {
+            // Ignore history write error
+        }
+    }
+
+    public HashSet<string> GetExistingLocalFileNames(string destinationFolder) {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(destinationFolder) || !Directory.Exists(destinationFolder)) return set;
+        var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif" };
+        try {
+            var files = Directory.EnumerateFiles(destinationFolder);
+            foreach (var f in files) {
+                if (exts.Contains(Path.GetExtension(f))) {
+                    set.Add(Path.GetFileNameWithoutExtension(f));
+                }
+            }
+        } catch { }
+        return set;
     }
 }
