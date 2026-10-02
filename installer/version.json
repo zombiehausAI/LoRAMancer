@@ -1,8 +1,7 @@
 {
-  "version": "1.0.0",
-  "releaseDate": "2026-09-24T00:00:00Z",
-  "downloadUrl": "https://github.com/loramancer/loramancer/releases/download/v1.0.0/LoRAMancer-Setup-1.0.0.exe",
-  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "changelog": "- Initial production scaffold of LoRAMancer\n- .NET 10 Blazor Hybrid MAUI desktop client with MudBlazor dark theme\n- ComfyUI ROCm PyTorch 2.9.1+rocm7.2.1 environment ingestion\n- SafeTensors header-only zero-weight metadata parser\n- AI-Toolkit AMD hardware sanitizer (bf16, sdpa, cache_latents_to_disk)\n- Dual plugin engine for C# (.dll) and Python (isolated .venv)\n- In-app auto-updater and native Windows installer",
+  "version": "1.0.1",
+  "releaseDate": "2026-10-01T00:00:00Z",
+  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.0.1/LoRAMancer-Setup-1.0.1.exe",
+  "changelog": "- Dataset Curator & Caption Studio with tag frequency inspection and bucketing\n- LoRA Library manager with SafeTensors metadata parser\n- Image Harvester scraper plugin ecosystem\n- PostForge showcase media extraction\n- AMD ROCm hardware sanitization and AI-Toolkit engine integration",
   "mandatory": false
 }
