@@ -236,7 +236,7 @@ public sealed class AiToolkitConfigBuilderTests {
     }
 
     [Fact]
-    public void BuildAiToolkitYaml_WithAuxiliaryLora_EmitsAssistantLoraAndExtraLoras() {
+    public void BuildAiToolkitYaml_WithAuxiliaryLora_EmitsLoraPathAndExtraLoras() {
         AiToolkitConfigBuilder builder = new();
         TrainingConfig config = new() {
             RunName = "aux_lora_test",
@@ -250,7 +250,7 @@ public sealed class AiToolkitConfigBuilderTests {
         string yaml = builder.BuildAiToolkitYaml(config);
         string kohya = builder.BuildKohyaConfig(config);
 
-        Assert.Contains("assistant_lora_path: C:\\loras\\anime_style_v1.safetensors", yaml);
+        Assert.Contains("lora_path: C:\\loras\\anime_style_v1.safetensors", yaml);
         Assert.Contains("extra_loras:", yaml);
         Assert.Contains("scale: 0.85", yaml);
 

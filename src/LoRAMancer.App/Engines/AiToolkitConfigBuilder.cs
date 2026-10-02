@@ -122,7 +122,7 @@ public sealed class AiToolkitConfigBuilder {
                         };
 
                         if (!string.IsNullOrWhiteSpace(sanitized.AuxiliaryLoraPath)) {
-                            modelDict["assistant_lora_path"] = sanitized.AuxiliaryLoraPath;
+                            modelDict["lora_path"] = sanitized.AuxiliaryLoraPath;
                             modelDict["extra_loras"] = new List<object> {
                                 new Dictionary<string, object> {
                                     ["path"] = sanitized.AuxiliaryLoraPath,

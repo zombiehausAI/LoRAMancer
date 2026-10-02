@@ -546,6 +546,33 @@ public sealed class AmdVenvProvisioner {
         }
 
         PatchChromaModel(venvPath, onProgress);
+        PatchAssistantLoraGuard(venvPath, onProgress);
+    }
+
+    public static void PatchAssistantLoraGuard(string venvPath, Action<string>? onProgress) {
+        string rootDir = Path.GetDirectoryName(venvPath) ?? string.Empty;
+        string sdModelPath = Path.Combine(rootDir, "tools", "ai-toolkit", "toolkit", "stable_diffusion_model.py");
+        if (!File.Exists(sdModelPath)) {
+            sdModelPath = Path.Combine(AppContext.BaseDirectory, "tools", "ai-toolkit", "toolkit", "stable_diffusion_model.py");
+        }
+
+        if (File.Exists(sdModelPath)) {
+            string content = File.ReadAllText(sdModelPath);
+            if (!content.Contains("# [loramancer] assistant-lora-guard")) {
+                string normalized = content.Replace("\r\n", "\n");
+                string target1 = "        # if using assistant, unfuse it\n        if self.model_config.assistant_lora_path is not None:\n            print_acc(\"Unloading assistant lora\")\n            if self.invert_assistant_lora:\n                self.assistant_lora.is_active = True";
+                string repl1 = "        # [loramancer] assistant-lora-guard\n        # if using assistant, unfuse it\n        if self.model_config.assistant_lora_path is not None:\n            print_acc(\"Unloading assistant lora\")\n            if self.assistant_lora is not None:\n                if self.invert_assistant_lora:\n                    self.assistant_lora.is_active = True";
+
+                string target2 = "        # refuse loras\n        if self.model_config.assistant_lora_path is not None:\n            print_acc(\"Loading assistant lora\")\n            if self.invert_assistant_lora:\n                self.assistant_lora.is_active = False";
+                string repl2 = "        # refuse loras\n        if self.model_config.assistant_lora_path is not None:\n            print_acc(\"Loading assistant lora\")\n            if self.assistant_lora is not None:\n                if self.invert_assistant_lora:\n                    self.assistant_lora.is_active = False";
+
+                if (normalized.Contains(target1) && normalized.Contains(target2)) {
+                    normalized = normalized.Replace(target1, repl1).Replace(target2, repl2);
+                    File.WriteAllText(sdModelPath, normalized);
+                    onProgress?.Invoke("[Patch] Patched stable_diffusion_model.py assistant LoRA null guard.");
+                }
+            }
+        }
     }
 
     public static void PatchChromaModel(string venvPath, Action<string>? onProgress) {

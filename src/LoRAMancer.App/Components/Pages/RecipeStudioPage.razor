@@ -4,6 +4,9 @@
 @using LoRAMancer.App.Services
 @using LoRAMancer.App.Engines
 @using System.IO
+@using System.Collections
+@using System.Globalization
+@using YamlDotNet.Serialization
 @inject NativeFileDialogService FileDialogService
 @inject AiToolkitConfigBuilder ConfigBuilder
 @inject ModelArchitectureRegistry ArchitectureRegistry
@@ -60,6 +63,37 @@
         </MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Queue" OnClick="SendToForgeQueueOnlyAsync" Disabled="@_isBusy">
             Queue Only
+        </MudButton>
+    </div>
+</div>
+
+<!-- Drag & Drop YAML Configuration Zone -->
+<div class="position-relative mb-4 pa-3 drop-zone d-flex align-center justify-space-between flex-wrap gap-2"
+     style="background: linear-gradient(135deg, rgba(137, 180, 250, 0.07) 0%, rgba(203, 166, 247, 0.07) 100%); border: 2px dashed rgba(137, 180, 250, 0.45); border-radius: 14px; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);">
+    <InputFile OnChange="OnYamlFileDropped" accept=".yaml,.yml"
+               style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 5;"
+               title="Drag &amp; Drop AI-Toolkit YAML configuration file here or click to browse" />
+    <div class="d-flex align-center gap-3">
+        <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(137, 180, 250, 0.16); border: 1px solid rgba(137, 180, 250, 0.3); display: flex; align-items: center; justify-content: center;">
+            <MudIcon Icon="@Icons.Material.Filled.FileUpload" Style="color: #89b4fa; font-size: 1.6rem;" />
+        </div>
+        <div>
+            <div class="d-flex align-center gap-2">
+                <span style="font-weight: 700; font-size: 0.95rem; color: #cdd6f4;">
+                    Drag &amp; Drop AI-Toolkit YAML Config
+                </span>
+                <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 20px; font-weight: 600;">
+                    .YAML / .YML
+                </MudChip>
+            </div>
+            <div style="font-size: 0.78rem; color: #a6adc8; margin-top: 2px;">
+                Drop any AI-Toolkit config onto this area to auto-load dataset paths, base models, hyperparameters, and prompts into Recipe &amp; Prep. Or click to browse.
+            </div>
+        </div>
+    </div>
+    <div class="d-flex align-center gap-2" style="z-index: 1;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileOpen" Style="pointer-events: none;">
+            Browse YAML
         </MudButton>
     </div>
 </div>
@@ -1275,6 +1309,252 @@
         } finally {
             _isBusy = false;
         }
+    }
+
+    private async Task OnYamlFileDropped(InputFileChangeEventArgs e) {
+        try {
+            var file = e.File;
+            if (file == null) return;
+
+            var ext = Path.GetExtension(file.Name);
+            if (!string.Equals(ext, ".yaml", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(ext, ".yml", StringComparison.OrdinalIgnoreCase)) {
+                Snackbar.Add("Please drop a valid .yaml or .yml configuration file.", Severity.Warning);
+                return;
+            }
+
+            const long maxFileSize = 5 * 1024 * 1024;
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var reader = new StreamReader(stream);
+            string yamlContent = await reader.ReadToEndAsync();
+
+            await LoadRecipeFromYamlAsync(yamlContent, file.Name);
+        } catch (Exception ex) {
+            Snackbar.Add($"Error reading YAML file: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadRecipeFromYamlAsync(string yamlContent, string? fileName) {
+        try {
+            var deserializer = new DeserializerBuilder()
+                .IgnoreUnmatchedProperties()
+                .Build();
+
+            var rawObj = deserializer.Deserialize<object>(yamlContent);
+            if (rawObj is not IDictionary rootDict) {
+                Snackbar.Add("The YAML file does not contain a valid dictionary structure.", Severity.Warning);
+                return;
+            }
+
+            var configDict = GetDictCaseInsensitive(rootDict, "config") ?? rootDict;
+
+            string? name = GetString(GetValueCaseInsensitive(configDict, "name"))
+                        ?? GetString(GetValueCaseInsensitive(rootDict, "name"));
+            if (!string.IsNullOrWhiteSpace(name)) {
+                _runName = name.Trim();
+            } else if (!string.IsNullOrWhiteSpace(fileName)) {
+                _runName = Path.GetFileNameWithoutExtension(fileName).Replace("_aitoolkit", "");
+            }
+
+            IDictionary? processDict = null;
+            var processList = GetListCaseInsensitive(configDict, "process")
+                           ?? GetListCaseInsensitive(rootDict, "process");
+            if (processList != null && processList.Count > 0) {
+                processDict = processList[0] as IDictionary;
+            } else {
+                processDict = GetDictCaseInsensitive(configDict, "process")
+                           ?? GetDictCaseInsensitive(rootDict, "process")
+                           ?? configDict;
+            }
+
+            string? outDir = GetString(GetValueCaseInsensitive(processDict, "training_folder", "output_folder", "output_dir", "outputDirectory"));
+            if (!string.IsNullOrWhiteSpace(outDir)) {
+                _outputDirectory = outDir.Trim();
+            }
+
+            var networkDict = GetDictCaseInsensitive(processDict, "network");
+            if (networkDict != null) {
+                int? dim = GetInt(GetValueCaseInsensitive(networkDict, "linear", "dim", "rank", "r"));
+                if (dim.HasValue && dim.Value > 0) {
+                    _networkDim = dim.Value;
+                }
+                double? alpha = GetDouble(GetValueCaseInsensitive(networkDict, "linear_alpha", "alpha", "a"));
+                if (alpha.HasValue && alpha.Value > 0) {
+                    _networkAlpha = alpha.Value;
+                }
+            }
+
+            var modelDict = GetDictCaseInsensitive(processDict, "model");
+            if (modelDict != null) {
+                string? nameOrPath = GetString(GetValueCaseInsensitive(modelDict, "name_or_path", "model_path", "base_model"));
+                if (!string.IsNullOrWhiteSpace(nameOrPath)) {
+                    var match = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
+                        string.Equals(a.DisplayName, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.Id, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.PretrainedModelPath, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(a.Family) && nameOrPath.Contains(a.Family, StringComparison.OrdinalIgnoreCase)) ||
+                        a.DetectionKeywords.Any(k => nameOrPath.Contains(k, StringComparison.OrdinalIgnoreCase)));
+
+                    if (match != null) {
+                        _targetBaseModel = match.DisplayName;
+                        _customBaseModelPath = string.Empty;
+                    } else if (File.Exists(nameOrPath) || Directory.Exists(nameOrPath)) {
+                        _customBaseModelPath = nameOrPath;
+                    } else {
+                        if (nameOrPath.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "FLUX.1-dev";
+                        } else if (nameOrPath.Contains("sdxl", StringComparison.OrdinalIgnoreCase) || nameOrPath.Contains("sd_xl", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SDXL 1.0";
+                        } else if (nameOrPath.Contains("pony", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "Pony Diffusion V6 XL";
+                        } else if (nameOrPath.Contains("v1-5", StringComparison.OrdinalIgnoreCase) || nameOrPath.Contains("sd15", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SD 1.5";
+                        } else if (nameOrPath.Contains("sd3", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SD3.5 Large";
+                        }
+                    }
+                }
+
+                string? auxPath = GetString(GetValueCaseInsensitive(modelDict, "lora_path", "assistant_lora_path"));
+                double auxScale = 1.0;
+                var extraLoras = GetListCaseInsensitive(modelDict, "extra_loras");
+                if (extraLoras != null && extraLoras.Count > 0 && extraLoras[0] is IDictionary extraLoraDict) {
+                    string? p = GetString(GetValueCaseInsensitive(extraLoraDict, "path", "lora_path"));
+                    if (!string.IsNullOrWhiteSpace(p)) {
+                        auxPath = p;
+                    }
+                    double? s = GetDouble(GetValueCaseInsensitive(extraLoraDict, "scale", "weight"));
+                    if (s.HasValue) {
+                        auxScale = s.Value;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(auxPath)) {
+                    _auxiliaryLoraPath = auxPath;
+                    _auxiliaryLoraWeight = auxScale;
+                    _enableAuxiliaryLora = true;
+                    StudioSession.SetAuxiliaryLora(_auxiliaryLoraPath, _auxiliaryLoraWeight);
+                }
+            }
+
+            var trainDict = GetDictCaseInsensitive(processDict, "train");
+            if (trainDict != null) {
+                int? batchSize = GetInt(GetValueCaseInsensitive(trainDict, "batch_size", "batchSize"));
+                if (batchSize.HasValue && batchSize.Value > 0) _batchSize = batchSize.Value;
+
+                int? epochs = GetInt(GetValueCaseInsensitive(trainDict, "epochs", "max_train_epochs"));
+                if (epochs.HasValue && epochs.Value > 0) _epochs = epochs.Value;
+
+                double? lr = GetDouble(GetValueCaseInsensitive(trainDict, "lr", "learning_rate", "learningRate"));
+                if (lr.HasValue && lr.Value > 0) _learningRate = lr.Value;
+
+                double? unetLr = GetDouble(GetValueCaseInsensitive(trainDict, "unet_lr", "unetLearningRate"));
+                if (unetLr.HasValue && unetLr.Value > 0) _unetLearningRate = unetLr.Value;
+
+                double? teLr = GetDouble(GetValueCaseInsensitive(trainDict, "text_encoder_lr", "textEncoderLearningRate"));
+                if (teLr.HasValue) _textEncoderLearningRate = teLr.Value;
+
+                string? opt = GetString(GetValueCaseInsensitive(trainDict, "optimizer"));
+                if (!string.IsNullOrWhiteSpace(opt)) _optimizer = opt.Trim().ToLowerInvariant();
+
+                string? sched = GetString(GetValueCaseInsensitive(trainDict, "lr_scheduler", "scheduler"));
+                if (!string.IsNullOrWhiteSpace(sched)) _lrScheduler = sched.Trim().ToLowerInvariant();
+
+                string? dtype = GetString(GetValueCaseInsensitive(trainDict, "dtype", "precision"));
+                if (!string.IsNullOrWhiteSpace(dtype)) _precision = dtype.Trim().ToLowerInvariant();
+            }
+
+            var saveDict = GetDictCaseInsensitive(processDict, "save");
+            if (saveDict != null) {
+                string? dtype = GetString(GetValueCaseInsensitive(saveDict, "dtype", "precision"));
+                if (!string.IsNullOrWhiteSpace(dtype) && string.IsNullOrWhiteSpace(_precision)) _precision = dtype.Trim().ToLowerInvariant();
+            }
+
+            var datasetsList = GetListCaseInsensitive(processDict, "datasets");
+            if (datasetsList != null && datasetsList.Count > 0 && datasetsList[0] is IDictionary datasetDict) {
+                string? folder = GetString(GetValueCaseInsensitive(datasetDict, "folder_path", "folder", "dataset_directory", "path"));
+                if (!string.IsNullOrWhiteSpace(folder)) {
+                    _datasetDirectory = folder.Trim();
+                    StudioSession.SetDatasetFolder(_datasetDirectory);
+                    await InspectDatasetAsync();
+                }
+
+                bool? shuffle = GetBool(GetValueCaseInsensitive(datasetDict, "shuffle_tokens"));
+                if (shuffle.HasValue) _shuffleTokens = shuffle.Value;
+
+                bool? flip = GetBool(GetValueCaseInsensitive(datasetDict, "flip_aug", "flip_x"));
+                if (flip.HasValue) _flipAug = flip.Value;
+
+                bool? cacheLatents = GetBool(GetValueCaseInsensitive(datasetDict, "cache_latents_to_disk"));
+                if (cacheLatents.HasValue) _cacheLatentsToDisk = cacheLatents.Value;
+            }
+
+            var sampleDict = GetDictCaseInsensitive(processDict, "sample");
+            if (sampleDict != null) {
+                string? neg = GetString(GetValueCaseInsensitive(sampleDict, "neg", "negative_prompt", "negative"));
+                if (neg != null) _negativePrompt = neg;
+
+                var promptsList = GetListCaseInsensitive(sampleDict, "prompts");
+                if (promptsList != null) {
+                    if (promptsList.Count > 0 && promptsList[0] != null) _samplePrompt1 = promptsList[0]!.ToString() ?? "";
+                    if (promptsList.Count > 1 && promptsList[1] != null) _samplePrompt2 = promptsList[1]!.ToString() ?? "";
+                    if (promptsList.Count > 2 && promptsList[2] != null) _samplePrompt3 = promptsList[2]!.ToString() ?? "";
+                }
+            }
+
+            StateHasChanged();
+            Snackbar.Add($"Loaded configuration from '{fileName ?? "YAML"}' into Recipe & Prep!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to parse YAML config: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static object? GetValueCaseInsensitive(object? dictObj, params string[] keys) {
+        if (dictObj is not IDictionary dict) return null;
+        foreach (var key in keys) {
+            foreach (DictionaryEntry entry in dict) {
+                if (string.Equals(entry.Key?.ToString(), key, StringComparison.OrdinalIgnoreCase)) {
+                    return entry.Value;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static IDictionary? GetDictCaseInsensitive(object? dictObj, params string[] keys) {
+        var val = GetValueCaseInsensitive(dictObj, keys);
+        return val as IDictionary;
+    }
+
+    private static IList? GetListCaseInsensitive(object? dictObj, params string[] keys) {
+        var val = GetValueCaseInsensitive(dictObj, keys);
+        return val as IList;
+    }
+
+    private static string? GetString(object? val) => val?.ToString();
+
+    private static int? GetInt(object? val) {
+        if (val == null) return null;
+        if (val is int i) return i;
+        if (val is long l) return (int)l;
+        if (int.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out int parsed)) return parsed;
+        return null;
+    }
+
+    private static double? GetDouble(object? val) {
+        if (val == null) return null;
+        if (val is double d) return d;
+        if (val is float f) return f;
+        if (val is decimal dec) return (double)dec;
+        if (double.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed)) return parsed;
+        return null;
+    }
+
+    private static bool? GetBool(object? val) {
+        if (val == null) return null;
+        if (val is bool b) return b;
+        if (bool.TryParse(val.ToString(), out bool parsed)) return parsed;
+        return null;
     }
 
     public void Dispose() {
