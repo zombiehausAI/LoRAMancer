@@ -102,4 +102,32 @@ LoRAMancer lets creators save their battle-tested hyperparameter recipes and fav
 - **Save Current as Favorite**: Found a hyperparameter combination that produces great likeness or texture? Click **Save Favorite Recipe** in the wizard bar, enter a recipe name and description, and your exact configuration is instantly saved and marked as a favorite (`⭐`).
 - **Favorite & Deletion Management**: Toggle favorite status (`⭐`) on any recipe directly from the selector bar or delete obsolete custom presets with one click.
 
+## 12. Stage 2: Recipe Studio & Auxiliary LoRA Conditioning (`/recipe`)
+
+To give complex training workflows room to breathe without modal constraints, LoRAMancer provides a dedicated **Stage 2: Recipe Studio & Configuration Forge** page:
+- **Dedicated Full-Width Workspace**: Replaces cramped dialogs with a responsive multi-column layout organizing Model Architecture, Auxiliary LoRA conditioning, Dataset inspection, Hyperparameters, and Live Telemetry.
+- **Incorporated Auxiliary LoRA (Residual Delta Training)**:
+  - Condition new training runs on an existing frozen LoRA adapter.
+  - Mathematically, backpropagation gradients adapt around the auxiliary adapter weights, teaching the new LoRA only the novel residual features without concept fighting or destructive interference.
+  - Adjustable conditioning multiplier / scale slider (`0.1x` to `2.0x`).
+  - Real-time architecture parity detection (verifies compatibility between the attached LoRA and the chosen base diffusion model).
+- **Surgical Layer Filter (Chop-Shop Inspired)**:
+  - Selectively condition on specific anatomical or functional parts of the auxiliary LoRA rather than the entire file.
+  - **Calibrated Presets**:
+    - 🌟 **All Components (100% Full Model)**: Passes all layers directly.
+    - 🎨 **Visual DiT / UNet Only**: Automatically zeroes text encoders (`lora_te`, `lora_clip`, `T5`) to prevent trigger tag pollution or prompt overwriting while preserving full visual and stylistic transfer.
+    - 🔤 **Prompt Triggers & Steering Only**: Retains only text encoders to transfer concept steering while leaving visual geometry completely open for new learning.
+    - 👤 **Identity & Bone Structure Only**: Retains mid-block geometry (`MID00`, FLUX `double_blocks 6-12`).
+    - 💡 **Lighting, Palette & Mood Only**: Retains early input layers (`IN00-IN03`, FLUX `double_blocks 0-5`).
+    - 🔍 **Detail, Texture & Skin Pores Only**: Retains high-frequency output layers (`OUT09-OUT11`, FLUX `single_blocks 30+`).
+    - ✂️ **Custom Chop-Shop Matrix**: Expand the interactive parts matrix to customize individual component weights (`0.1x` to `1.5x`) or toggle individual parts on/off.
+  - **Zero-Latency Slicing & Caching**: When filtering is requested, LoRAMancer slices the tensor dictionary into a cached companion file (`~/.loramancer/aux_slices/`), zeroing out excluded weights while preserving mathematical rank integrity.
+- **Library Context Action ("Add to Recipe")**:
+  - Right-click any LoRA card or table row in the LoRA Library (`/`) and select **Add to Recipe (Auxiliary LoRA)** to instantly load it into the Recipe Studio as the conditioning adapter.
+- **1-Click Forge Handoff**:
+  - Click **Send to Forge & Launch** to generate the AI-Toolkit YAML and automatically dispatch to **Stage 3: Train & Forge** (`/training?config=...&autostart=true`).
+  - Or click **Queue Only** to add the run to the training queue without immediate execution.
+
+
+
 

@@ -11,6 +11,7 @@
 @inject AuthTokenManagerService TokenManager
 @inject ThemeService ThemeManager
 @inject LoraDatabaseService DatabaseService
+@inject PostForgeShowcaseService ShowcaseService
 @inject ISnackbar Snackbar
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
@@ -737,9 +738,14 @@
                                 Folders scanned by the Post-Forge Showcase gallery. Remove slow, network, or troublesome folders here to keep scans instant.
                             </MudText>
                         </div>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddShowcaseFolderAsync">
-                            Add Folder...
-                        </MudButton>
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddShowcaseFolderAsync">
+                                Add Folder...
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="PurgeOrphanedShowcaseMediaAsync">
+                                Purge Removed Folders &amp; Sync DB
+                            </MudButton>
+                        </div>
                     </div>
 
                     @if (_settings.ShowcaseDirectories == null || _settings.ShowcaseDirectories.Count == 0) {
@@ -2039,10 +2045,28 @@
         }
     }
 
-    private void RemoveShowcaseFolder(string folder) {
+    private async Task RemoveShowcaseFolder(string folder) {
         if (_settings.ShowcaseDirectories != null) {
             _settings.ShowcaseDirectories.RemoveAll(d => string.Equals(d, folder, StringComparison.OrdinalIgnoreCase));
-            Snackbar.Add($"Removed '{folder}' from Showcase directories. Click 'Save Settings' to apply.", Severity.Warning);
+            try {
+                await ShowcaseService.RemoveFolderAsync(folder);
+                Snackbar.Add($"Removed '{folder}' from Showcase and purged gallery database records.", Severity.Success);
+            } catch (Exception ex) {
+                Snackbar.Add($"Removed '{folder}' from settings: {ex.Message}", Severity.Warning);
+            }
+        }
+    }
+
+    private async Task PurgeOrphanedShowcaseMediaAsync() {
+        try {
+            int purged = await ShowcaseService.PurgeOrphanedMediaAsync();
+            if (purged > 0) {
+                Snackbar.Add($"Successfully purged {purged} orphaned media items from showcase database and cache!", Severity.Success);
+            } else {
+                Snackbar.Add("Showcase database is clean. No orphaned records found.", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to purge showcase media: {ex.Message}", Severity.Error);
         }
     }
 

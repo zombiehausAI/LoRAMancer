@@ -233,6 +233,29 @@ public sealed class AiToolkitConfigBuilderTests {
         Assert.Contains("keep_tokens = 3", kohya);
         Assert.Contains("clip_skip = 2", kohya);
     }
+
+    [Fact]
+    public void BuildAiToolkitYaml_WithAuxiliaryLora_EmitsAssistantLoraAndExtraLoras() {
+        AiToolkitConfigBuilder builder = new();
+        TrainingConfig config = new() {
+            RunName = "aux_lora_test",
+            DatasetDirectory = "D:\\datasets\\test",
+            OutputDirectory = "D:\\output\\test",
+            TargetBaseModel = "FLUX.1-dev",
+            AuxiliaryLoraPath = "C:\\loras\\anime_style_v1.safetensors",
+            AuxiliaryLoraWeight = 0.85
+        };
+
+        string yaml = builder.BuildAiToolkitYaml(config);
+        string kohya = builder.BuildKohyaConfig(config);
+
+        Assert.Contains("assistant_lora_path: C:\\loras\\anime_style_v1.safetensors", yaml);
+        Assert.Contains("extra_loras:", yaml);
+        Assert.Contains("scale: 0.85", yaml);
+
+        Assert.Contains("network_weights = \"C:\\loras\\anime_style_v1.safetensors\"", kohya);
+        Assert.Contains("network_multiplier = 0.85", kohya);
+    }
 }
 
 

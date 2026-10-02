@@ -18,8 +18,11 @@
         <MudText Typo="Typo.body2" Color="Color.Secondary">Execute AI-Toolkit runs with live hardware acceleration telemetry and log streaming</MudText>
     </div>
     <div class="d-flex align-center flex-wrap gap-2">
-        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenTrainingWizardAsync">
-            Training Wizard
+        <MudButton Variant="Variant.Filled" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenRecipeStudio">
+            Recipe Studio (Stage 2)
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Tune" OnClick="OpenTrainingWizardAsync">
+            Quick Wizard
         </MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Collections" OnClick="OpenDatasetCuratorAsync">
             Curate Dataset
@@ -537,6 +540,10 @@
         lock (_logsLock) {
             _logs.Clear();
         }
+    }
+
+    private void OpenRecipeStudio() {
+        NavManager.NavigateTo("/recipe");
     }
 
     private async Task OpenTrainingWizardAsync() {

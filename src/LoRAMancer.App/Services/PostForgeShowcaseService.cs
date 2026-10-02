@@ -62,21 +62,36 @@ public sealed class PostForgeShowcaseService {
     public async Task LoadCacheAsync(CancellationToken cancellationToken = default) {
         await _lock.WaitAsync(cancellationToken);
         try {
+            var configuredDirs = GetConfiguredDirectories();
             bool loadedFromDb = false;
             if (_databaseService != null) {
                 try {
                     var dbItems = await _databaseService.GetAllGalleryMediaAsync(cancellationToken);
                     if (dbItems.Count > 0) {
+                        var orphanedInDb = new List<string>();
                         lock (_items) {
                             _items.Clear();
                             foreach (var item in dbItems) {
-                                if (File.Exists(item.FilePath)) {
+                                bool belongs = configuredDirs.Any(d => item.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase));
+                                if (belongs && File.Exists(item.FilePath)) {
                                     _items[item.FilePath] = item;
+                                } else if (!belongs) {
+                                    orphanedInDb.Add(item.FilePath);
                                 }
                             }
                         }
                         UpdateSnapshot();
                         loadedFromDb = true;
+
+                        if (orphanedInDb.Count > 0) {
+                            _ = Task.Run(async () => {
+                                foreach (var orphan in orphanedInDb) {
+                                    try {
+                                        await _databaseService.RemoveGalleryMediaAsync(orphan, CancellationToken.None);
+                                    } catch { }
+                                }
+                            });
+                        }
                     }
                 } catch {
                     // Fallback to json cache if db query fails
@@ -93,7 +108,8 @@ public sealed class PostForgeShowcaseService {
                         lock (_items) {
                             _items.Clear();
                             foreach (var item in cached) {
-                                if (File.Exists(item.FilePath)) {
+                                bool belongs = configuredDirs.Any(d => item.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase));
+                                if (belongs && File.Exists(item.FilePath)) {
                                     _items[item.FilePath] = item;
                                 }
                             }
@@ -193,22 +209,70 @@ public sealed class PostForgeShowcaseService {
             await _settingsService.SaveSettingsAsync(settings);
         }
 
+        string cleanPath = directoryPath.TrimEnd('\\', '/');
+        List<string> removedKeys = new();
         lock (_items) {
-            var toRemove = _items.Keys.Where(k => k.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase)).ToList();
+            var toRemove = _items.Keys.Where(k =>
+                k.StartsWith(cleanPath + "\\", StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(cleanPath + "/", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(k, cleanPath, StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase)
+            ).ToList();
             foreach (var k in toRemove) {
                 _items.Remove(k);
+                removedKeys.Add(k);
             }
         }
 
         if (_databaseService != null) {
             try {
                 await _databaseService.RemoveGalleryMediaByFolderAsync(directoryPath, cancellationToken);
+                foreach (var k in removedKeys) {
+                    await _databaseService.RemoveGalleryMediaAsync(k, cancellationToken);
+                }
             } catch { }
         }
 
         UpdateSnapshot();
         await SaveCacheAsync(cancellationToken);
         OnShowcaseUpdated?.Invoke();
+    }
+
+    /// <summary>
+    /// Purges all cached and database records for directories that are no longer in configured ShowcaseDirectories.
+    /// </summary>
+    public async Task<int> PurgeOrphanedMediaAsync(CancellationToken cancellationToken = default) {
+        var dirs = GetConfiguredDirectories();
+        List<string> orphans;
+        lock (_items) {
+            orphans = _items.Keys
+                .Where(k => !dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            foreach (var o in orphans) {
+                _items.Remove(o);
+            }
+        }
+
+        if (_databaseService != null) {
+            try {
+                var allDb = await _databaseService.GetAllGalleryMediaAsync(cancellationToken);
+                var dbOrphans = allDb.Where(i => !dirs.Any(d => i.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase))).ToList();
+                foreach (var item in dbOrphans) {
+                    await _databaseService.RemoveGalleryMediaAsync(item.FilePath, cancellationToken);
+                    if (!orphans.Contains(item.FilePath, StringComparer.OrdinalIgnoreCase)) {
+                        orphans.Add(item.FilePath);
+                    }
+                }
+            } catch { }
+        }
+
+        if (orphans.Count > 0) {
+            UpdateSnapshot();
+            await SaveCacheAsync(cancellationToken);
+            OnShowcaseUpdated?.Invoke();
+        }
+
+        return orphans.Count;
     }
 
     /// <summary>
@@ -410,12 +474,12 @@ public sealed class PostForgeShowcaseService {
             }
         }
 
-        // Clean up items for files deleted from disk using the fast candidate set
+        // Clean up items for files deleted from disk OR files belonging to removed directories
         lock (_items) {
-            var dead = _items.Keys
-                .Where(k => dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)) && !candidateFilesSet.Contains(k))
+            var toRemove = _items.Keys
+                .Where(k => !dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)) || !candidateFilesSet.Contains(k))
                 .ToList();
-            foreach (var d in dead) {
+            foreach (var d in toRemove) {
                 _items.Remove(d);
                 if (_databaseService != null) {
                     _ = _databaseService.RemoveGalleryMediaAsync(d, CancellationToken.None);

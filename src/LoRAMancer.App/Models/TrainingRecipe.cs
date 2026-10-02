@@ -11,6 +11,8 @@ public sealed class TrainingRecipe {
     public string TargetBaseModel { get; set; } = "FLUX.1 Dev";
     public string? CustomBaseModelPath { get; set; }
     public string SubjectType { get; set; } = "Character";
+    public string AuxiliaryLoraPath { get; set; } = string.Empty;
+    public double AuxiliaryLoraWeight { get; set; } = 1.0;
 
     public int NetworkDim { get; set; } = 16;
     public double NetworkAlpha { get; set; } = 16.0;

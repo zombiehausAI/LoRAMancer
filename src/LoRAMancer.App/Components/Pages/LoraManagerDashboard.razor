@@ -660,8 +660,11 @@
                 <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(lora))">
                     Test in ComfyUI Canvas (Stage 4)
                 </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Extension" IconColor="Color.Tertiary" OnClick="@(() => AddLoraToRecipe(lora))">
+                    Add to Recipe (Auxiliary LoRA)
+                </MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(lora))">
-                    Clone Recipe into Trainer (Stage 2)
+                    Clone Recipe into Trainer
                 </MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(lora))">
                     Save as Favorite Recipe
@@ -851,8 +854,11 @@
                         <MudMenuItem Icon="@Icons.Material.Filled.Speed" IconColor="Color.Success" OnClick="@(() => SendToStudioTest(context))">
                             Test in ComfyUI Canvas (Stage 4)
                         </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.Extension" IconColor="Color.Tertiary" OnClick="@(() => AddLoraToRecipe(context))">
+                            Add to Recipe (Auxiliary LoRA)
+                        </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(context))">
-                            Clone Recipe into Trainer (Stage 2)
+                            Clone Recipe into Trainer
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(context))">
                             Save as Favorite Recipe
@@ -1986,6 +1992,16 @@
     private void CancelEnrichment() {
         LibraryService.CancelEnrichment();
         Snackbar.Add("Civitai background lookup stopped.", Severity.Info);
+    }
+
+    private void AddLoraToRecipe(LoraMetadata lora) {
+        if (lora == null || string.IsNullOrWhiteSpace(lora.FilePath)) {
+            return;
+        }
+
+        StudioSession.SetAuxiliaryLora(lora.FilePath, 1.0);
+        Snackbar.Add($"Added '{lora.FileName}' as Auxiliary LoRA in Recipe Studio!", Severity.Success);
+        NavigationManager.NavigateTo($"/recipe?auxLora={Uri.EscapeDataString(lora.FilePath)}");
     }
 
     private async Task UseLoraTrainingSettings(LoraMetadata lora) {
