@@ -24,7 +24,7 @@
 @inject LoraChopShopService ChopShopService
 @implements IDisposable
 
-<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4" style="position: relative; z-index: 10;">
     <div class="d-flex align-center gap-3">
         <div style="@($"width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}33, {ThemeManager.EffectivePrimaryColor}11); border: 1px solid {ThemeManager.EffectivePrimaryColor}55; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px {ThemeManager.EffectivePrimaryColor}33;")">
             <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.8rem;")" />
@@ -44,7 +44,7 @@
         </div>
     </div>
     
-    <div class="d-flex align-center flex-wrap gap-2">
+    <div class="d-flex align-center flex-wrap gap-2" style="position: relative; z-index: 10;">
         <div class="d-flex align-center gap-2 pa-1 px-3" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 20px;">
             <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Style="@($"color: {(_isProMode ? ThemeManager.EffectivePrimaryColor : "var(--text-secondary)")};")" />
             <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
@@ -68,12 +68,12 @@
 </div>
 
 <!-- Drag & Drop YAML Configuration Zone -->
-<div class="position-relative mb-4 pa-3 drop-zone d-flex align-center justify-space-between flex-wrap gap-2"
-     style="background: linear-gradient(135deg, rgba(137, 180, 250, 0.07) 0%, rgba(203, 166, 247, 0.07) 100%); border: 2px dashed rgba(137, 180, 250, 0.45); border-radius: 14px; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);">
+<div class="mb-4 pa-3 drop-zone d-flex align-center justify-space-between flex-wrap gap-2"
+     style="position: relative; overflow: hidden; background: linear-gradient(135deg, rgba(137, 180, 250, 0.07) 0%, rgba(203, 166, 247, 0.07) 100%); border: 2px dashed rgba(137, 180, 250, 0.45); border-radius: 14px; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);">
     <InputFile OnChange="OnYamlFileDropped" accept=".yaml,.yml"
-               style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 5;"
+               style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 2;"
                title="Drag &amp; Drop AI-Toolkit YAML configuration file here or click to browse" />
-    <div class="d-flex align-center gap-3">
+    <div class="d-flex align-center gap-3" style="position: relative; z-index: 1; pointer-events: none;">
         <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(137, 180, 250, 0.16); border: 1px solid rgba(137, 180, 250, 0.3); display: flex; align-items: center; justify-content: center;">
             <MudIcon Icon="@Icons.Material.Filled.FileUpload" Style="color: #89b4fa; font-size: 1.6rem;" />
         </div>
@@ -91,8 +91,8 @@
             </div>
         </div>
     </div>
-    <div class="d-flex align-center gap-2" style="z-index: 1;">
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileOpen" Style="pointer-events: none;">
+    <div class="d-flex align-center gap-2" style="position: relative; z-index: 1; pointer-events: none;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileOpen">
             Browse YAML
         </MudButton>
     </div>
