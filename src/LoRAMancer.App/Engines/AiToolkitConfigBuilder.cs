@@ -152,6 +152,7 @@ public sealed class AiToolkitConfigBuilder {
                                     ["caption_dropout_rate"] = 0.05,
                                     ["shuffle_tokens"] = sanitized.ShuffleTokens,
                                     ["keep_tokens"] = sanitized.KeepTokens,
+                                    ["flip_x"] = sanitized.FlipAug,
                                     ["flip_aug"] = sanitized.FlipAug,
                                     ["cache_latents_to_disk"] = sanitized.CacheLatentsToDisk,
                                     ["resolution"] = new List<int> { archInfo.DefaultResolution }

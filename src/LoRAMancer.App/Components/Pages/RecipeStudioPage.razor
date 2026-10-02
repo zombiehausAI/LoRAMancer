@@ -540,9 +540,7 @@
                     <div class="d-flex align-center flex-wrap gap-4 pt-1">
                         <MudCheckBox @bind-Value="_cacheLatentsToDisk" Label="Cache Latents to Disk" Color="Color.Primary" Dense="true" />
                         <MudCheckBox @bind-Value="_shuffleTokens" Label="Shuffle Caption Tokens" Color="Color.Primary" Dense="true" />
-                        @if (_isProMode) {
-                            <MudCheckBox @bind-Value="_flipAug" Label="Horizontal Flip Aug" Color="Color.Primary" Dense="true" />
-                        }
+                        <MudCheckBox @bind-Value="_flipAug" Label="Horizontal Flip Augmentation (flip_x)" Color="Color.Primary" Dense="true" />
                     </div>
                 </div>
             </MudCardContent>
@@ -728,6 +726,10 @@
                 ApplyDonorLora(match);
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(RecipeIdQuery)) {
+            OnRecipeSelected(RecipeIdQuery);
+        }
     }
 
     private void ApplyDonorLora(LoraMetadata donor) {
@@ -743,6 +745,8 @@
         _precision = cloned.Precision;
         _targetBaseModel = cloned.TargetBaseModel;
         _epochs = cloned.MaxTrainEpochs;
+        _flipAug = cloned.FlipAug;
+        _shuffleTokens = cloned.ShuffleTokens;
     }
 
     private void ClearDonorLora() {
@@ -960,6 +964,8 @@
         _repeats = recipe.Repeats;
         _batchSize = recipe.BatchSize;
         _saveEveryNEpochs = recipe.SaveEveryNEpochs;
+        _flipAug = recipe.FlipAug;
+        _shuffleTokens = recipe.ShuffleTokens;
 
         if (!string.IsNullOrWhiteSpace(recipe.AuxiliaryLoraPath)) {
             _auxiliaryLoraPath = recipe.AuxiliaryLoraPath;
@@ -1082,6 +1088,8 @@
                 Repeats = _repeats,
                 BatchSize = _batchSize,
                 SaveEveryNEpochs = _saveEveryNEpochs,
+                FlipAug = _flipAug,
+                ShuffleTokens = _shuffleTokens,
                 SamplePrompt1 = _samplePrompt
             };
 

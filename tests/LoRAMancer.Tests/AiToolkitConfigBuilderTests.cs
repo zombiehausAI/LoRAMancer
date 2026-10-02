@@ -223,6 +223,7 @@ public sealed class AiToolkitConfigBuilderTests {
         string yaml = builder.BuildAiToolkitYaml(config);
         string kohya = builder.BuildKohyaConfig(config);
 
+        Assert.Contains("flip_x: true", yaml);
         Assert.Contains("flip_aug: true", yaml);
         Assert.Contains("shuffle_tokens: true", yaml);
         Assert.Contains("keep_tokens: 3", yaml);
