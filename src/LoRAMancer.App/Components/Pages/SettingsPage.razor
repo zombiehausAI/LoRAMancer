@@ -269,23 +269,68 @@
                         </div>
 
                         @if (!string.IsNullOrEmpty(_toolkitCommit)) {
-                            <div style="font-size:0.75rem; color:#89b4fa;" class="mb-3">
+                            <div style="font-size:0.75rem; color:#89b4fa;" class="mb-2">
                                 Commit: <code>@_toolkitCommit</code>
                             </div>
-                        } else {
-                            <div class="mb-3"></div>
                         }
 
-                        <div class="d-flex gap-2">
+                        <div style="font-size:0.75rem; color:#cdd6f4;" class="mb-1">
+                            Active Git Branch: <code style="color: #a6e3a1;">@(string.IsNullOrWhiteSpace(_currentGitBranch) ? "unknown" : _currentGitBranch)</code>
+                        </div>
+                        <div style="font-size:0.75rem; color:#a6adc8;" class="mb-3">
+                            Configured Target: <code style="color: #89b4fa;">@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)</code>
+                        </div>
+
+                        @if (IsBranchSwitchPending) {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.AltRoute">
+                                <div><b>Branch switch required:</b> Repository is currently on <code>@_currentGitBranch</code>, but target is set to <code>@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)</code>.</div>
+                                <div style="font-size: 0.75rem; opacity: 0.9;" class="mt-1">
+                                    Click <b>"Switch to '@(string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch)' & Pull"</b> below to automatically change branches and pull the latest code.
+                                </div>
+                            </MudAlert>
+                        }
+
+                        @if (_toolkitUpdateResult != null && !IsBranchSwitchPending) {
+                            @if (_toolkitUpdateResult.HasUpdate) {
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.SystemUpdate">
+                                    Update available! <b>@_toolkitUpdateResult.CommitsBehind</b> commit(s) behind <code>origin/@_toolkitUpdateResult.Branch</code>.
+                                    @if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.RemoteCommit)) {
+                                        <div style="font-size: 0.75rem; opacity: 0.9;" class="mt-1">Latest: @_toolkitUpdateResult.RemoteCommit</div>
+                                    }
+                                </MudAlert>
+                            } else if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.ErrorMessage)) {
+                                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                    @_toolkitUpdateResult.ErrorMessage
+                                </MudAlert>
+                            } else {
+                                <div style="font-size:0.75rem; color:#a6e3a1;" class="d-flex align-center gap-1 mb-3">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                                    <span>Up to date with origin/@_toolkitUpdateResult.Branch</span>
+                                </div>
+                            }
+                        }
+
+                        <div class="d-flex gap-2 flex-wrap">
                             @if (ToolkitSetup.IsInstalled()) {
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="UpdateAiToolkitAsync">
-                                    @(_isUpdatingToolkit ? "Updating AI-Toolkit..." : "Update AI-Toolkit (git pull)")
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Search" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="CheckAiToolkitUpdatesAsync">
+                                    @(_isCheckingToolkitUpdates ? "Checking..." : "Check for Updates")
                                 </MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                <MudButton Variant="Variant.Filled" 
+                                           Color="@(IsBranchSwitchPending ? Color.Warning : Color.Primary)" 
+                                           StartIcon="@(IsBranchSwitchPending ? Icons.Material.Filled.AltRoute : Icons.Material.Filled.Sync)" 
+                                           Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" 
+                                           OnClick="UpdateAiToolkitAsync">
+                                    @if (_isUpdatingToolkit) {
+                                        <span>@(IsBranchSwitchPending ? $"Switching to '{_settings.AiToolkitBranch}'..." : "Updating AI-Toolkit...")</span>
+                                    } else {
+                                        <span>@(IsBranchSwitchPending ? $"Switch to '{_settings.AiToolkitBranch}' & Pull" : "Update AI-Toolkit (git pull)")</span>
+                                    }
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="AutoSetupAiToolkitAsync">
                                     Reinstall / Clean Setup
                                 </MudButton>
                             } else {
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit)" OnClick="AutoSetupAiToolkitAsync">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_isSettingUpToolkit || _isUpdatingToolkit || _isCheckingToolkitUpdates)" OnClick="AutoSetupAiToolkitAsync">
                                     @(_isSettingUpToolkit ? "Setting Up AI-Toolkit..." : "Auto-Setup / Clone AI-Toolkit")
                                 </MudButton>
                             }
@@ -295,6 +340,7 @@
 
                 <MudItem xs="12" md="6">
                     <MudTextField @bind-Value="_settings.AiToolkitRepoUrl" Label="Git Repository URL" Variant="Variant.Outlined" HelperText="Official or custom AI-Toolkit fork" Class="mb-3" />
+                    <MudTextField T="string" Value="_settings.AiToolkitBranch" ValueChanged="OnBranchChanged" Label="Git Branch" Variant="Variant.Outlined" HelperText="Target branch to track, check, and pull from (default: main)" Class="mb-3" />
                     <MudTextField @bind-Value="_settings.AiToolkitPath" Label="Custom Installation Directory (Optional)" Variant="Variant.Outlined" Placeholder="Leave blank for default (tools/ai-toolkit)" />
                 </MudItem>
 
@@ -665,6 +711,21 @@
                         <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseOutputFolderAsync">
                             Browse...
                         </MudButton>
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Saved Prompts Directory</MudText>
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_settings.SavedPromptsDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Defaults to ~/.loramancer/saved_prompts (compatible with ModusFlow)" FullWidth="true" HelperText="Directory where saved prompt JSON files are stored. Defaults to your user settings directory." />
+                        <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseSavedPromptsFolderAsync">
+                            Browse...
+                        </MudButton>
+                        @if (!string.IsNullOrWhiteSpace(_settings.SavedPromptsDirectory)) {
+                            <MudTooltip Text="Reset to Default">
+                                <MudIconButton Icon="@Icons.Material.Filled.Clear" Color="Color.Default" OnClick="@(() => _settings.SavedPromptsDirectory = string.Empty)" />
+                            </MudTooltip>
+                        }
                     </div>
                 </MudItem>
 
@@ -1307,6 +1368,103 @@
                     </MudCard>
                 </MudItem>
 
+                <!-- Database Backup, Cross-Installation Import & Schema Parity Resolution -->
+                <MudItem xs="12">
+                    <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
+                        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Backup" Color="Color.Primary" />
+                                <div>
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">Database Backup, Cross-Installation Import &amp; Schema Parity</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Active Database: <code style="color:#a6e3a1; background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">@DatabaseService.DatabasePath</code>
+                                    </MudText>
+                                </div>
+                            </div>
+                            <div class="d-flex align-center gap-2 flex-wrap">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ExportDatabaseBackupAsync" Disabled="_isImportingDb">
+                                    Export / Backup Database
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileUpload" OnClick="SelectAndAnalyzeImportDatabaseAsync" Disabled="_isImportingDb">
+                                    Import Database (.db)...
+                                </MudButton>
+                            </div>
+                        </div>
+
+                        @if (_hasLegacyLorasDb) {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="my-3 d-flex align-center justify-space-between" Style="background-color: rgba(249, 226, 175, 0.15); color: #f9e2af; border: 1px solid #f9e2af;">
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" />
+                                    <span>Legacy <code>loras.db</code> detected on disk. All data has been safely auto-migrated to <code>loramancer_studio.db</code>.</span>
+                                </div>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="DeleteLegacyDatabase">
+                                    Remove Legacy loras.db
+                                </MudButton>
+                            </MudAlert>
+                        }
+
+                        @if (_importAnalysis != null) {
+                            <MudPaper Elevation="0" Class="pa-3 mt-3" Style="background-color: #181825; border: 1px solid #45475a; border-radius: 6px;">
+                                <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                                    <div class="d-flex align-center gap-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.FindInPage" Color="Color.Info" Size="Size.Medium" />
+                                        <div>
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Import Candidate: @Path.GetFileName(_importFilePath)</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                Size: @((_importAnalysis.FileSizeBytes / (1024.0 * 1024.0)).ToString("F2")) MB | Matching Tables: @_importAnalysis.MatchingTables.Count | Extra Tables: @_importAnalysis.ExtraTables.Count
+                                            </MudText>
+                                        </div>
+                                    </div>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _importAnalysis = null)" />
+                                </div>
+
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    @foreach (var tbl in _importAnalysis.MatchingTables) {
+                                        int count = _importAnalysis.SourceRowCounts.TryGetValue(tbl, out int c) ? c : 0;
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" Style="font-size: 0.72rem;">
+                                            @tbl: @count row@(count != 1 ? "s" : "")
+                                        </MudChip>
+                                    }
+                                </div>
+
+                                @if (_importAnalysis.MissingColumnsInDestination.Count > 0) {
+                                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                                        <b>Automatic Resolution:</b> Source database contains newer columns not present in local database:
+                                        @string.Join(", ", _importAnalysis.MissingColumnsInDestination.Select(kvp => $"{kvp.Key} ({string.Join(", ", kvp.Value)})")).
+                                        These columns will be added automatically to your local tables during merge!
+                                    </MudAlert>
+                                }
+
+                                @if (_importAnalysis.MissingColumnsInSource.Count > 0) {
+                                    <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-2">
+                                        <b>Notice:</b> Source database lacks some local columns (@string.Join(", ", _importAnalysis.MissingColumnsInSource.Select(kvp => $"{kvp.Key} ({string.Join(", ", kvp.Value)})"))). Imported rows will default safely to empty/NULL.
+                                    </MudAlert>
+                                }
+
+                                <div class="d-flex align-center gap-2 mt-3 flex-wrap">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small" StartIcon="@Icons.Material.Filled.CallMerge" Disabled="_isImportingDb" OnClick="ExecuteMergeImportAsync">
+                                        @(_isImportingDb ? "Merging..." : "Merge Records (Auto-Resolve & Preserve Local)")
+                                    </MudButton>
+
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Restore" Disabled="_isImportingDb" OnClick="ExecuteReplaceImportAsync">
+                                        Full Replace (Creates Auto-Backup)
+                                    </MudButton>
+
+                                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" OnClick="@(() => _importAnalysis = null)">
+                                        Dismiss
+                                    </MudButton>
+                                </div>
+                            </MudPaper>
+                        }
+
+                        @if (!string.IsNullOrEmpty(_importStatusMessage)) {
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                                @_importStatusMessage
+                            </MudAlert>
+                        }
+                    </MudCard>
+                </MudItem>
+
                 <!-- SQLite Performance Optimization Specs -->
                 <MudItem xs="12">
                     <MudCard Elevation="0" Style="background-color: #11111b; border: 1px solid #313244; padding: 16px; border-radius: 8px;">
@@ -1354,8 +1512,21 @@
 
     private bool _isSettingUpToolkit;
     private bool _isUpdatingToolkit;
+    private bool _isCheckingToolkitUpdates;
     private string _toolkitCommit = string.Empty;
+    private string _currentGitBranch = string.Empty;
+    private AiToolkitUpdateCheckResult? _toolkitUpdateResult;
     private readonly List<string> _toolkitLogs = new();
+
+    private bool IsBranchSwitchPending {
+        get {
+            if (string.IsNullOrWhiteSpace(_currentGitBranch)) {
+                return false;
+            }
+            string target = string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? "main" : _settings.AiToolkitBranch.Trim();
+            return !string.Equals(_currentGitBranch, target, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     private bool _isValidatingHf;
     private bool _hfTokenValid;
@@ -1393,12 +1564,23 @@
         _settings = Settings.Current;
         if (ToolkitSetup.IsInstalled()) {
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
         }
 
         SyncRgbFromHex(ThemeManager.EffectivePrimaryColor);
         ThemeManager.OnThemeChanged += OnThemeChangedHandler;
         LoadTokensFromService();
         TokenManager.OnTokensChanged += OnTokensChangedHandler;
+
+        if (_settings.OllamaDiscoveredModels != null && _settings.OllamaDiscoveredModels.Count > 0) {
+            _discoveredVisionModels.Clear();
+            _discoveredVisionModels.AddRange(_settings.OllamaDiscoveredModels);
+            _ollamaReachable = true;
+            _ollamaStatusMessage = $"Cached from server: {_discoveredVisionModels.Count} model(s) available.";
+        }
+
+        CheckLegacyDatabaseStatus();
     }
 
     public void Dispose() {
@@ -1689,21 +1871,62 @@
         }
     }
 
+    private async Task CheckAiToolkitUpdatesAsync() {
+        _isCheckingToolkitUpdates = true;
+        _toolkitLogs.Clear();
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Checking for AI-Toolkit updates on branch '{branch}'...");
+
+        try {
+            _toolkitUpdateResult = await ToolkitSetup.CheckForUpdatesAsync(branch);
+            if (_toolkitUpdateResult.HasUpdate) {
+                _toolkitLogs.Add($"[LoRAMancer] Update available! {_toolkitUpdateResult.CommitsBehind} new commit(s) on branch '{branch}'.");
+                if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.RemoteCommit)) {
+                    _toolkitLogs.Add($"[LoRAMancer] Latest commit: {_toolkitUpdateResult.RemoteCommit}");
+                }
+                Snackbar.Add($"AI-Toolkit update available ({_toolkitUpdateResult.CommitsBehind} commit(s)) on branch '{branch}'!", Severity.Info);
+            } else if (!string.IsNullOrWhiteSpace(_toolkitUpdateResult.ErrorMessage)) {
+                _toolkitLogs.Add($"[ERROR] {_toolkitUpdateResult.ErrorMessage}");
+                Snackbar.Add($"Update check failed: {_toolkitUpdateResult.ErrorMessage}", Severity.Warning);
+            } else {
+                _toolkitLogs.Add($"[LoRAMancer] Up to date with origin/{branch}.");
+                Snackbar.Add($"AI-Toolkit is up to date on branch '{branch}'.", Severity.Success);
+            }
+        } catch (Exception ex) {
+            _toolkitLogs.Add($"[ERROR] {ex.Message}");
+            Snackbar.Add($"Failed to check updates: {ex.Message}", Severity.Error);
+        } finally {
+            _isCheckingToolkitUpdates = false;
+        }
+    }
+
+    private void OnBranchChanged(string newBranch) {
+        _settings.AiToolkitBranch = newBranch;
+        string target = string.IsNullOrWhiteSpace(newBranch) ? "main" : newBranch.Trim();
+        if (!string.IsNullOrWhiteSpace(_currentGitBranch) && !string.Equals(_currentGitBranch, target, StringComparison.OrdinalIgnoreCase)) {
+            Snackbar.Add($"Target branch set to '{target}'. Click \"Switch to '{target}' & Pull\" to checkout the branch and update.", Severity.Warning);
+        }
+        StateHasChanged();
+    }
+
     private async Task UpdateAiToolkitAsync() {
         _isUpdatingToolkit = true;
         _toolkitLogs.Clear();
-        _toolkitLogs.Add("[LoRAMancer] Updating AI-Toolkit via Git...");
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Updating AI-Toolkit via Git on branch '{branch}'...");
 
         try {
             string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
-            await ToolkitSetup.UpdateAiToolkitAsync(venvPath, line => {
+            await ToolkitSetup.UpdateAiToolkitAsync(venvPath, branch, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);
                     StateHasChanged();
                 });
             });
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
-            Snackbar.Add("AI-Toolkit updated to latest version!", Severity.Success);
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
+            Snackbar.Add($"AI-Toolkit switched to branch '{branch}' and updated to latest code!", Severity.Success);
         } catch (Exception ex) {
             _toolkitLogs.Add($"[ERROR] {ex.Message}");
             Snackbar.Add($"AI-Toolkit update failed: {ex.Message}", Severity.Error);
@@ -1715,18 +1938,21 @@
     private async Task AutoSetupAiToolkitAsync() {
         _isSettingUpToolkit = true;
         _toolkitLogs.Clear();
-        _toolkitLogs.Add("[LoRAMancer] Initiating AI-Toolkit automated setup...");
+        string branch = !string.IsNullOrWhiteSpace(_settings.AiToolkitBranch) ? _settings.AiToolkitBranch.Trim() : "main";
+        _toolkitLogs.Add($"[LoRAMancer] Initiating AI-Toolkit automated setup on branch '{branch}'...");
 
         try {
             string venvPath = AiToolkitSetupService.GetDefaultVenvPath();
-            await ToolkitSetup.SetupAiToolkitAsync(venvPath, line => {
+            await ToolkitSetup.SetupAiToolkitAsync(venvPath, branch, line => {
                 InvokeAsync(() => {
                     _toolkitLogs.Add(line);
                     StateHasChanged();
                 });
             });
             _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
-            Snackbar.Add("AI-Toolkit setup completed successfully!", Severity.Success);
+            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
+            Snackbar.Add($"AI-Toolkit setup completed successfully on branch '{branch}'!", Severity.Success);
         } catch (Exception ex) {
             _toolkitLogs.Add($"[ERROR] {ex.Message}");
             Snackbar.Add($"AI-Toolkit setup failed: {ex.Message}", Severity.Error);
@@ -1751,6 +1977,13 @@
         string? folder = await FileDialogService.PickFolderAsync("Select Default Output Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _settings.DefaultOutputDirectory = folder;
+        }
+    }
+
+    private async Task BrowseSavedPromptsFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Saved Prompts Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _settings.SavedPromptsDirectory = folder;
         }
     }
 
@@ -2042,6 +2275,8 @@
                     connected = true;
                     _ollamaReachable = true;
                     _ollamaStatusMessage = $"Successfully connected to Ollama at {url}! Found {_discoveredVisionModels.Count} model(s).";
+                    _settings.OllamaDiscoveredModels = new List<string>(_discoveredVisionModels);
+                    await Settings.SaveSettingsAsync(_settings);
                     break;
                 } else {
                     lastError = $"HTTP {(int)response.StatusCode}";
@@ -2058,5 +2293,132 @@
 
         _isTestingOllama = false;
         StateHasChanged();
+    }
+
+    private DatabaseImportAnalysis? _importAnalysis;
+    private string _importFilePath = string.Empty;
+    private bool _isImportingDb;
+    private string _importStatusMessage = string.Empty;
+    private bool _hasLegacyLorasDb;
+
+    private void CheckLegacyDatabaseStatus() {
+        string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
+        string legacyDb = Path.Combine(appDir, "loras.db");
+        _hasLegacyLorasDb = File.Exists(legacyDb);
+    }
+
+    private void DeleteLegacyDatabase() {
+        string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
+        string legacyDb = Path.Combine(appDir, "loras.db");
+        try {
+            if (File.Exists(legacyDb)) {
+                File.Delete(legacyDb);
+            }
+            if (File.Exists(legacyDb + "-wal")) {
+                File.Delete(legacyDb + "-wal");
+            }
+            if (File.Exists(legacyDb + "-shm")) {
+                File.Delete(legacyDb + "-shm");
+            }
+            _hasLegacyLorasDb = false;
+            Snackbar.Add("Legacy loras.db removed successfully.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Could not remove legacy file: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ExportDatabaseBackupAsync() {
+        try {
+            string? folder = await FileDialogService.PickFolderAsync("Select Destination for Database Backup");
+            if (string.IsNullOrWhiteSpace(folder)) {
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                folder = Path.Combine(userProfile, ".LoRAMancer", "backups");
+            }
+
+            if (!Directory.Exists(folder)) {
+                Directory.CreateDirectory(folder);
+            }
+
+            string targetFile = Path.Combine(folder, $"loramancer_studio_backup_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+            await DatabaseService.ExportDatabaseAsync(targetFile);
+            long bytes = new FileInfo(targetFile).Length;
+            Snackbar.Add($"Database exported to '{Path.GetFileName(targetFile)}' ({(bytes / (1024.0 * 1024.0)):F2} MB)!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Export failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SelectAndAnalyzeImportDatabaseAsync() {
+        try {
+            var customFileType = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>> {
+                { DevicePlatform.WinUI, new[] { ".db", ".sqlite", ".sqlite3" } }
+            });
+            var result = await FilePicker.Default.PickAsync(new PickOptions {
+                PickerTitle = "Select LoRAMancer Database (.db)",
+                FileTypes = customFileType
+            });
+
+            if (result == null || string.IsNullOrWhiteSpace(result.FullPath)) {
+                return;
+            }
+
+            _importFilePath = result.FullPath;
+            _importAnalysis = await DatabaseService.AnalyzeDatabaseForImportAsync(_importFilePath);
+
+            if (!_importAnalysis.IsValid) {
+                Snackbar.Add(_importAnalysis.ErrorMessage, Severity.Error);
+            } else {
+                Snackbar.Add($"Found {_importAnalysis.MatchingTables.Count} matching table(s) in {Path.GetFileName(_importFilePath)}", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Error inspecting database: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ExecuteMergeImportAsync() {
+        if (_importAnalysis == null || string.IsNullOrWhiteSpace(_importFilePath)) {
+            return;
+        }
+
+        _isImportingDb = true;
+        _importStatusMessage = "Merging database records and resolving columns...";
+        StateHasChanged();
+
+        try {
+            var (tables, rows, resolutions) = await DatabaseService.ImportAndMergeDatabaseAsync(_importFilePath, autoAddMissingColumns: true);
+            string resText = resolutions.Count > 0 ? $" ({resolutions.Count} column schema resolution(s) applied)" : "";
+            _importStatusMessage = $"Successfully imported {rows} record(s) across {tables} table(s){resText}!";
+            Snackbar.Add(_importStatusMessage, Severity.Success);
+            _importAnalysis = null;
+        } catch (Exception ex) {
+            _importStatusMessage = $"Import error: {ex.Message}";
+            Snackbar.Add(_importStatusMessage, Severity.Error);
+        } finally {
+            _isImportingDb = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteReplaceImportAsync() {
+        if (_importAnalysis == null || string.IsNullOrWhiteSpace(_importFilePath)) {
+            return;
+        }
+
+        _isImportingDb = true;
+        _importStatusMessage = "Backing up current database and replacing...";
+        StateHasChanged();
+
+        try {
+            await DatabaseService.ReplaceDatabaseAsync(_importFilePath);
+            _importStatusMessage = "Database replaced successfully with verified schema parity!";
+            Snackbar.Add(_importStatusMessage, Severity.Success);
+            _importAnalysis = null;
+        } catch (Exception ex) {
+            _importStatusMessage = $"Replace error: {ex.Message}";
+            Snackbar.Add(_importStatusMessage, Severity.Error);
+        } finally {
+            _isImportingDb = false;
+            StateHasChanged();
+        }
     }
 }

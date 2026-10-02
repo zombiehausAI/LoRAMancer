@@ -1,6 +1,8 @@
 ; Inno Setup Script for LoRAMancer Desktop
 #define MyAppName "LoRAMancer"
+#ifndef MyAppVersion
 #define MyAppVersion "1.0.0"
+#endif
 #define MyAppPublisher "LoRAMancer Team"
 #define MyAppURL "https://github.com/loramancer/loramancer"
 #define MyAppExeName "LoRAMancer.App.exe"

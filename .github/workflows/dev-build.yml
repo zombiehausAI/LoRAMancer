@@ -81,8 +81,28 @@ jobs:
           if ($exists) {
               Write-Host "Updating existing pre-release $tag..."
               gh release edit $tag --title "$title" --notes "$notes" --prerelease
+
+              Write-Host "Cleaning up old dev assets from $tag..."
+              try {
+                  $releaseJson = gh release view $tag --json assets 2>$null
+                  if ($releaseJson) {
+                      $releaseInfo = $releaseJson | ConvertFrom-Json
+                      if ($releaseInfo -and $releaseInfo.assets) {
+                          foreach ($asset in $releaseInfo.assets) {
+                              if ($asset.name -match '\.(exe|zip|sha256)$') {
+                                  Write-Host "Removing stale release asset: $($asset.name)"
+                                  gh release delete-asset $tag $asset.name --yes 2>$null
+                              }
+                          }
+                      }
+                  }
+              } catch {
+                  Write-Warning "Failed to clean up old assets: $_"
+              }
+
               gh release upload $tag @files --clobber
           } else {
               Write-Host "Creating new pre-release $tag..."
               gh release create $tag @files --title "$title" --notes "$notes" --prerelease
           }
+

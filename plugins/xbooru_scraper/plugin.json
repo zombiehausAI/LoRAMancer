@@ -1,0 +1,13 @@
+{
+  "id": "xbooru-scraper",
+  "name": "Xbooru Explicit Art",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting explicit anime, 3D renders, and adult art from Xbooru with booru tag filtering.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Xbooru Scraper",
+  "icon": "Explicit"
+}

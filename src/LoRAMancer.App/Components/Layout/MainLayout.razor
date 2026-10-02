@@ -7,6 +7,8 @@
 @inject SettingsService Settings
 @inject NetworkServerService NetworkServer
 @inject AutoUpdateService UpdateService
+@inject AiToolkitSetupService ToolkitSetup
+@inject PluginManagerService PluginManager
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
 @implements IDisposable
@@ -186,6 +188,47 @@
 
         <!-- Right: Hardware & Telemetry -->
         <div class="d-flex align-center flex-shrink-0 gap-1" style="@($"color: {ThemeManager.CurrentTheme.TextPrimary};")">
+            @if (_availableToolkitUpdate?.HasUpdate == true && !_toolkitUpdateDismissed) {
+                <MudMenu Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                    <ActivatorContent>
+                        <MudTooltip Text="@($"AI-Toolkit ({_availableToolkitUpdate.Branch}) has {_availableToolkitUpdate.CommitsBehind} new commit(s). Click to review.")">
+                            <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled" 
+                                     Icon="@Icons.Material.Filled.Build" 
+                                     Class="mr-1 update-chip-pulse" 
+                                     Style="cursor: pointer; font-weight: 700; text-transform: none;">
+                                AI-Toolkit Update (@_availableToolkitUpdate.CommitsBehind)
+                            </MudChip>
+                        </MudTooltip>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <div class="pa-3" style="min-width: 320px; max-width: 380px; background-color: var(--bg-dark-surface);">
+                            <div class="d-flex align-center gap-2 mb-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Info" Size="Size.Small" />
+                                <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary);">
+                                    AI-Toolkit Update Ready (@_availableToolkitUpdate.Branch)
+                                </MudText>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
+                                @_availableToolkitUpdate.CommitsBehind new commit(s) available on branch <b>@_availableToolkitUpdate.Branch</b>.
+                            </MudText>
+                            @if (!string.IsNullOrWhiteSpace(_availableToolkitUpdate.RemoteCommit)) {
+                                <div class="pa-2 mb-3 rounded" style="background: rgba(0,0,0,0.25); max-height: 120px; overflow-y: auto; font-size: 0.75rem; color: var(--text-secondary); white-space: pre-wrap; font-family: monospace;">
+                                    @_availableToolkitUpdate.RemoteCommit
+                                </div>
+                            }
+                            <div class="d-flex align-center justify-space-between gap-2 mt-2">
+                                <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="@(() => _toolkitUpdateDismissed = true)">
+                                    Put Off for Now
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.Sync" OnClick="@(() => Navigation.NavigateTo("settings"))">
+                                    Update in Settings
+                                </MudButton>
+                            </div>
+                        </div>
+                    </ChildContent>
+                </MudMenu>
+            }
+
             @if (_availableUpdate?.IsUpdateAvailable == true && !_updateDismissed) {
                 <MudMenu Dense="true" Size="Size.Small" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
                     <ActivatorContent>
@@ -355,6 +398,8 @@
     private bool _startupNavigated;
     private UpdateCheckResult? _availableUpdate;
     private bool _updateDismissed;
+    private AiToolkitUpdateCheckResult? _availableToolkitUpdate;
+    private bool _toolkitUpdateDismissed;
 
     protected override async Task OnInitializedAsync() {
         TrainingRunner.OnProgressUpdated += HandleProgressUpdated;
@@ -362,6 +407,7 @@
         ThemeManager.OnThemeChanged += HandleThemeChanged;
         StudioSession.OnSessionChanged += HandleSessionChanged;
         Navigation.LocationChanged += HandleLocationChanged;
+        ToolkitSetup.OnUpdateChecked += HandleToolkitUpdateChecked;
         if (!_startupNavigated) {
             _startupNavigated = true;
             string relative = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
@@ -401,6 +447,40 @@
                 }
             } catch {
                 // Silently ignore background update check exceptions
+            }
+        });
+
+        _ = Task.Run(async () => {
+            try {
+                var toolkitResult = await ToolkitSetup.CheckForUpdatesAsync();
+                if (toolkitResult.HasUpdate) {
+                    _availableToolkitUpdate = toolkitResult;
+                    await InvokeAsync(StateHasChanged);
+                }
+            } catch {
+                // Silently ignore background toolkit update check exceptions
+            }
+        });
+
+        _ = Task.Run(async () => {
+            try {
+                // Wait briefly for initial plugin discovery scan to settle
+                for (int i = 0; i < 15; i++) {
+                    if (PluginManager.Plugins.Count > 0) {
+                        break;
+                    }
+                    await Task.Delay(200);
+                }
+
+                // If the Ollama plugin is enabled, auto-check Ollama at startup and populate models
+                bool isOllamaEnabled = PluginManager.Plugins.Any(p =>
+                    string.Equals(p.Id, "ollama-lora-tagger", StringComparison.OrdinalIgnoreCase) && p.IsEnabled);
+
+                if (isOllamaEnabled) {
+                    await Settings.ProbeOllamaModelsAsync();
+                }
+            } catch {
+                // Silently ignore background Ollama startup check exceptions
             }
         });
     }
@@ -523,6 +603,21 @@
         } catch { }
     }
 
+    private void HandleToolkitUpdateChecked(AiToolkitUpdateCheckResult result) {
+        if (_disposed) {
+            return;
+        }
+        _ = InvokeAsync(() => {
+            if (!_disposed) {
+                _availableToolkitUpdate = result;
+                if (!result.HasUpdate) {
+                    _toolkitUpdateDismissed = false;
+                }
+                StateHasChanged();
+            }
+        });
+    }
+
     public void Dispose() {
         _disposed = true;
         TrainingRunner.OnProgressUpdated -= HandleProgressUpdated;
@@ -530,5 +625,6 @@
         ThemeManager.OnThemeChanged -= HandleThemeChanged;
         StudioSession.OnSessionChanged -= HandleSessionChanged;
         Navigation.LocationChanged -= HandleLocationChanged;
+        ToolkitSetup.OnUpdateChecked -= HandleToolkitUpdateChecked;
     }
 }

@@ -1,0 +1,13 @@
+{
+  "id": "konachan-adult-scraper",
+  "name": "Konachan Adult Wallpapers",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting explicit and adult widescreen anime artwork and wallpapers from Konachan.com.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Konachan Adult Scraper",
+  "icon": "Wallpaper"
+}

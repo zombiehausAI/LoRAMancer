@@ -1,0 +1,13 @@
+{
+  "id": "deviantart-scraper",
+  "name": "DeviantArt Community Feed",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting artwork, anime fanart, and digital illustrations from DeviantArt media feeds.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "DeviantArt Scraper",
+  "icon": "Brush"
+}

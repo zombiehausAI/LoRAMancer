@@ -1,0 +1,24 @@
+{
+  "id": "pixabay-scraper",
+  "name": "Pixabay Creative Archive",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting free-to-use photography, 3D graphics, and digital illustrations from Pixabay API.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Pixabay Scraper",
+  "icon": "InsertPhoto",
+  "isEnabled": false,
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "Pixabay API Key",
+      "type": "password",
+      "description": "Your free personal API key from pixabay.com/api/docs.",
+      "defaultValue": "",
+      "isRequired": true
+    }
+  ]
+}

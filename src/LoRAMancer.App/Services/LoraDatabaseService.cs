@@ -23,13 +23,48 @@ public sealed class LoraDatabaseService : IDisposable {
         cmd.Parameters.Add(p);
     }
 
+    public string DatabasePath => _dbPath;
+
     public LoraDatabaseService(SettingsService? settingsService = null) {
         _settingsService = settingsService;
         string appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".LoRAMancer");
         if (!Directory.Exists(appDir)) {
             Directory.CreateDirectory(appDir);
         }
-        _dbPath = Path.Combine(appDir, "loras.db");
+        _dbPath = Path.Combine(appDir, "loramancer_studio.db");
+
+        // Automatic Migration: detect legacy loras.db or lora.db and migrate to loramancer_studio.db
+        string legacyLorasDb = Path.Combine(appDir, "loras.db");
+        string legacyLoraDb = Path.Combine(appDir, "lora.db");
+        string? legacySource = File.Exists(legacyLorasDb) ? legacyLorasDb : (File.Exists(legacyLoraDb) ? legacyLoraDb : null);
+
+        if (!File.Exists(_dbPath) && legacySource != null) {
+            try {
+                File.Copy(legacySource, _dbPath, overwrite: false);
+                if (File.Exists(legacySource + "-wal")) {
+                    File.Copy(legacySource + "-wal", _dbPath + "-wal", overwrite: true);
+                }
+                if (File.Exists(legacySource + "-shm")) {
+                    File.Copy(legacySource + "-shm", _dbPath + "-shm", overwrite: true);
+                }
+                try {
+                    File.Delete(legacySource);
+                    if (File.Exists(legacySource + "-wal")) {
+                        File.Delete(legacySource + "-wal");
+                    }
+                    if (File.Exists(legacySource + "-shm")) {
+                        File.Delete(legacySource + "-shm");
+                    }
+                } catch {
+                    try {
+                        File.Move(legacySource, legacySource + ".bak", overwrite: true);
+                    } catch { }
+                }
+            } catch {
+                // If migration fails, proceed to clean database initialization
+            }
+        }
+
         _connectionString = new SqliteConnectionStringBuilder {
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
@@ -161,6 +196,45 @@ public sealed class LoraDatabaseService : IDisposable {
                 );
                 CREATE INDEX IF NOT EXISTS idx_collection_items_path ON CollectionItems(FilePath);
                 CREATE INDEX IF NOT EXISTS idx_collection_items_col ON CollectionItems(CollectionId);
+
+                CREATE TABLE IF NOT EXISTS GalleryMedia (
+                    FilePath TEXT PRIMARY KEY,
+                    FileName TEXT NOT NULL,
+                    FileExtension TEXT NOT NULL,
+                    MediaType INTEGER NOT NULL DEFAULT 0,
+                    FileSizeBytes INTEGER NOT NULL DEFAULT 0,
+                    FormattedSize TEXT,
+                    CreatedDate TEXT NOT NULL,
+                    FolderPath TEXT NOT NULL,
+                    FolderName TEXT,
+                    FileUrl TEXT,
+                    IsAiGenerated INTEGER NOT NULL DEFAULT 0,
+                    AiGenerator TEXT,
+                    Prompt TEXT,
+                    NegativePrompt TEXT,
+                    Seed INTEGER,
+                    Steps INTEGER,
+                    Sampler TEXT,
+                    Scheduler TEXT,
+                    CfgScale REAL,
+                    ModelName TEXT,
+                    UsedLorasJson TEXT,
+                    Width INTEGER,
+                    Height INTEGER,
+                    DurationSeconds REAL,
+                    RawMetadataJson TEXT,
+                    Category TEXT,
+                    UserTagsJson TEXT,
+                    IsFavorite INTEGER NOT NULL DEFAULT 0,
+                    UserNotes TEXT,
+                    AssociatedLoraNamesJson TEXT,
+                    AssociatedLoraFilePathsJson TEXT,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_folder ON GalleryMedia(FolderPath);
+                CREATE INDEX IF NOT EXISTS idx_gallery_fav ON GalleryMedia(IsFavorite);
+                CREATE INDEX IF NOT EXISTS idx_gallery_ai ON GalleryMedia(IsAiGenerated);
+                CREATE INDEX IF NOT EXISTS idx_gallery_created ON GalleryMedia(CreatedDate);
             ";
 
             using var cmd = connection.CreateCommand();
@@ -799,7 +873,9 @@ public sealed class LoraDatabaseService : IDisposable {
                 string path = reader.GetString(0);
                 string? timeStr = reader.IsDBNull(1) ? null : reader.GetString(1);
                 long size = reader.GetInt64(2);
-                DateTime time = DateTime.TryParse(timeStr, out var dt) ? dt : DateTime.MinValue;
+                DateTime time = DateTime.TryParse(timeStr, null, System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt)
+                    ? dt
+                    : (DateTime.TryParse(timeStr, out var fallback) ? fallback.ToUniversalTime() : DateTime.MinValue);
                 dict[path] = (time, size);
             }
             return dict;
@@ -1590,6 +1666,45 @@ public sealed class LoraDatabaseService : IDisposable {
                 );
                 CREATE INDEX IF NOT EXISTS idx_collection_items_path ON CollectionItems(FilePath);
                 CREATE INDEX IF NOT EXISTS idx_collection_items_col ON CollectionItems(CollectionId);
+
+                CREATE TABLE IF NOT EXISTS GalleryMedia (
+                    FilePath TEXT PRIMARY KEY,
+                    FileName TEXT NOT NULL,
+                    FileExtension TEXT NOT NULL,
+                    MediaType INTEGER NOT NULL DEFAULT 0,
+                    FileSizeBytes BIGINT NOT NULL DEFAULT 0,
+                    FormattedSize TEXT,
+                    CreatedDate TEXT NOT NULL,
+                    FolderPath TEXT NOT NULL,
+                    FolderName TEXT,
+                    FileUrl TEXT,
+                    IsAiGenerated INTEGER NOT NULL DEFAULT 0,
+                    AiGenerator TEXT,
+                    Prompt TEXT,
+                    NegativePrompt TEXT,
+                    Seed BIGINT,
+                    Steps INTEGER,
+                    Sampler TEXT,
+                    Scheduler TEXT,
+                    CfgScale DOUBLE PRECISION,
+                    ModelName TEXT,
+                    UsedLorasJson TEXT,
+                    Width INTEGER,
+                    Height INTEGER,
+                    DurationSeconds DOUBLE PRECISION,
+                    RawMetadataJson TEXT,
+                    Category TEXT,
+                    UserTagsJson TEXT,
+                    IsFavorite INTEGER NOT NULL DEFAULT 0,
+                    UserNotes TEXT,
+                    AssociatedLoraNamesJson TEXT,
+                    AssociatedLoraFilePathsJson TEXT,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_folder ON GalleryMedia(FolderPath);
+                CREATE INDEX IF NOT EXISTS idx_gallery_fav ON GalleryMedia(IsFavorite);
+                CREATE INDEX IF NOT EXISTS idx_gallery_ai ON GalleryMedia(IsAiGenerated);
+                CREATE INDEX IF NOT EXISTS idx_gallery_created ON GalleryMedia(CreatedDate);
             ";
 
             using var cmd = conn.CreateCommand();
@@ -1780,11 +1895,18 @@ public sealed class LoraDatabaseService : IDisposable {
                 migrated++;
             }
             await tx.CommitAsync();
-            double progress = 0.25 + ((double)migrated / total * 0.75);
+            double progress = 0.25 + ((double)migrated / total * 0.70);
             onProgress?.Invoke($"Migrated {migrated} of {total} LoRAs to PostgreSQL...", progress);
         }
 
-        onProgress?.Invoke($"Migration complete! {migrated} LoRAs successfully synced to PostgreSQL.", 1.0);
+        // Migrate GalleryMedia if any exist in SQLite
+        var galleryItems = await GetAllGalleryMediaAsync();
+        if (galleryItems.Count > 0) {
+            onProgress?.Invoke($"Migrating {galleryItems.Count} gallery images to PostgreSQL...", 0.95);
+            await UpsertGalleryMediaBatchToPostgreSqlAsync(pgConn, galleryItems, CancellationToken.None);
+        }
+
+        onProgress?.Invoke($"Migration complete! {migrated} LoRAs & {galleryItems.Count} gallery items successfully synced to PostgreSQL.", 1.0);
         return migrated;
     }
 
@@ -1952,7 +2074,633 @@ public sealed class LoraDatabaseService : IDisposable {
         cmd.Parameters.AddWithValue("@UpdatedAtUtc", now);
     }
 
+    public async Task<List<ShowcaseMediaItem>> GetAllGalleryMediaAsync(CancellationToken cancellationToken = default) {
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT * FROM GalleryMedia ORDER BY CreatedDate DESC;";
+
+            var list = new List<ShowcaseMediaItem>();
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) {
+                list.Add(MapReaderToGalleryMedia(reader));
+            }
+            return list;
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task UpsertGalleryMediaBatchAsync(IEnumerable<ShowcaseMediaItem> items, CancellationToken cancellationToken = default) {
+        var itemList = items.ToList();
+        if (itemList.Count == 0) return;
+
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+
+            if (connection is NpgsqlConnection npgsqlConn) {
+                await UpsertGalleryMediaBatchToPostgreSqlAsync(npgsqlConn, itemList, cancellationToken);
+                return;
+            }
+
+            if (connection is SqliteConnection sqliteConn) {
+                using var tx = sqliteConn.BeginTransaction();
+
+                const string sql = @"
+                    INSERT INTO GalleryMedia (
+                        FilePath, FileName, FileExtension, MediaType, FileSizeBytes, FormattedSize,
+                        CreatedDate, FolderPath, FolderName, FileUrl, IsAiGenerated, AiGenerator,
+                        Prompt, NegativePrompt, Seed, Steps, Sampler, Scheduler, CfgScale, ModelName,
+                        UsedLorasJson, Width, Height, DurationSeconds, RawMetadataJson, Category,
+                        UserTagsJson, IsFavorite, UserNotes, AssociatedLoraNamesJson, AssociatedLoraFilePathsJson,
+                        UpdatedAtUtc
+                    ) VALUES (
+                        @FilePath, @FileName, @FileExtension, @MediaType, @FileSizeBytes, @FormattedSize,
+                        @CreatedDate, @FolderPath, @FolderName, @FileUrl, @IsAiGenerated, @AiGenerator,
+                        @Prompt, @NegativePrompt, @Seed, @Steps, @Sampler, @Scheduler, @CfgScale, @ModelName,
+                        @UsedLorasJson, @Width, @Height, @DurationSeconds, @RawMetadataJson, @Category,
+                        @UserTagsJson, @IsFavorite, @UserNotes, @AssociatedLoraNamesJson, @AssociatedLoraFilePathsJson,
+                        @UpdatedAtUtc
+                    ) ON CONFLICT(FilePath) DO UPDATE SET
+                        FileName = excluded.FileName,
+                        FileExtension = excluded.FileExtension,
+                        MediaType = excluded.MediaType,
+                        FileSizeBytes = excluded.FileSizeBytes,
+                        FormattedSize = excluded.FormattedSize,
+                        CreatedDate = excluded.CreatedDate,
+                        FolderPath = excluded.FolderPath,
+                        FolderName = excluded.FolderName,
+                        FileUrl = excluded.FileUrl,
+                        IsAiGenerated = excluded.IsAiGenerated,
+                        AiGenerator = excluded.AiGenerator,
+                        Prompt = excluded.Prompt,
+                        NegativePrompt = excluded.NegativePrompt,
+                        Seed = excluded.Seed,
+                        Steps = excluded.Steps,
+                        Sampler = excluded.Sampler,
+                        Scheduler = excluded.Scheduler,
+                        CfgScale = excluded.CfgScale,
+                        ModelName = excluded.ModelName,
+                        UsedLorasJson = excluded.UsedLorasJson,
+                        Width = excluded.Width,
+                        Height = excluded.Height,
+                        DurationSeconds = excluded.DurationSeconds,
+                        RawMetadataJson = excluded.RawMetadataJson,
+                        Category = excluded.Category,
+                        UserTagsJson = excluded.UserTagsJson,
+                        IsFavorite = excluded.IsFavorite,
+                        UserNotes = excluded.UserNotes,
+                        AssociatedLoraNamesJson = excluded.AssociatedLoraNamesJson,
+                        AssociatedLoraFilePathsJson = excluded.AssociatedLoraFilePathsJson,
+                        UpdatedAtUtc = excluded.UpdatedAtUtc;
+                ";
+
+                foreach (var item in itemList) {
+                    using var cmd = connection.CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = sql;
+                    BindGalleryMediaParameters(cmd, item);
+                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await tx.CommitAsync(cancellationToken);
+            }
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    private static async Task UpsertGalleryMediaBatchToPostgreSqlAsync(NpgsqlConnection conn, IEnumerable<ShowcaseMediaItem> items, CancellationToken cancellationToken) {
+        const string pgSql = @"
+            INSERT INTO GalleryMedia (
+                FilePath, FileName, FileExtension, MediaType, FileSizeBytes, FormattedSize,
+                CreatedDate, FolderPath, FolderName, FileUrl, IsAiGenerated, AiGenerator,
+                Prompt, NegativePrompt, Seed, Steps, Sampler, Scheduler, CfgScale, ModelName,
+                UsedLorasJson, Width, Height, DurationSeconds, RawMetadataJson, Category,
+                UserTagsJson, IsFavorite, UserNotes, AssociatedLoraNamesJson, AssociatedLoraFilePathsJson,
+                UpdatedAtUtc
+            ) VALUES (
+                @FilePath, @FileName, @FileExtension, @MediaType, @FileSizeBytes, @FormattedSize,
+                @CreatedDate, @FolderPath, @FolderName, @FileUrl, @IsAiGenerated, @AiGenerator,
+                @Prompt, @NegativePrompt, @Seed, @Steps, @Sampler, @Scheduler, @CfgScale, @ModelName,
+                @UsedLorasJson, @Width, @Height, @DurationSeconds, @RawMetadataJson, @Category,
+                @UserTagsJson, @IsFavorite, @UserNotes, @AssociatedLoraNamesJson, @AssociatedLoraFilePathsJson,
+                @UpdatedAtUtc
+            ) ON CONFLICT (FilePath) DO UPDATE SET
+                FileName = EXCLUDED.FileName,
+                FileExtension = EXCLUDED.FileExtension,
+                MediaType = EXCLUDED.MediaType,
+                FileSizeBytes = EXCLUDED.FileSizeBytes,
+                FormattedSize = EXCLUDED.FormattedSize,
+                CreatedDate = EXCLUDED.CreatedDate,
+                FolderPath = EXCLUDED.FolderPath,
+                FolderName = EXCLUDED.FolderName,
+                FileUrl = EXCLUDED.FileUrl,
+                IsAiGenerated = EXCLUDED.IsAiGenerated,
+                AiGenerator = EXCLUDED.AiGenerator,
+                Prompt = EXCLUDED.Prompt,
+                NegativePrompt = EXCLUDED.NegativePrompt,
+                Seed = EXCLUDED.Seed,
+                Steps = EXCLUDED.Steps,
+                Sampler = EXCLUDED.Sampler,
+                Scheduler = EXCLUDED.Scheduler,
+                CfgScale = EXCLUDED.CfgScale,
+                ModelName = EXCLUDED.ModelName,
+                UsedLorasJson = EXCLUDED.UsedLorasJson,
+                Width = EXCLUDED.Width,
+                Height = EXCLUDED.Height,
+                DurationSeconds = EXCLUDED.DurationSeconds,
+                RawMetadataJson = EXCLUDED.RawMetadataJson,
+                Category = EXCLUDED.Category,
+                UserTagsJson = EXCLUDED.UserTagsJson,
+                IsFavorite = EXCLUDED.IsFavorite,
+                UserNotes = EXCLUDED.UserNotes,
+                AssociatedLoraNamesJson = EXCLUDED.AssociatedLoraNamesJson,
+                AssociatedLoraFilePathsJson = EXCLUDED.AssociatedLoraFilePathsJson,
+                UpdatedAtUtc = EXCLUDED.UpdatedAtUtc;
+        ";
+
+        using var tx = await conn.BeginTransactionAsync(cancellationToken);
+        foreach (var item in items) {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = pgSql;
+            BindGalleryMediaParameters(cmd, item);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    private static void BindGalleryMediaParameters(DbCommand cmd, ShowcaseMediaItem item) {
+        AddParam(cmd, "@FilePath", item.FilePath);
+        AddParam(cmd, "@FileName", item.FileName);
+        AddParam(cmd, "@FileExtension", item.FileExtension);
+        AddParam(cmd, "@MediaType", (int)item.MediaType);
+        AddParam(cmd, "@FileSizeBytes", item.FileSizeBytes);
+        AddParam(cmd, "@FormattedSize", item.FormattedSize);
+        AddParam(cmd, "@CreatedDate", item.CreatedDate.ToString("O"));
+        AddParam(cmd, "@FolderPath", item.FolderPath);
+        AddParam(cmd, "@FolderName", item.FolderName);
+        AddParam(cmd, "@FileUrl", item.FileUrl);
+        AddParam(cmd, "@IsAiGenerated", item.IsAiGenerated ? 1 : 0);
+        AddParam(cmd, "@AiGenerator", item.AiGenerator);
+        AddParam(cmd, "@Prompt", item.Prompt);
+        AddParam(cmd, "@NegativePrompt", item.NegativePrompt);
+        AddParam(cmd, "@Seed", item.Seed);
+        AddParam(cmd, "@Steps", item.Steps);
+        AddParam(cmd, "@Sampler", item.Sampler);
+        AddParam(cmd, "@Scheduler", item.Scheduler);
+        AddParam(cmd, "@CfgScale", item.CfgScale);
+        AddParam(cmd, "@ModelName", item.ModelName);
+        AddParam(cmd, "@UsedLorasJson", item.UsedLoras != null && item.UsedLoras.Count > 0 ? JsonSerializer.Serialize(item.UsedLoras) : null);
+        AddParam(cmd, "@Width", item.Width);
+        AddParam(cmd, "@Height", item.Height);
+        AddParam(cmd, "@DurationSeconds", item.Duration?.TotalSeconds);
+        AddParam(cmd, "@RawMetadataJson", item.RawMetadata != null && item.RawMetadata.Count > 0 ? JsonSerializer.Serialize(item.RawMetadata) : null);
+        AddParam(cmd, "@Category", item.Category);
+        AddParam(cmd, "@UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
+        AddParam(cmd, "@IsFavorite", item.IsFavorite ? 1 : 0);
+        AddParam(cmd, "@UserNotes", item.UserNotes);
+        AddParam(cmd, "@AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
+        AddParam(cmd, "@AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
+        AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+    }
+
+    public async Task ToggleGalleryFavoriteAsync(string filePath, CancellationToken cancellationToken = default) {
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                UPDATE GalleryMedia 
+                SET IsFavorite = CASE WHEN IsFavorite = 1 THEN 0 ELSE 1 END,
+                    UpdatedAtUtc = @UpdatedAtUtc
+                WHERE FilePath = @FilePath;
+            ";
+            AddParam(cmd, "@FilePath", filePath);
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task UpdateGalleryMediaItemAsync(ShowcaseMediaItem item, CancellationToken cancellationToken = default) {
+        if (item == null || string.IsNullOrWhiteSpace(item.FilePath)) return;
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                UPDATE GalleryMedia 
+                SET Category = @Category,
+                    UserTagsJson = @UserTagsJson,
+                    IsFavorite = @IsFavorite,
+                    UserNotes = @UserNotes,
+                    AssociatedLoraNamesJson = @AssociatedLoraNamesJson,
+                    AssociatedLoraFilePathsJson = @AssociatedLoraFilePathsJson,
+                    UpdatedAtUtc = @UpdatedAtUtc
+                WHERE FilePath = @FilePath;
+            ";
+            AddParam(cmd, "@FilePath", item.FilePath);
+            AddParam(cmd, "@Category", item.Category);
+            AddParam(cmd, "@UserTagsJson", item.UserTags != null && item.UserTags.Count > 0 ? JsonSerializer.Serialize(item.UserTags) : null);
+            AddParam(cmd, "@IsFavorite", item.IsFavorite ? 1 : 0);
+            AddParam(cmd, "@UserNotes", item.UserNotes);
+            AddParam(cmd, "@AssociatedLoraNamesJson", item.AssociatedLoraNames != null && item.AssociatedLoraNames.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraNames) : null);
+            AddParam(cmd, "@AssociatedLoraFilePathsJson", item.AssociatedLoraFilePaths != null && item.AssociatedLoraFilePaths.Count > 0 ? JsonSerializer.Serialize(item.AssociatedLoraFilePaths) : null);
+            AddParam(cmd, "@UpdatedAtUtc", DateTime.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task RemoveGalleryMediaAsync(string filePath, CancellationToken cancellationToken = default) {
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FilePath = @FilePath;";
+            AddParam(cmd, "@FilePath", filePath);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    public async Task RemoveGalleryMediaByFolderAsync(string folderPath, CancellationToken cancellationToken = default) {
+        if (string.IsNullOrWhiteSpace(folderPath)) return;
+        await EnsureInitializedAsync();
+        await _lock.WaitAsync(cancellationToken);
+        try {
+            using var connection = await OpenConnectionAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM GalleryMedia WHERE FolderPath = @FolderPath OR FilePath LIKE @FolderPrefix;";
+            AddParam(cmd, "@FolderPath", folderPath);
+            AddParam(cmd, "@FolderPrefix", folderPath.TrimEnd('\\', '/') + "%");
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        } finally {
+            _lock.Release();
+        }
+    }
+
+    private static ShowcaseMediaItem MapReaderToGalleryMedia(DbDataReader reader) {
+        var item = new ShowcaseMediaItem {
+            FilePath = reader.GetString(reader.GetOrdinal("FilePath")),
+            FileName = reader.GetString(reader.GetOrdinal("FileName")),
+            FileExtension = reader.GetString(reader.GetOrdinal("FileExtension")),
+            MediaType = (ShowcaseMediaType)reader.GetInt32(reader.GetOrdinal("MediaType")),
+            FileSizeBytes = reader.GetInt64(reader.GetOrdinal("FileSizeBytes")),
+            FormattedSize = reader.IsDBNull(reader.GetOrdinal("FormattedSize")) ? "0 B" : reader.GetString(reader.GetOrdinal("FormattedSize")),
+            CreatedDate = DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedDate")), out var cd) ? cd : DateTime.UtcNow,
+            FolderPath = reader.GetString(reader.GetOrdinal("FolderPath")),
+            FolderName = reader.IsDBNull(reader.GetOrdinal("FolderName")) ? string.Empty : reader.GetString(reader.GetOrdinal("FolderName")),
+            FileUrl = reader.IsDBNull(reader.GetOrdinal("FileUrl")) ? string.Empty : reader.GetString(reader.GetOrdinal("FileUrl")),
+            IsAiGenerated = reader.GetInt32(reader.GetOrdinal("IsAiGenerated")) == 1,
+            AiGenerator = reader.IsDBNull(reader.GetOrdinal("AiGenerator")) ? string.Empty : reader.GetString(reader.GetOrdinal("AiGenerator")),
+            Prompt = reader.IsDBNull(reader.GetOrdinal("Prompt")) ? string.Empty : reader.GetString(reader.GetOrdinal("Prompt")),
+            NegativePrompt = reader.IsDBNull(reader.GetOrdinal("NegativePrompt")) ? string.Empty : reader.GetString(reader.GetOrdinal("NegativePrompt")),
+            Seed = reader.IsDBNull(reader.GetOrdinal("Seed")) ? null : reader.GetInt64(reader.GetOrdinal("Seed")),
+            Steps = reader.IsDBNull(reader.GetOrdinal("Steps")) ? null : reader.GetInt32(reader.GetOrdinal("Steps")),
+            Sampler = reader.IsDBNull(reader.GetOrdinal("Sampler")) ? string.Empty : reader.GetString(reader.GetOrdinal("Sampler")),
+            Scheduler = reader.IsDBNull(reader.GetOrdinal("Scheduler")) ? string.Empty : reader.GetString(reader.GetOrdinal("Scheduler")),
+            CfgScale = reader.IsDBNull(reader.GetOrdinal("CfgScale")) ? null : reader.GetDouble(reader.GetOrdinal("CfgScale")),
+            ModelName = reader.IsDBNull(reader.GetOrdinal("ModelName")) ? string.Empty : reader.GetString(reader.GetOrdinal("ModelName")),
+            Width = reader.IsDBNull(reader.GetOrdinal("Width")) ? null : reader.GetInt32(reader.GetOrdinal("Width")),
+            Height = reader.IsDBNull(reader.GetOrdinal("Height")) ? null : reader.GetInt32(reader.GetOrdinal("Height")),
+            Category = reader.IsDBNull(reader.GetOrdinal("Category")) ? "Uncategorized" : reader.GetString(reader.GetOrdinal("Category")),
+            IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) == 1,
+            UserNotes = reader.IsDBNull(reader.GetOrdinal("UserNotes")) ? string.Empty : reader.GetString(reader.GetOrdinal("UserNotes"))
+        };
+
+        int durOrd = reader.GetOrdinal("DurationSeconds");
+        if (!reader.IsDBNull(durOrd)) {
+            item.Duration = TimeSpan.FromSeconds(reader.GetDouble(durOrd));
+        }
+
+        int usedLorasOrd = reader.GetOrdinal("UsedLorasJson");
+        if (!reader.IsDBNull(usedLorasOrd)) {
+            try {
+                item.UsedLoras = JsonSerializer.Deserialize<List<string>>(reader.GetString(usedLorasOrd)) ?? new();
+            } catch { }
+        }
+
+        int rawMetaOrd = reader.GetOrdinal("RawMetadataJson");
+        if (!reader.IsDBNull(rawMetaOrd)) {
+            try {
+                item.RawMetadata = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(rawMetaOrd)) ?? new();
+            } catch { }
+        }
+
+        int tagsOrd = reader.GetOrdinal("UserTagsJson");
+        if (!reader.IsDBNull(tagsOrd)) {
+            try {
+                item.UserTags = JsonSerializer.Deserialize<List<string>>(reader.GetString(tagsOrd)) ?? new();
+            } catch { }
+        }
+
+        int loraNamesOrd = reader.GetOrdinal("AssociatedLoraNamesJson");
+        if (!reader.IsDBNull(loraNamesOrd)) {
+            try {
+                item.AssociatedLoraNames = JsonSerializer.Deserialize<List<string>>(reader.GetString(loraNamesOrd)) ?? new();
+            } catch { }
+        }
+
+        int loraPathsOrd = reader.GetOrdinal("AssociatedLoraFilePathsJson");
+        if (!reader.IsDBNull(loraPathsOrd)) {
+            try {
+                item.AssociatedLoraFilePaths = JsonSerializer.Deserialize<List<string>>(reader.GetString(loraPathsOrd)) ?? new();
+            } catch { }
+        }
+
+        return item;
+    }
+
+    public async Task ExportDatabaseAsync(string targetFilePath) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetFilePath);
+        await EnsureInitializedAsync();
+
+        string? dir = Path.GetDirectoryName(targetFilePath);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) {
+            Directory.CreateDirectory(dir);
+        }
+
+        if (File.Exists(targetFilePath)) {
+            File.Delete(targetFilePath);
+        }
+
+        if (IsPostgreSql) {
+            if (File.Exists(_dbPath)) {
+                File.Copy(_dbPath, targetFilePath, overwrite: true);
+            }
+            return;
+        }
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"VACUUM INTO '{targetFilePath.Replace("'", "''")}';";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<DatabaseImportAnalysis> AnalyzeDatabaseForImportAsync(string sourceDbPath) {
+        var analysis = new DatabaseImportAnalysis();
+        if (!File.Exists(sourceDbPath)) {
+            analysis.IsValid = false;
+            analysis.ErrorMessage = $"Source file not found at '{sourceDbPath}'.";
+            return analysis;
+        }
+
+        analysis.FileSizeBytes = new FileInfo(sourceDbPath).Length;
+        await EnsureInitializedAsync();
+
+        try {
+            var srcBuilder = new SqliteConnectionStringBuilder {
+                DataSource = sourceDbPath,
+                Mode = SqliteOpenMode.ReadOnly
+            };
+
+            using var srcConn = new SqliteConnection(srcBuilder.ToString());
+            await srcConn.OpenAsync();
+
+            var srcTables = new List<string>();
+            using (var cmd = srcConn.CreateCommand()) {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) {
+                    srcTables.Add(reader.GetString(0));
+                }
+            }
+
+            var destTables = new List<string>();
+            using var destConn = new SqliteConnection(_connectionString);
+            await destConn.OpenAsync();
+            using (var cmd = destConn.CreateCommand()) {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) {
+                    destTables.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (var tbl in srcTables) {
+                if (destTables.Contains(tbl, StringComparer.OrdinalIgnoreCase)) {
+                    analysis.MatchingTables.Add(tbl);
+                } else {
+                    analysis.ExtraTables.Add(tbl);
+                }
+
+                try {
+                    using var countCmd = srcConn.CreateCommand();
+                    countCmd.CommandText = $"SELECT COUNT(*) FROM \"{tbl.Replace("\"", "\"\"")}\";";
+                    var count = await countCmd.ExecuteScalarAsync();
+                    analysis.SourceRowCounts[tbl] = Convert.ToInt32(count);
+                } catch {
+                    analysis.SourceRowCounts[tbl] = 0;
+                }
+            }
+
+            foreach (var tbl in destTables) {
+                if (!srcTables.Contains(tbl, StringComparer.OrdinalIgnoreCase)) {
+                    analysis.MissingTables.Add(tbl);
+                }
+            }
+
+            foreach (var tbl in analysis.MatchingTables) {
+                var srcCols = await GetTableColumnsAsync(srcConn, tbl);
+                var destCols = await GetTableColumnsAsync(destConn, tbl);
+
+                var srcColNames = srcCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var destColNames = destCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var missingInDest = srcCols.Where(c => !destColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+                if (missingInDest.Count > 0) {
+                    analysis.MissingColumnsInDestination[tbl] = missingInDest;
+                }
+
+                var missingInSrc = destCols.Where(c => !srcColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+                if (missingInSrc.Count > 0) {
+                    analysis.MissingColumnsInSource[tbl] = missingInSrc;
+                }
+            }
+
+            analysis.IsValid = analysis.MatchingTables.Count > 0;
+            if (!analysis.IsValid) {
+                analysis.ErrorMessage = "The selected file does not appear to be a valid LoRAMancer SQLite database (no matching tables found).";
+            }
+        } catch (Exception ex) {
+            analysis.IsValid = false;
+            analysis.ErrorMessage = $"Failed to analyze database: {ex.Message}";
+        }
+
+        return analysis;
+    }
+
+    private static async Task<List<(string Name, string Type)>> GetTableColumnsAsync(SqliteConnection conn, string tableName) {
+        var cols = new List<(string Name, string Type)>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info(\"{tableName.Replace("\"", "\"\"")}\");";
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) {
+            string name = reader.GetString(1);
+            string type = reader.IsDBNull(2) ? "TEXT" : reader.GetString(2);
+            cols.Add((name, type));
+        }
+        return cols;
+    }
+
+    public async Task<(int TablesImported, int RowsImported, List<string> AppliedResolutions)> ImportAndMergeDatabaseAsync(string sourceDbPath, bool autoAddMissingColumns = true) {
+        var resolutions = new List<string>();
+        int totalTables = 0;
+        int totalRows = 0;
+
+        await EnsureInitializedAsync();
+        var analysis = await AnalyzeDatabaseForImportAsync(sourceDbPath);
+        if (!analysis.IsValid) {
+            throw new InvalidOperationException(analysis.ErrorMessage);
+        }
+
+        var srcBuilder = new SqliteConnectionStringBuilder {
+            DataSource = sourceDbPath,
+            Mode = SqliteOpenMode.ReadOnly
+        };
+
+        using var srcConn = new SqliteConnection(srcBuilder.ToString());
+        await srcConn.OpenAsync();
+
+        using var destConn = new SqliteConnection(_connectionString);
+        await destConn.OpenAsync();
+
+        if (autoAddMissingColumns && analysis.MissingColumnsInDestination.Count > 0) {
+            foreach (var kvp in analysis.MissingColumnsInDestination) {
+                string tableName = kvp.Key;
+                var srcCols = await GetTableColumnsAsync(srcConn, tableName);
+                foreach (string colName in kvp.Value) {
+                    var colDef = srcCols.FirstOrDefault(c => string.Equals(c.Name, colName, StringComparison.OrdinalIgnoreCase));
+                    string colType = !string.IsNullOrWhiteSpace(colDef.Type) ? colDef.Type : "TEXT";
+                    try {
+                        using var alterCmd = destConn.CreateCommand();
+                        alterCmd.CommandText = $"ALTER TABLE \"{tableName.Replace("\"", "\"\"")}\" ADD COLUMN \"{colName.Replace("\"", "\"\"")}\" {colType};";
+                        await alterCmd.ExecuteNonQueryAsync();
+                        resolutions.Add($"Added column '{colName}' ({colType}) to '{tableName}'");
+                    } catch (Exception ex) {
+                        resolutions.Add($"Could not add column '{colName}' to '{tableName}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        foreach (string tableName in analysis.MatchingTables) {
+            var srcCols = await GetTableColumnsAsync(srcConn, tableName);
+            var destCols = await GetTableColumnsAsync(destConn, tableName);
+
+            var destColNames = destCols.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var commonCols = srcCols.Where(c => destColNames.Contains(c.Name)).Select(c => c.Name).ToList();
+
+            if (commonCols.Count == 0) {
+                continue;
+            }
+
+            string escapedTable = $"\"{tableName.Replace("\"", "\"\"")}\"";
+            string colList = string.Join(", ", commonCols.Select(c => $"\"{c.Replace("\"", "\"\"")}\""));
+            string paramList = string.Join(", ", commonCols.Select((_, idx) => $"@p{idx}"));
+
+            using var selectCmd = srcConn.CreateCommand();
+            selectCmd.CommandText = $"SELECT {colList} FROM {escapedTable};";
+            using var reader = await selectCmd.ExecuteReaderAsync();
+
+            using var tx = destConn.BeginTransaction();
+            try {
+                using var insertCmd = destConn.CreateCommand();
+                insertCmd.Transaction = tx;
+                insertCmd.CommandText = $"INSERT OR REPLACE INTO {escapedTable} ({colList}) VALUES ({paramList});";
+
+                var parameters = new List<SqliteParameter>();
+                for (int i = 0; i < commonCols.Count; i++) {
+                    var p = insertCmd.CreateParameter();
+                    p.ParameterName = $"@p{i}";
+                    insertCmd.Parameters.Add(p);
+                    parameters.Add(p);
+                }
+
+                int tableRowCount = 0;
+                while (await reader.ReadAsync()) {
+                    for (int i = 0; i < commonCols.Count; i++) {
+                        parameters[i].Value = reader.IsDBNull(i) ? DBNull.Value : reader.GetValue(i);
+                    }
+                    await insertCmd.ExecuteNonQueryAsync();
+                    tableRowCount++;
+                }
+
+                await tx.CommitAsync();
+                totalTables++;
+                totalRows += tableRowCount;
+            } catch {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
+        return (totalTables, totalRows, resolutions);
+    }
+
+    public async Task<bool> ReplaceDatabaseAsync(string sourceDbPath) {
+        if (!File.Exists(sourceDbPath)) {
+            throw new FileNotFoundException("Source database file not found.", sourceDbPath);
+        }
+
+        await EnsureInitializedAsync();
+
+        string backupPath = _dbPath + $".backup_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+        try {
+            if (File.Exists(_dbPath)) {
+                File.Copy(_dbPath, backupPath, overwrite: true);
+            }
+        } catch { }
+
+        SqliteConnection.ClearAllPools();
+
+        File.Copy(sourceDbPath, _dbPath, overwrite: true);
+        if (File.Exists(_dbPath + "-wal")) {
+            try {
+                File.Delete(_dbPath + "-wal");
+            } catch { }
+        }
+        if (File.Exists(_dbPath + "-shm")) {
+            try {
+                File.Delete(_dbPath + "-shm");
+            } catch { }
+        }
+
+        _initialized = false;
+        await EnsureInitializedAsync();
+
+        return true;
+    }
+
     public void Dispose() {
         _lock.Dispose();
     }
+}
+
+public sealed class DatabaseImportAnalysis {
+    public bool IsValid { get; set; }
+    public string ErrorMessage { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public List<string> MatchingTables { get; set; } = new();
+    public List<string> ExtraTables { get; set; } = new();
+    public List<string> MissingTables { get; set; } = new();
+    public Dictionary<string, int> SourceRowCounts { get; set; } = new();
+    public Dictionary<string, List<string>> MissingColumnsInDestination { get; set; } = new();
+    public Dictionary<string, List<string>> MissingColumnsInSource { get; set; } = new();
 }

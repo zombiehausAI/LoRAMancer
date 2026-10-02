@@ -1,0 +1,106 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject ModusFlowPromptService PromptService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.BookmarkAdd" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">Save Prompt</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    100% compatible with ModusFlow JSON format
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3 pt-2">
+            <MudTextField @bind-Value="_name" Label="Prompt Preset Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="e.g. Cyberpunk Alley Portrait" Required="true" AutoFocus="true"
+                          HelperText="Saved as <name>.json in your saved_prompts directory" />
+
+            <div class="d-flex align-center gap-2">
+                <MudAutocomplete T="string" @bind-Value="_category" Label="Category" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" SearchFunc="@SearchCategories" ResetValueOnEmptyText="false"
+                                 CoerceText="true" CoerceValue="true" Placeholder="e.g. Portraits, Styles, Fantasy"
+                                 HelperText="Organize your prompts by category" FullWidth="true" />
+            </div>
+
+            <MudTextField @bind-Value="PositivePrompt" Label="Positive Prompt" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Lines="3" HelperText="Will be saved as positive prompt" />
+
+            <MudTextField @bind-Value="NegativePrompt" Label="Negative Prompt" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Lines="2" HelperText="Will be saved as negative prompt" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="SaveAsync" Disabled="@(string.IsNullOrWhiteSpace(_name) || _isSaving)">
+            @(_isSaving ? "Saving..." : "Save Prompt")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter]
+    public string PositivePrompt { get; set; } = string.Empty;
+
+    [Parameter]
+    public string NegativePrompt { get; set; } = string.Empty;
+
+    [Parameter]
+    public string InitialCategory { get; set; } = string.Empty;
+
+    [Parameter]
+    public string InitialName { get; set; } = string.Empty;
+
+    private string _name = string.Empty;
+    private string _category = string.Empty;
+    private bool _isSaving;
+    private List<string> _existingCategories = new();
+
+    protected override async Task OnInitializedAsync() {
+        _name = InitialName;
+        _category = InitialCategory;
+        try {
+            var cats = await PromptService.GetCategoriesAsync();
+            _existingCategories = cats.ToList();
+        } catch {
+            _existingCategories = new();
+        }
+    }
+
+    private Task<IEnumerable<string>> SearchCategories(string value, CancellationToken token) {
+        if (string.IsNullOrWhiteSpace(value)) {
+            return Task.FromResult<IEnumerable<string>>(_existingCategories);
+        }
+        return Task.FromResult(_existingCategories.Where(x => x.Contains(value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task SaveAsync() {
+        if (string.IsNullOrWhiteSpace(_name)) {
+            return;
+        }
+
+        _isSaving = true;
+        try {
+            var saved = await PromptService.SavePromptAsync(_name, PositivePrompt, NegativePrompt, _category);
+            Snackbar.Add($"Saved ModusFlow prompt '{saved.Name}.json'", Severity.Success);
+            MudDialog?.Close(DialogResult.Ok(saved));
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save prompt: {ex.Message}", Severity.Error);
+        } finally {
+            _isSaving = false;
+        }
+    }
+
+    private void Cancel() {
+        MudDialog?.Cancel();
+    }
+}

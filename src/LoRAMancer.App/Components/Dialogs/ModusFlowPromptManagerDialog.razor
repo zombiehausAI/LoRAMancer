@@ -1,0 +1,155 @@
+@using System.Diagnostics
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject ModusFlowPromptService PromptService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Color="Color.Primary" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Saved Prompts</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Stored in: <code>@_promptsDir</code>
+                    </MudText>
+                </div>
+            </div>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenFolderInExplorer">
+                    Open Folder
+                </MudButton>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3 pt-2" style="max-height: 70vh; overflow-y: auto;">
+            <div class="d-flex align-center gap-2">
+                <MudTextField @bind-Value="_searchQuery" Placeholder="Search prompts..." Variant="Variant.Outlined"
+                              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true" FullWidth="true" />
+                <MudSelect T="string" @bind-Value="_selectedCategory" Label="Filter Category" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Dense="true" Style="min-width: 160px;">
+                    <MudSelectItem Value="@("")">All Categories</MudSelectItem>
+                    @foreach (var cat in _categories) {
+                        <MudSelectItem Value="@cat">@cat</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if (_filteredPrompts.Count == 0) {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-2">
+                    No saved prompts found.
+                </MudAlert>
+            } else {
+                <MudTable Items="_filteredPrompts" Hover="true" Dense="true" Elevation="0"
+                          Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                    <HeaderContent>
+                        <MudTh>Prompt Name</MudTh>
+                        <MudTh>Category</MudTh>
+                        <MudTh>Positive Preview</MudTh>
+                        <MudTh Style="text-align: right;">Actions</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">
+                            <span style="font-weight: 600; color: #cdd6f4;">@context.Name</span>
+                        </MudTd>
+                        <MudTd DataLabel="Category">
+                            @if (!string.IsNullOrWhiteSpace(context.Category)) {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">
+                                    @context.Category
+                                </MudChip>
+                            } else {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">—</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Positive Preview" Style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            <span style="font-size: 0.8rem; color: #a6adc8;" title="@context.Positive">
+                                @context.Positive
+                            </span>
+                        </MudTd>
+                        <MudTd DataLabel="Actions" Style="text-align: right;">
+                            <div class="d-flex align-center justify-end gap-1">
+                                <MudTooltip Text="Select and insert prompt">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                   OnClick="@(() => SelectPrompt(context))" />
+                                </MudTooltip>
+                                <MudTooltip Text="Delete saved prompt">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => DeletePromptAsync(context))" />
+                                </MudTooltip>
+                            </div>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    private string _promptsDir = string.Empty;
+    private List<ModusFlowPrompt> _prompts = new();
+    private List<string> _categories = new();
+    private string _searchQuery = string.Empty;
+    private string _selectedCategory = string.Empty;
+
+    private List<ModusFlowPrompt> _filteredPrompts => _prompts
+        .Where(p => string.IsNullOrWhiteSpace(_selectedCategory) || string.Equals(p.Category, _selectedCategory, StringComparison.OrdinalIgnoreCase))
+        .Where(p => string.IsNullOrWhiteSpace(_searchQuery) ||
+                    p.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                    p.Positive.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                    p.Category.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override async Task OnInitializedAsync() {
+        _promptsDir = PromptService.ResolvePromptsDirectory();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync() {
+        var prompts = await PromptService.GetAllPromptsAsync();
+        _prompts = prompts.ToList();
+        var cats = await PromptService.GetCategoriesAsync();
+        _categories = cats.ToList();
+    }
+
+    private void SelectPrompt(ModusFlowPrompt prompt) {
+        MudDialog?.Close(DialogResult.Ok(prompt));
+    }
+
+    private async Task DeletePromptAsync(ModusFlowPrompt prompt) {
+        bool deleted = await PromptService.DeletePromptAsync(prompt.FilePath);
+        if (deleted) {
+            Snackbar.Add($"Deleted '{prompt.Name}.json'", Severity.Info);
+            await ReloadAsync();
+        }
+    }
+
+    private void OpenFolderInExplorer() {
+        try {
+            string dir = PromptService.ResolvePromptsDirectory();
+            if (Directory.Exists(dir)) {
+                Process.Start(new ProcessStartInfo {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{dir}\"",
+                    UseShellExecute = true
+                });
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to open directory: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private void Close() {
+        MudDialog?.Cancel();
+    }
+}

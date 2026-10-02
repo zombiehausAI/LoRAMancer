@@ -48,6 +48,22 @@ public sealed class AppSettings {
     public string? CustomPrimaryColor { get; set; }
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
+    // Post-Forge Showcase Gallery Configuration
+    public List<string> ShowcaseDirectories { get; set; } = new();
+    public List<string> ShowcaseCustomTags { get; set; } = new() { "Favorites", "Best Likeness", "Experimental", "Overbaked", "Keeper" };
+    public List<string> ShowcaseCustomCategories { get; set; } = new() { "Portraits", "Styles", "Landscapes", "Characters", "Objects", "Concepts" };
+    public string ShowcaseDefaultSort { get; set; } = "newest";
+    public Dictionary<string, string> ShowcaseFolderSortOrders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // Saved Prompts Directory (Default: ~/.loramancer/saved_prompts or custom path)
+    public string SavedPromptsDirectory { get; set; } = string.Empty;
+
+    // Image Harvester Multi-Provider Configuration
+    public bool HarvestSearchAllProviders { get; set; } = false;
+    public string HarvestLastSelectedProvider { get; set; } = "duckduckgo";
+    public List<string> HarvestDisabledProviderIds { get; set; } = new();
+    public List<HarvestProviderDefinition> HarvestCustomProviders { get; set; } = new();
+
     // Studio Database & PostgreSQL Configuration
     public string DatabaseProvider { get; set; } = "SQLite"; // "SQLite" or "PostgreSQL"
     public string PgHost { get; set; } = "localhost";
@@ -60,6 +76,7 @@ public sealed class AppSettings {
     // AI-Toolkit & Training Environment
     public string AiToolkitRepoUrl { get; set; } = "https://github.com/ostris/ai-toolkit.git";
     public string AiToolkitPath { get; set; } = string.Empty;
+    public string AiToolkitBranch { get; set; } = "main";
     public string HfHomeCachePath { get; set; } = string.Empty;
 
     // User Profile & Identifiable Information
@@ -72,6 +89,7 @@ public sealed class AppSettings {
     public string OllamaEndpointUrl { get; set; } = "http://localhost:11434";
     public string OllamaApiKey { get; set; } = string.Empty;
     public string OllamaDefaultModel { get; set; } = "llama3.2-vision";
+    public List<string> OllamaDiscoveredModels { get; set; } = new();
 
     // ComfyUI Integration (Local, LAN, or WAN)
     public string ComfyUiEndpointUrl { get; set; } = "http://127.0.0.1:8188";

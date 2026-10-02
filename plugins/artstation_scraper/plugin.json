@@ -1,0 +1,13 @@
+{
+  "id": "artstation-scraper",
+  "name": "ArtStation Digital Concepts",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting digital artwork, character concept art, and 3D renders from ArtStation.",
+  "author": "LoRAMancer Team",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "ArtStation Scraper",
+  "icon": "Palette"
+}

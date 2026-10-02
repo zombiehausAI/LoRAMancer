@@ -537,6 +537,8 @@ public sealed class LoraLibraryService {
 
                 List<LoraMetadata> batchToSave = new();
 
+                DateTime lastProgressReport = DateTime.MinValue;
+
                 for (int i = 0; i < files.Length; i++) {
                     if (token.IsCancellationRequested) {
                         break;
@@ -545,14 +547,24 @@ public sealed class LoraLibraryService {
                     string file = files[i];
                     CurrentScanningFile = Path.GetFileName(file);
                     ScannedCount = i + 1;
-                    OnScanProgress?.Invoke(CurrentScanningFile, ScannedCount, TotalFiles);
+
+                    // Throttle scan progress events to at most once per 250ms to keep UI thread 100% fluid
+                    if (i == 0 || i == files.Length - 1 || (DateTime.UtcNow - lastProgressReport).TotalMilliseconds >= 250) {
+                        lastProgressReport = DateTime.UtcNow;
+                        OnScanProgress?.Invoke(CurrentScanningFile, ScannedCount, TotalFiles);
+                    }
+
+                    // Periodically yield execution to keep background scanning truly non-blocking
+                    if (i % 30 == 0) {
+                        await Task.Delay(1, token);
+                    }
 
                     try {
                         DateTime diskTime = File.GetLastWriteTimeUtc(file);
                         long diskSize = new FileInfo(file).Length;
 
                         // Smart Differential Scan: Skip disk header parsing if already indexed & unchanged
-                        if (signatures.TryGetValue(file, out var sig) && sig.LastModified == diskTime && sig.Size == diskSize) {
+                        if (signatures.TryGetValue(file, out var sig) && Math.Abs((sig.LastModified - diskTime).TotalSeconds) < 2 && sig.Size == diskSize) {
                             lock (_lock) {
                                 if (!_items.Any(x => x.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase))) {
                                     // Item in DB but not yet in memory
@@ -776,6 +788,34 @@ public sealed class LoraLibraryService {
                 return;
             }
         }
+    }
+
+    public async Task<bool> AssignPreviewImageAsync(LoraMetadata meta, string imageSourcePath, bool copyAlongsideLora = true) {
+        ArgumentNullException.ThrowIfNull(meta);
+        ArgumentException.ThrowIfNullOrWhiteSpace(imageSourcePath);
+
+        if (!File.Exists(imageSourcePath) || !File.Exists(meta.FilePath)) {
+            return false;
+        }
+
+        string targetThumbnailPath = imageSourcePath;
+        if (copyAlongsideLora) {
+            string loraDir = Path.GetDirectoryName(meta.FilePath) ?? string.Empty;
+            string loraBaseName = Path.GetFileNameWithoutExtension(meta.FilePath);
+            string ext = Path.GetExtension(imageSourcePath);
+            if (string.IsNullOrWhiteSpace(ext)) {
+                ext = ".png";
+            }
+            string dest = Path.Combine(loraDir, $"{loraBaseName}.preview{ext}");
+            File.Copy(imageSourcePath, dest, overwrite: true);
+            targetThumbnailPath = dest;
+        }
+
+        meta.ThumbnailPath = targetThumbnailPath;
+        await _databaseService.UpsertSingleAsync(meta);
+        AddOrUpdateLora(meta);
+        OnLibraryUpdated?.Invoke();
+        return true;
     }
 
     public async Task<CivitaiModelVersionInfo?> EnrichFromCivitaiAsync(LoraMetadata meta, CancellationToken cancellationToken = default) {

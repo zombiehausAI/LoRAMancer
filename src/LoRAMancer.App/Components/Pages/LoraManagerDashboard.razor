@@ -14,6 +14,7 @@
 @using LoRAMancer.App.Components.Dialogs
 @using LoRAMancer.App.Engines
 @inject ModelArchitectureRegistry ArchitectureRegistry
+@inject TrainingRecipeService RecipeService
 @using System.Collections.Concurrent
 @using System.Threading
 
@@ -662,6 +663,9 @@
                 <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(lora))">
                     Clone Recipe into Trainer (Stage 2)
                 </MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(lora))">
+                    Save as Favorite Recipe
+                </MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(lora))">
                     Seed Concept to Dataset Curator (Stage 1)
                 </MudMenuItem>
@@ -849,6 +853,9 @@
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.AutoAwesome" IconColor="Color.Primary" OnClick="@(() => UseLoraTrainingSettings(context))">
                             Clone Recipe into Trainer (Stage 2)
+                        </MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Filled.StarRate" IconColor="Color.Tertiary" OnClick="@(() => SaveLoraAsFavoriteRecipeAsync(context))">
+                            Save as Favorite Recipe
                         </MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Filled.Collections" IconColor="Color.Secondary" OnClick="@(() => SeedConceptToCurator(context))">
                             Seed Concept to Dataset Curator (Stage 1)
@@ -2002,6 +2009,20 @@
         }
     }
 
+    private async Task SaveLoraAsFavoriteRecipeAsync(LoraMetadata lora) {
+        if (lora == null) {
+            return;
+        }
+
+        try {
+            var recipe = RecipeService.CreateRecipeFromLora(lora);
+            string savedPath = await RecipeService.SaveRecipeAsync(recipe);
+            Snackbar.Add($"Saved '{recipe.Name}' to favorite recipes ⭐! Selectable anytime in Training Wizard.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save recipe: {ex.Message}", Severity.Error);
+        }
+    }
+
     private void InspectLora(LoraMetadata lora) {
         _selectedLora = lora;
         _drawerOpen = true;
@@ -2050,6 +2071,129 @@
         return null;
     }
 
+    private static bool IsSupportedImageHeader(ReadOnlySpan<byte> header) {
+        if (header.Length < 4) {
+            return false;
+        }
+
+        // PNG: 89 50 4E 47
+        if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) {
+            return true;
+        }
+
+        // JPEG: FF D8 FF
+        if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
+            return true;
+        }
+
+        // GIF: GIF8
+        if (header[0] == 0x47 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x38) {
+            return true;
+        }
+
+        // WebP: RIFF....WEBP
+        if (header.Length >= 12 &&
+            header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 &&
+            header[8] == 0x57 && header[9] == 0x45 && header[10] == 0x42 && header[11] == 0x50) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static async Task<string> CreateSafeThumbnailDataUriAsync(string path, CancellationToken token) {
+        if (!File.Exists(path)) {
+            return string.Empty;
+        }
+
+        FileInfo fileInfo = new(path);
+        // Absolute safety ceiling: files over 80MB or 0 bytes are never valid display thumbnails
+        if (fileInfo.Length == 0 || fileInfo.Length > 80 * 1024 * 1024) {
+            return string.Empty;
+        }
+
+        await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+        byte[] headerBytes = new byte[16];
+        int headerRead = await stream.ReadAsync(headerBytes.AsMemory(0, 16), token);
+        if (!IsSupportedImageHeader(headerBytes.AsSpan(0, headerRead))) {
+            // Reject non-image payloads (such as MP4 video files saved with .png extensions)
+            return string.Empty;
+        }
+
+        stream.Position = 0;
+
+        // If file is already small (<= 1.5 MB), convert directly to base64
+        if (stream.Length <= 1536 * 1024) {
+            byte[] bytes = new byte[stream.Length];
+            await stream.ReadExactlyAsync(bytes, token);
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            string mime = ext switch {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+            return $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+        }
+
+        // For larger images (1.5MB - 80MB), downscale using Windows.Graphics.Imaging to avoid IPC limits
+        try {
+            using var randomAccessStream = System.IO.WindowsRuntimeStreamExtensions.AsRandomAccessStream(stream);
+            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(randomAccessStream);
+
+            uint origW = decoder.PixelWidth;
+            uint origH = decoder.PixelHeight;
+            const uint maxDim = 400;
+            uint targetW = origW;
+            uint targetH = origH;
+
+            if (origW > maxDim || origH > maxDim) {
+                if (origW >= origH) {
+                    targetH = Math.Max(1, (uint)Math.Round((double)origH * maxDim / origW));
+                    targetW = maxDim;
+                } else {
+                    targetW = Math.Max(1, (uint)Math.Round((double)origW * maxDim / origH));
+                    targetH = maxDim;
+                }
+            }
+
+            var transform = new Windows.Graphics.Imaging.BitmapTransform {
+                ScaledWidth = targetW,
+                ScaledHeight = targetH,
+                InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Linear
+            };
+
+            var pixelData = await decoder.GetPixelDataAsync(
+                Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+                Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                transform,
+                Windows.Graphics.Imaging.ExifOrientationMode.RespectExifOrientation,
+                Windows.Graphics.Imaging.ColorManagementMode.ColorManageToSRgb
+            );
+
+            byte[] pixels = pixelData.DetachPixelData();
+            using var outStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.JpegEncoderId, outStream);
+            encoder.SetPixelData(
+                Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+                Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                targetW,
+                targetH,
+                96,
+                96,
+                pixels
+            );
+            await encoder.FlushAsync();
+
+            using MemoryStream ms = new();
+            outStream.Seek(0);
+            await System.IO.WindowsRuntimeStreamExtensions.AsStreamForRead(outStream).CopyToAsync(ms, token);
+            byte[] thumbBytes = ms.ToArray();
+            return $"data:image/jpeg;base64,{Convert.ToBase64String(thumbBytes)}";
+        } catch {
+            return string.Empty;
+        }
+    }
+
     private string GetImageSrc(string? path) {
         if (string.IsNullOrWhiteSpace(path) || _disposed) {
             return string.Empty;
@@ -2061,22 +2205,15 @@
             var token = _cts.Token;
             _ = Task.Run(async () => {
                 try {
-                    if (!_disposed && !token.IsCancellationRequested && File.Exists(path)) {
-                        byte[] bytes = await File.ReadAllBytesAsync(path, token);
-                        string ext = Path.GetExtension(path).ToLowerInvariant();
-                        string mime = ext switch {
-                            ".png" => "image/png",
-                            ".webp" => "image/webp",
-                            _ => "image/jpeg"
-                        };
-                        string dataUri = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+                    if (!_disposed && !token.IsCancellationRequested) {
+                        string dataUri = await CreateSafeThumbnailDataUriAsync(path, token);
                         _thumbnailCache[path] = dataUri;
-                        if (!_disposed && !token.IsCancellationRequested) {
+                        if (!_disposed && !token.IsCancellationRequested && !string.IsNullOrEmpty(dataUri)) {
                             await SafeInvokeAsync(StateHasChanged);
                         }
                     }
                 } catch {
-                    // Graceful fallback to prevent unhandled exception if file is locked or unreadable
+                    _thumbnailCache[path] = string.Empty;
                 } finally {
                     _loadingThumbnails.TryRemove(path, out _);
                 }

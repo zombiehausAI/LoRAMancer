@@ -131,6 +131,50 @@ public sealed class ToolBenchmarkStartDto {
     public string? TriggerWord { get; set; }
 }
 
+public sealed class HarvesterSearchDto {
+    public string Query { get; set; } = string.Empty;
+    public string? ProviderId { get; set; }
+    public bool SearchAll { get; set; } = false;
+    public int MaxResults { get; set; } = 40;
+    public bool SafeSearch { get; set; } = true;
+    public int MinWidth { get; set; } = 0;
+    public int MinHeight { get; set; } = 0;
+    public string? Tags { get; set; }
+}
+
+public sealed class HarvesterCandidateDto {
+    public string SourceUrl { get; set; } = string.Empty;
+    public string? ThumbnailUrl { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public List<string>? Tags { get; set; }
+}
+
+public sealed class HarvesterDownloadDto {
+    public string? DestinationFolder { get; set; }
+    public string? Prefix { get; set; } = "harvest";
+    public List<HarvesterCandidateDto>? Items { get; set; }
+}
+
+public sealed class HarvesterToggleProviderDto {
+    public string? ProviderId { get; set; }
+    public bool IsEnabled { get; set; }
+}
+
+public sealed class PluginToggleDto {
+    public bool IsEnabled { get; set; }
+}
+
+public sealed class SavePromptDto {
+    public string Name { get; set; } = string.Empty;
+    public string Positive { get; set; } = string.Empty;
+    public string? Negative { get; set; } = string.Empty;
+    public string? Category { get; set; } = string.Empty;
+}
+
+
 public sealed class NetworkServerService : IAsyncDisposable {
     private readonly SettingsService _settingsService;
     private readonly TrainingRunnerService _trainingRunner;
@@ -150,6 +194,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
     private readonly PluginManagerService? _pluginManager;
     private readonly LoraDiffService? _diffService;
     private readonly LoraBenchmarkService? _benchmarkService;
+    private readonly ImageHarvesterService? _harvesterService;
+    private readonly ModusFlowPromptService? _promptService;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -180,7 +226,9 @@ public sealed class NetworkServerService : IAsyncDisposable {
         SafeTensorsMetadataReader? metadataReader = null,
         PluginManagerService? pluginManager = null,
         LoraDiffService? diffService = null,
-        LoraBenchmarkService? benchmarkService = null
+        LoraBenchmarkService? benchmarkService = null,
+        ImageHarvesterService? harvesterService = null,
+        ModusFlowPromptService? promptService = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
@@ -200,6 +248,8 @@ public sealed class NetworkServerService : IAsyncDisposable {
         _pluginManager = pluginManager;
         _diffService = diffService;
         _benchmarkService = benchmarkService;
+        _harvesterService = harvesterService;
+        _promptService = promptService;
 
         _trainingRunner.OnProgressUpdated += HandleProgressUpdated;
         _trainingRunner.OnLogReceived += HandleLogReceived;
@@ -1195,6 +1245,182 @@ public sealed class NetworkServerService : IAsyncDisposable {
             );
             return Results.Json(result);
         });
+
+        // 25. Harvester Endpoints
+        app.MapGet("/api/v1/harvester/providers", (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            if (_harvesterService == null) return Results.Json(Array.Empty<object>());
+            var providers = _harvesterService.GetProviders().Select(p => new {
+                id = p.Id,
+                name = p.Name,
+                description = p.Description,
+                icon = p.Icon,
+                engine = p.Engine.ToString(),
+                isEnabled = p.IsEnabled,
+                isCustom = p.IsCustom,
+                pluginId = p.PluginId
+            });
+            return Results.Json(providers);
+        });
+
+        app.MapPost("/api/v1/harvester/toggle-provider", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_harvesterService == null) return Results.BadRequest(new { error = "Harvester service not available." });
+            var dto = await JsonSerializer.DeserializeAsync<HarvesterToggleProviderDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.ProviderId)) {
+                return Results.BadRequest(new { error = "ProviderId is required." });
+            }
+            await _harvesterService.SetProviderEnabledAsync(dto.ProviderId, dto.IsEnabled);
+            return Results.Json(new { success = true, providerId = dto.ProviderId, isEnabled = dto.IsEnabled });
+        });
+
+        app.MapPost("/api/v1/harvester/search", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_harvesterService == null) return Results.BadRequest(new { error = "Harvester service not available." });
+            var dto = await JsonSerializer.DeserializeAsync<HarvesterSearchDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.Query)) {
+                return Results.BadRequest(new { error = "Search query is required." });
+            }
+
+            var query = new HarvestSearchQuery {
+                Query = dto.Query,
+                ProviderId = dto.ProviderId ?? string.Empty,
+                SearchAllProviders = dto.SearchAll,
+                MaxResults = dto.MaxResults > 0 ? dto.MaxResults : 40,
+                SafeSearch = dto.SafeSearch,
+                MinWidth = dto.MinWidth,
+                MinHeight = dto.MinHeight,
+                Tags = dto.Tags ?? string.Empty
+            };
+
+            if (!dto.SearchAll && !string.IsNullOrWhiteSpace(dto.ProviderId)) {
+                var p = _harvesterService.GetProviders().FirstOrDefault(x => string.Equals(x.Id, dto.ProviderId, StringComparison.OrdinalIgnoreCase));
+                if (p != null) {
+                    query.Engine = p.Engine;
+                }
+            }
+
+            var results = await _harvesterService.SearchAsync(query);
+            return Results.Json(results);
+        });
+
+        app.MapPost("/api/v1/harvester/download", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_harvesterService == null) return Results.BadRequest(new { error = "Harvester service not available." });
+            var dto = await JsonSerializer.DeserializeAsync<HarvesterDownloadDto>(request.Body);
+            if (dto == null) return Results.BadRequest(new { error = "Download parameters required." });
+
+            string targetDir = !string.IsNullOrWhiteSpace(dto.DestinationFolder)
+                ? dto.DestinationFolder
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "harvested", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+
+            Directory.CreateDirectory(targetDir);
+
+            if (dto.Items != null && dto.Items.Count > 0) {
+                var selectedUrls = new HashSet<string>(dto.Items.Select(i => i.SourceUrl), StringComparer.OrdinalIgnoreCase);
+                foreach (var c in _harvesterService.Candidates) {
+                    c.IsSelected = selectedUrls.Contains(c.SourceUrl);
+                }
+            }
+
+            var downloaded = await _harvesterService.DownloadSelectedAsync(targetDir, dto.Prefix);
+            return Results.Json(new {
+                success = true,
+                count = downloaded.Count,
+                destinationFolder = targetDir,
+                files = downloaded
+            });
+        });
+
+        // 26. Plugin Manager & Config Endpoints
+        app.MapGet("/api/v1/plugins", (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            if (_pluginManager == null) return Results.Json(Array.Empty<object>());
+            var list = _pluginManager.Plugins.Select(p => new {
+                id = p.Id,
+                name = p.Name,
+                description = p.Description,
+                version = p.Version,
+                author = p.Author,
+                pluginType = p.PluginType,
+                isEnabled = p.IsEnabled,
+                hasPythonVenv = p.HasDedicatedVenv,
+                isScraper = PluginManagerService.IsScraperPlugin(p),
+                hasConfigOptions = (p.ConfigSchema != null && p.ConfigSchema.Count > 0) || PluginManagerService.IsScraperPlugin(p),
+                configSchema = p.ConfigSchema,
+                uiSlot = p.UiSlot,
+                menuSection = p.MenuSection
+            });
+            return Results.Json(list);
+        });
+
+        app.MapPost("/api/v1/plugins/{id}/toggle", (string id, HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_pluginManager == null) return Results.BadRequest(new { error = "Plugin manager not available." });
+            var manifest = _pluginManager.Plugins.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (manifest == null) return Results.NotFound(new { error = $"Plugin '{id}' not found." });
+
+            _pluginManager.TogglePluginState(id, !manifest.IsEnabled);
+            return Results.Json(new { success = true, id = id, isEnabled = manifest.IsEnabled });
+        });
+
+        app.MapGet("/api/v1/plugins/{id}/config", (string id, HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            if (_pluginManager == null) return Results.BadRequest(new { error = "Plugin manager not available." });
+            var manifest = _pluginManager.Plugins.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (manifest == null) return Results.NotFound(new { error = $"Plugin '{id}' not found." });
+
+            var config = _pluginManager.GetPluginConfig(id);
+            string configPath = PluginManagerService.GetPluginConfigPath(id);
+            return Results.Json(new {
+                id = id,
+                name = manifest.Name,
+                config = config,
+                schema = manifest.ConfigSchema,
+                configPath = configPath
+            });
+        });
+
+        app.MapPost("/api/v1/plugins/{id}/config", async (string id, HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_pluginManager == null) return Results.BadRequest(new { error = "Plugin manager not available." });
+            var manifest = _pluginManager.Plugins.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (manifest == null) return Results.NotFound(new { error = $"Plugin '{id}' not found." });
+
+            var config = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(request.Body);
+            if (config == null) return Results.BadRequest(new { error = "Configuration data required." });
+
+            _pluginManager.SavePluginConfig(id, config);
+            string configPath = PluginManagerService.GetPluginConfigPath(id);
+            return Results.Json(new { success = true, id = id, configPath = configPath });
+        });
+
+        // 27. Saved Prompts (ModusFlow JSON) Endpoints
+        app.MapGet("/api/v1/prompts", async (HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            if (_promptService == null) return Results.Json(Array.Empty<object>());
+            var prompts = await _promptService.GetAllPromptsAsync();
+            return Results.Json(prompts);
+        });
+
+        app.MapPost("/api/v1/prompts", async (HttpRequest request) => {
+            if (!IsAuthorized(request.HttpContext, accessToken)) return Results.Unauthorized();
+            if (_promptService == null) return Results.BadRequest(new { error = "Prompt service not available." });
+            var dto = await JsonSerializer.DeserializeAsync<SavePromptDto>(request.Body);
+            if (dto == null || string.IsNullOrWhiteSpace(dto.Name)) {
+                return Results.BadRequest(new { error = "Prompt preset name is required." });
+            }
+            var saved = await _promptService.SavePromptAsync(dto.Name, dto.Positive ?? "", dto.Negative ?? "", dto.Category ?? "");
+            return Results.Json(saved);
+        });
+
+        app.MapDelete("/api/v1/prompts/{name}", async (string name, HttpContext context) => {
+            if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
+            if (_promptService == null) return Results.BadRequest(new { error = "Prompt service not available." });
+            bool deleted = await _promptService.DeletePromptAsync(name);
+            return Results.Json(new { success = deleted });
+        });
+
 
         // 25. Embedded Desktop-Replicating HTML Interface
         app.MapGet("/", async (HttpContext context) => {
@@ -2407,6 +2633,104 @@ self.addEventListener('fetch', (e) => {
             background: rgba(203, 166, 247, 0.05);
         }
 
+        /* HARVESTER GALLERY */
+        .harvest-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+            max-height: 520px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .harvest-card {
+            background: var(--bg-overlay);
+            border: 2px solid var(--border-dark);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .harvest-card:hover {
+            border-color: var(--accent-purple);
+            transform: translateY(-2px);
+        }
+        .harvest-card.selected {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 10px rgba(166, 227, 161, 0.35);
+        }
+        .harvest-thumb {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            background: #000;
+        }
+        .harvest-badge {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            background: rgba(17, 17, 27, 0.85);
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--accent-purple);
+            border: 1px solid var(--border-dark);
+            pointer-events: none;
+        }
+        .harvest-check {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent-green);
+            cursor: pointer;
+        }
+        .harvest-info {
+            padding: 6px 8px;
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* PLUGIN CARDS */
+        .plugin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 14px;
+        }
+        .plugin-card {
+            background: var(--bg-overlay);
+            border: 1px solid var(--border-dark);
+            border-radius: 10px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: border-color 0.2s;
+        }
+        .plugin-card:hover {
+            border-color: var(--accent-blue);
+        }
+        .plugin-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .plugin-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         /* MODAL DIALOG OVERLAYS */
         .modal-overlay {
             position: fixed;
@@ -2604,6 +2928,11 @@ self.addEventListener('fetch', (e) => {
             </div>
 
             <div class="nav-group-header">Studio Workshop</div>
+            <div class="nav-item" data-view="harvester" onclick="switchView('harvester')">
+                <span class="nav-icon">🌾</span>
+                <span>Image Harvester</span>
+                <span class="nav-badge" style="color:var(--accent-green);">Scrape</span>
+            </div>
             <div class="nav-item" data-view="chop" onclick="switchView('chop')">
                 <span class="nav-icon">🛠️</span>
                 <span>LoRA Chop-Shop</span>
@@ -2643,6 +2972,11 @@ self.addEventListener('fetch', (e) => {
             </div>
 
             <div class="nav-group-header">Subsystems</div>
+            <div class="nav-item" data-view="plugins" onclick="switchView('plugins')">
+                <span class="nav-icon">🧩</span>
+                <span>Plugins &amp; Extensions</span>
+                <span class="nav-badge" style="color:var(--accent-purple);">Addons</span>
+            </div>
             <div class="nav-item" data-view="telemetry" onclick="switchView('telemetry')">
                 <span class="nav-icon">💻</span>
                 <span>Compute Environment</span>
@@ -2708,7 +3042,10 @@ self.addEventListener('fetch', (e) => {
                 <div class="card">
                     <div class="card-header-bar">
                         <div class="card-title">🖼️ Stage 1: Curate &amp; Caption Studio</div>
-                        <span class="chip chip-stage">Dataset Management</span>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button class="btn btn-secondary btn-sm" onclick="switchView('harvester')">🌾 Harvest Images</button>
+                            <span class="chip chip-stage">Dataset Management</span>
+                        </div>
                     </div>
                     <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
                         Upload raw image archives (.zip) to the host machine. Datasets are automatically extracted, inspected for aspect ratios, and captions verified.
@@ -3206,6 +3543,15 @@ self.addEventListener('fetch', (e) => {
                             <div class="card-title">🎨 Stage 4: ComfyUI Interactive Test Studio</div>
                             <span id="comfyStatusBadge" class="chip chip-stage">Checking...</span>
                         </div>
+                        <div class="input-group" style="margin-bottom:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <label style="margin:0; font-size:0.82rem; font-weight:700;">Preset / Saved Prompt (ModusFlow)</label>
+                                <button class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="saveCurrentComfyPromptPreset()">💾 Save Preset</button>
+                            </div>
+                            <select id="comfySavedPromptSelect" onchange="onSavedPromptSelected()">
+                                <option value="">-- Load Saved Prompt (ModusFlow JSON) --</option>
+                            </select>
+                        </div>
                         <div class="input-group">
                             <label>Prompt</label>
                             <textarea id="comfyPrompt" rows="3" placeholder="masterpiece, 1girl, highly detailed, expressive eyes, dynamic lighting"></textarea>
@@ -3426,6 +3772,106 @@ self.addEventListener('fetch', (e) => {
                         </div>
                         <div id="docActiveContent" class="markdown-rendered-view" style="color:var(--text-primary); line-height:1.7; font-size:0.92rem;">
                             Select a guide on the left to read its complete technical documentation.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: IMAGE HARVESTER STUDIO -->
+            <div id="view-harvester" class="view-panel">
+                <div class="card">
+                    <div class="card-header-bar">
+                        <div class="card-title">🌾 Image Harvester &amp; Dataset Scraper</div>
+                        <span class="chip chip-stage" style="color:var(--accent-green);">Multi-Engine Scraper</span>
+                    </div>
+                    <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
+                        Scrape candidate training images across DuckDuckGo, Reddit, Safebooru, Wikimedia, Unsplash, and all discovered Python scraper plugins (Civitai, Wallhaven, ArtStation, Danbooru, Gelbooru, Rule34, e621, xbooru, TBIB, etc.).
+                    </p>
+
+                    <div class="grid-3" style="align-items:flex-end;">
+                        <div class="input-group" style="grid-column: span 2;">
+                            <label>Search Query / Tags / Subject</label>
+                            <input id="harvestQuery" type="text" placeholder="e.g. cybernetic samurai armor, fantasy landscapes, 1girl silver hair" onkeydown="if(event.key==='Enter') runHarvestSearch()" />
+                        </div>
+                        <div class="input-group">
+                            <label>Search Provider</label>
+                            <select id="harvestProviderSelect">
+                                <option value="">Loading search engines...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:18px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.85rem;">
+                            <input type="checkbox" id="harvestSearchAll" />
+                            <span>🌐 <strong>Search All Enabled Sites At Once</strong></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.85rem;">
+                            <input type="checkbox" id="harvestSafeSearch" checked />
+                            <span>🛡️ SafeSearch (Filter Explicit Content)</span>
+                        </label>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:0.82rem; color:var(--text-secondary);">Max Candidates:</span>
+                            <input type="number" id="harvestMaxResults" value="40" min="5" max="200" style="width:70px; padding:4px 8px; font-size:0.85rem;" />
+                        </div>
+                        <button class="btn" style="margin-left:auto;" onclick="runHarvestSearch()">🔍 Search &amp; Harvest</button>
+                    </div>
+
+                    <div id="harvestSearchStatus" style="font-size:0.85rem; color:var(--accent-purple); margin-top:12px; display:none;"></div>
+                </div>
+
+                <!-- Candidates Gallery Card -->
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header-bar">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div class="card-title">🖼️ Harvested Image Candidates</div>
+                            <span id="harvestCountBadge" class="chip chip-stage">0 found</span>
+                        </div>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-sm" onclick="toggleHarvestSelectAll(true)">Select All</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleHarvestSelectAll(false)">Deselect All</button>
+                            <span id="harvestSelectedCount" style="font-size:0.82rem; color:var(--accent-green); font-weight:700;">0 selected</span>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-bottom:14px; align-items:center; flex-wrap:wrap;">
+                        <div class="input-group" style="flex:1; min-width:240px; margin-bottom:0;">
+                            <input id="harvestDestFolder" type="text" placeholder="Destination folder on host (leave blank for default ~/.loramancer/harvested/)" />
+                        </div>
+                        <button id="harvestDownloadBtn" class="btn btn-secondary btn-sm" onclick="downloadHarvestSelected()">⬇️ Download Selected Images</button>
+                        <button id="harvestSendCurateBtn" class="btn btn-sm" onclick="sendHarvestToCurate()" style="display:none;">🪄 Send to Stage 1 Curate</button>
+                    </div>
+
+                    <div id="harvestGalleryGrid" class="harvest-gallery">
+                        <div style="grid-column: 1 / -1; text-align:center; color:var(--text-secondary); padding:40px 0;">
+                            Search above to discover image candidates across enabled search providers and Python scraper plugins.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: PLUGINS & EXTENSIONS -->
+            <div id="view-plugins" class="view-panel">
+                <div class="card">
+                    <div class="card-header-bar">
+                        <div>
+                            <div class="card-title">🧩 Plugins &amp; Extensions Subsystem</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:2px;">
+                                Manage C# and Python scraper plugins, shared virtual environments, and API authentication credentials.
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="loadPluginsList()">🔄 Refresh Plugins</button>
+                    </div>
+
+                    <div style="display:flex; gap:8px; margin-top:14px; margin-bottom:12px; border-bottom:1px solid var(--border-dark); padding-bottom:10px;">
+                        <button id="pluginTabScrapers" class="btn btn-sm btn-secondary active" onclick="setPluginTab('scrapers')">🌾 Image Scrapers (<span id="scraperTabCount">0</span>)</button>
+                        <button id="pluginTabGeneral" class="btn btn-sm btn-secondary" onclick="setPluginTab('general')">🧩 General Extensions (<span id="generalTabCount">0</span>)</button>
+                        <button id="pluginTabAll" class="btn btn-sm btn-secondary" onclick="setPluginTab('all')">All Installed (<span id="allTabCount">0</span>)</button>
+                    </div>
+
+                    <div id="pluginsListGrid" class="plugin-grid" style="margin-top:14px;">
+                        <div style="grid-column: 1 / -1; color:var(--text-secondary); text-align:center; padding:30px 0;">
+                            Loading installed plugins...
                         </div>
                     </div>
                 </div>
@@ -3801,6 +4247,26 @@ self.addEventListener('fetch', (e) => {
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModalApp()">Close</button>
                 <button id="bmRunBtn" class="btn" onclick="runBenchmarkMatrix()">🚀 Run Benchmark Matrix</button>
+            </div>
+        </div>
+
+        <!-- Modal: Plugin Configuration -->
+        <div id="modal-plugin-config" class="modal-window" style="display:none; max-width:640px;">
+            <div class="modal-header">
+                <div>
+                    <div id="modalPluginConfigTitle" class="modal-title">⚙️ Configure Plugin</div>
+                    <div id="modalPluginConfigPath" class="modal-subtitle" style="font-family:monospace; font-size:0.75rem;"></div>
+                </div>
+                <button class="modal-close-btn" onclick="closeModalApp()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="modalPluginConfigDesc" style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:14px;"></p>
+                <div id="modalPluginConfigFields" style="display:flex; flex-direction:column; gap:12px;"></div>
+                <div id="modalPluginConfigStatus" style="font-size:0.82rem; color:var(--accent-green); margin-top:10px; display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModalApp()">Cancel</button>
+                <button class="btn" onclick="savePluginConfig()">💾 Save Configuration</button>
             </div>
         </div>
     </div>
@@ -5626,6 +6092,533 @@ self.addEventListener('fetch', (e) => {
             }
         }
 
+        // --- IMAGE HARVESTER STUDIO LOGIC ---
+        let harvestCandidates = [];
+        let harvestProviders = [];
+        let lastDownloadedHarvestFolder = '';
+
+        async function loadHarvesterProviders() {
+            try {
+                const res = await fetch('/api/v1/harvester/providers', { headers: getHeaders() });
+                if (!res.ok) return;
+                harvestProviders = await res.json();
+                const sel = document.getElementById('harvestProviderSelect');
+                if (!sel) return;
+                sel.innerHTML = '';
+                
+                const builtIn = harvestProviders.filter(p => !p.pluginId);
+                const plugins = harvestProviders.filter(p => p.pluginId);
+
+                const grpBuiltin = document.createElement('optgroup');
+                grpBuiltin.label = 'Built-in Search Engines';
+                builtIn.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = `${p.name} ${!p.isEnabled ? '(Disabled in settings)' : ''}`;
+                    grpBuiltin.appendChild(opt);
+                });
+                sel.appendChild(grpBuiltin);
+
+                if (plugins.length > 0) {
+                    const grpPlugins = document.createElement('optgroup');
+                    grpPlugins.label = 'Python Scraper Plugins';
+                    plugins.forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p.id;
+                        opt.textContent = `🧩 ${p.name} ${!p.isEnabled ? '(Disabled)' : ''}`;
+                        grpPlugins.appendChild(opt);
+                    });
+                    sel.appendChild(grpPlugins);
+                }
+            } catch (err) {
+                console.error('Failed to load harvester providers:', err);
+            }
+        }
+
+        async function runHarvestSearch() {
+            const query = document.getElementById('harvestQuery').value.trim();
+            if (!query) {
+                alert('Please enter a search query or tags.');
+                return;
+            }
+
+            const searchAll = document.getElementById('harvestSearchAll').checked;
+            const providerId = document.getElementById('harvestProviderSelect').value;
+            const safeSearch = document.getElementById('harvestSafeSearch').checked;
+            const maxResults = parseInt(document.getElementById('harvestMaxResults').value, 10) || 40;
+
+            const statusEl = document.getElementById('harvestSearchStatus');
+            statusEl.style.display = 'block';
+            statusEl.textContent = searchAll 
+                ? '🌐 Searching all enabled engines and Python scraper plugins simultaneously...'
+                : '🔍 Harvesting candidates from provider...';
+
+            try {
+                const res = await fetch('/api/v1/harvester/search', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        query: query,
+                        providerId: providerId,
+                        searchAll: searchAll,
+                        safeSearch: safeSearch,
+                        maxResults: maxResults
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Search request failed.');
+                }
+
+                harvestCandidates = await res.json();
+                statusEl.textContent = `✅ Found ${harvestCandidates.length} candidate images.`;
+                renderHarvestGrid();
+            } catch (err) {
+                statusEl.textContent = '❌ Search failed: ' + err.message;
+            }
+        }
+
+        function renderHarvestGrid() {
+            const grid = document.getElementById('harvestGalleryGrid');
+            const countBadge = document.getElementById('harvestCountBadge');
+            if (!grid) return;
+
+            if (!harvestCandidates || harvestCandidates.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; color:var(--text-secondary); padding:40px 0;">No candidate images found matching criteria.</div>';
+                if (countBadge) countBadge.textContent = '0 found';
+                updateHarvestSelectedCounter();
+                return;
+            }
+
+            if (countBadge) countBadge.textContent = `${harvestCandidates.length} found`;
+
+            grid.innerHTML = harvestCandidates.map((c, idx) => {
+                const isSel = c.isSelected ? 'selected' : '';
+                const checked = c.isSelected ? 'checked' : '';
+                const thumb = c.thumbnailUrl || c.sourceUrl;
+                const source = c.providerName || c.source || 'Scraper';
+                const dim = (c.width && c.height) ? `${c.width}x${c.height}` : '';
+                const title = c.title ? c.title.replace(/"/g, '&quot;') : '';
+
+                return `
+                    <div class="harvest-card ${isSel}" id="hcard-${idx}" onclick="toggleHarvestCandidate(${idx})">
+                        <span class="harvest-badge">${source}</span>
+                        <input type="checkbox" class="harvest-check" ${checked} onclick="event.stopPropagation(); toggleHarvestCandidate(${idx})" />
+                        <img class="harvest-thumb" src="${thumb}" alt="${title}" loading="lazy" onerror="this.src='/icon.svg'; this.style.padding='20px';" />
+                        <div class="harvest-info" title="${title}">
+                            ${dim ? `<span style="color:var(--accent-purple); font-weight:700; margin-right:4px;">${dim}</span>` : ''}
+                            <span>${title || 'Untitled Candidate'}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            updateHarvestSelectedCounter();
+        }
+
+        function toggleHarvestCandidate(idx) {
+            if (!harvestCandidates[idx]) return;
+            harvestCandidates[idx].isSelected = !harvestCandidates[idx].isSelected;
+            const card = document.getElementById(`hcard-${idx}`);
+            if (card) {
+                if (harvestCandidates[idx].isSelected) {
+                    card.classList.add('selected');
+                } else {
+                    card.classList.remove('selected');
+                }
+                const chk = card.querySelector('.harvest-check');
+                if (chk) chk.checked = harvestCandidates[idx].isSelected;
+            }
+            updateHarvestSelectedCounter();
+        }
+
+        function toggleHarvestSelectAll(select) {
+            harvestCandidates.forEach((c, idx) => {
+                c.isSelected = select;
+                const card = document.getElementById(`hcard-${idx}`);
+                if (card) {
+                    if (select) card.classList.add('selected');
+                    else card.classList.remove('selected');
+                    const chk = card.querySelector('.harvest-check');
+                    if (chk) chk.checked = select;
+                }
+            });
+            updateHarvestSelectedCounter();
+        }
+
+        function updateHarvestSelectedCounter() {
+            const count = harvestCandidates.filter(c => c.isSelected).length;
+            const el = document.getElementById('harvestSelectedCount');
+            if (el) el.textContent = `${count} selected`;
+            const dlBtn = document.getElementById('harvestDownloadBtn');
+            if (dlBtn) dlBtn.textContent = `⬇️ Download Selected (${count})`;
+        }
+
+        async function downloadHarvestSelected() {
+            const selected = harvestCandidates.filter(c => c.isSelected);
+            if (selected.length === 0) {
+                alert('Please select at least one image candidate to download.');
+                return;
+            }
+
+            const destFolder = document.getElementById('harvestDestFolder').value.trim();
+            const dlBtn = document.getElementById('harvestDownloadBtn');
+            const origText = dlBtn.textContent;
+            dlBtn.disabled = true;
+            dlBtn.textContent = '⏳ Downloading on host...';
+
+            try {
+                const res = await fetch('/api/v1/harvester/download', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        destinationFolder: destFolder,
+                        prefix: 'harvest',
+                        items: selected
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Failed to download candidates.');
+                }
+
+                const data = await res.json();
+                lastDownloadedHarvestFolder = data.destinationFolder;
+                alert(`✅ Successfully downloaded ${data.count} images to:\n${data.destinationFolder}`);
+                
+                const sendBtn = document.getElementById('harvestSendCurateBtn');
+                if (sendBtn) {
+                    sendBtn.style.display = 'inline-block';
+                    sendBtn.textContent = `🪄 Send ${data.count} Images to Stage 1 Curate`;
+                }
+            } catch (err) {
+                alert('Download error: ' + err.message);
+            } finally {
+                dlBtn.disabled = false;
+                dlBtn.textContent = origText;
+            }
+        }
+
+        function sendHarvestToCurate() {
+            if (!lastDownloadedHarvestFolder) return;
+            const pathInput = document.getElementById('ollamaDatasetPath');
+            if (pathInput) pathInput.value = lastDownloadedHarvestFolder;
+            const curateReport = document.getElementById('curateReportStatus');
+            if (curateReport) {
+                curateReport.textContent = `Harvested folder loaded: ${lastDownloadedHarvestFolder}`;
+            }
+            switchView('curate');
+        }
+
+        // --- PLUGINS & EXTENSIONS LOGIC ---
+        let installedPlugins = [];
+        let currentConfigPluginId = null;
+        let currentPluginTab = 'scrapers';
+
+        function setPluginTab(tab) {
+            currentPluginTab = tab;
+            ['scrapers', 'general', 'all'].forEach(t => {
+                const btn = document.getElementById('pluginTab' + t.charAt(0).toUpperCase() + t.slice(1));
+                if (btn) {
+                    if (t === tab) {
+                        btn.classList.add('active');
+                        btn.classList.remove('btn-secondary');
+                    } else {
+                        btn.classList.remove('active');
+                        btn.classList.add('btn-secondary');
+                    }
+                }
+            });
+            renderPluginsGrid();
+        }
+
+        function renderPluginsGrid() {
+            const grid = document.getElementById('pluginsListGrid');
+            if (!grid) return;
+
+            let filtered = installedPlugins;
+            if (currentPluginTab === 'scrapers') {
+                filtered = installedPlugins.filter(p => p.isScraper);
+            } else if (currentPluginTab === 'general') {
+                filtered = installedPlugins.filter(p => !p.isScraper);
+            }
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `<div style="grid-column: 1 / -1; color:var(--text-secondary); text-align:center; padding:30px 0;">No plugins discovered in this tab category.</div>`;
+                return;
+            }
+
+            grid.innerHTML = filtered.map(p => {
+                const isEnabled = p.isEnabled;
+                const statusColor = isEnabled ? 'var(--accent-green)' : 'var(--text-muted)';
+                const statusText = isEnabled ? 'Active' : 'Disabled';
+                const toggleActionText = isEnabled ? 'Disable' : 'Enable';
+                const toggleBtnClass = isEnabled ? 'btn-secondary' : 'btn-primary';
+                const venvBadge = p.isScraper
+                    ? '<span class="chip chip-stage" style="color:var(--accent-green); font-size:0.68rem;">Shared Scraper .venv</span>'
+                    : (p.hasPythonVenv ? '<span class="chip chip-stage" style="color:var(--accent-blue); font-size:0.68rem;">Python .venv</span>' : '');
+
+                return `
+                    <div class="plugin-card">
+                        <div class="plugin-card-header">
+                            <div class="plugin-title">
+                                <span>${p.isScraper ? '🌾' : '🧩'}</span>
+                                <span>${p.name}</span>
+                            </div>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                ${venvBadge}
+                                <span class="chip chip-stage" style="color:${statusColor}; font-size:0.68rem;">${statusText}</span>
+                            </div>
+                        </div>
+                        <div style="font-size:0.8rem; color:var(--text-secondary); line-height:1.4; flex:1;">
+                            ${p.description || 'No description provided.'}
+                        </div>
+                        <div style="font-size:0.72rem; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:4px;">
+                            <span>v${p.version || '1.0.0'}</span>
+                            <span>${p.author ? `by ${p.author}` : ''}</span>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:8px;">
+                            <button class="btn ${toggleBtnClass} btn-sm" style="flex:1;" onclick="togglePluginState('${p.id}')">
+                                ${toggleActionText}
+                            </button>
+                            ${p.hasConfigOptions ? `
+                                <button class="btn btn-secondary btn-sm" title="Configure API Keys and Settings" onclick="openPluginConfigModal('${p.id}')">
+                                    ⚙️ Configure
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadPluginsList() {
+            try {
+                const res = await fetch('/api/v1/plugins', { headers: getHeaders() });
+                if (!res.ok) return;
+                installedPlugins = await res.json();
+
+                const scrapersCount = installedPlugins.filter(p => p.isScraper).length;
+                const generalCount = installedPlugins.filter(p => !p.isScraper).length;
+                const allCount = installedPlugins.length;
+
+                const scEl = document.getElementById('scraperTabCount');
+                if (scEl) scEl.textContent = scrapersCount;
+                const genEl = document.getElementById('generalTabCount');
+                if (genEl) genEl.textContent = generalCount;
+                const allEl = document.getElementById('allTabCount');
+                if (allEl) allEl.textContent = allCount;
+
+                renderPluginsGrid();
+            } catch (err) {
+                console.error('Failed to load plugins:', err);
+            }
+        }
+
+        async function togglePluginState(pluginId) {
+            try {
+                const res = await fetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/toggle`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+                if (res.ok) {
+                    await loadPluginsList();
+                    await loadHarvesterProviders();
+                }
+            } catch (err) {
+                alert('Could not toggle plugin: ' + err.message);
+            }
+        }
+
+        async function openPluginConfigModal(pluginId) {
+            currentConfigPluginId = pluginId;
+            const titleEl = document.getElementById('modalPluginConfigTitle');
+            const pathEl = document.getElementById('modalPluginConfigPath');
+            const descEl = document.getElementById('modalPluginConfigDesc');
+            const fieldsEl = document.getElementById('modalPluginConfigFields');
+            const statusEl = document.getElementById('modalPluginConfigStatus');
+            statusEl.style.display = 'none';
+
+            try {
+                const res = await fetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/config`, { headers: getHeaders() });
+                if (!res.ok) throw new Error('Failed to load configuration.');
+                const data = await res.json();
+
+                titleEl.textContent = `⚙️ Configure: ${data.name || pluginId}`;
+                pathEl.textContent = `Config file: ${data.configPath}`;
+                descEl.textContent = 'Configure authentication credentials and API keys. These are securely passed to the scraper plugin when executed.';
+
+                fieldsEl.innerHTML = '';
+                const schema = data.schema || [];
+                const userConfig = data.config || {};
+
+                if (schema.length > 0) {
+                    schema.forEach(field => {
+                        const val = userConfig[field.key] || field.defaultValue || '';
+                        const isSecret = field.isSecret || (field.type && (field.type.toLowerCase().includes('password') || field.type.toLowerCase().includes('secret')));
+                        const inputType = isSecret ? 'password' : (field.type && field.type.toLowerCase().includes('number') ? 'number' : 'text');
+
+                        const group = document.createElement('div');
+                        group.className = 'input-group';
+                        group.style.marginBottom = '8px';
+                        group.innerHTML = `
+                            <label style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>${field.label || field.key} ${field.isRequired ? '<span style="color:var(--accent-red);">*</span>' : ''}</span>
+                                <span style="font-size:0.7rem; color:var(--text-muted); font-family:monospace;">${field.key}</span>
+                            </label>
+                            <input id="cfgfield_${field.key}" data-key="${field.key}" type="${inputType}" value="${val.replace(/"/g, '&quot;')}" placeholder="${(field.description || '').replace(/"/g, '&quot;')}" />
+                            ${field.description ? `<div style="font-size:0.72rem; color:var(--text-secondary); margin-top:2px;">${field.description}</div>` : ''}
+                        `;
+                        fieldsEl.appendChild(group);
+                    });
+                } else {
+                    const keys = Object.keys(userConfig);
+                    if (keys.length === 0) {
+                        fieldsEl.innerHTML = `
+                            <div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:10px;">
+                                This plugin does not declare a formal configuration schema. You can add custom configuration key-value pairs below (e.g. <code>api_key</code>):
+                            </div>
+                            <div class="grid-2">
+                                <input id="cfgfield_custom_key" type="text" placeholder="Key (e.g. api_key)" />
+                                <input id="cfgfield_custom_val" type="text" placeholder="Value" />
+                            </div>
+                        `;
+                    } else {
+                        keys.forEach(k => {
+                            const val = userConfig[k] || '';
+                            const group = document.createElement('div');
+                            group.className = 'input-group';
+                            group.innerHTML = `
+                                <label>${k}</label>
+                                <input id="cfgfield_${k}" data-key="${k}" type="text" value="${val.replace(/"/g, '&quot;')}" />
+                            `;
+                            fieldsEl.appendChild(group);
+                        });
+                    }
+                }
+
+                await openModalApp('plugin-config');
+            } catch (err) {
+                alert('Could not open plugin configuration: ' + err.message);
+            }
+        }
+
+        async function savePluginConfig() {
+            if (!currentConfigPluginId) return;
+            const fieldsEl = document.getElementById('modalPluginConfigFields');
+            const inputs = fieldsEl.querySelectorAll('input[data-key]');
+            const config = {};
+
+            inputs.forEach(inp => {
+                const k = inp.getAttribute('data-key');
+                if (k) config[k] = inp.value;
+            });
+
+            const customKey = document.getElementById('cfgfield_custom_key');
+            const customVal = document.getElementById('cfgfield_custom_val');
+            if (customKey && customVal && customKey.value.trim()) {
+                config[customKey.value.trim()] = customVal.value;
+            }
+
+            const statusEl = document.getElementById('modalPluginConfigStatus');
+            statusEl.style.display = 'block';
+            statusEl.textContent = 'Saving configuration...';
+
+            try {
+                const res = await fetch(`/api/v1/plugins/${encodeURIComponent(currentConfigPluginId)}/config`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(config)
+                });
+
+                if (!res.ok) throw new Error('Save failed.');
+                const data = await res.json();
+                statusEl.textContent = `✅ Saved successfully to ${data.configPath}`;
+                setTimeout(() => {
+                    closeModalApp();
+                    loadHarvesterProviders();
+                }, 1000);
+            } catch (err) {
+                statusEl.style.color = 'var(--accent-red)';
+                statusEl.textContent = '❌ Failed to save: ' + err.message;
+            }
+        }
+
+        // --- SAVED PROMPTS (MODUSFLOW JSON) LOGIC ---
+        let savedPromptsList = [];
+
+        async function loadSavedPrompts() {
+            const sel = document.getElementById('comfySavedPromptSelect');
+            if (!sel) return;
+            try {
+                const res = await fetch('/api/v1/prompts', { headers: getHeaders() });
+                if (!res.ok) return;
+                savedPromptsList = await res.json();
+
+                sel.innerHTML = '<option value="">-- Load Saved Prompt (ModusFlow JSON) --</option>';
+                savedPromptsList.forEach((p, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = idx.toString();
+                    const cat = p.category ? `[${p.category}] ` : '';
+                    opt.textContent = `${cat}${p.name}`;
+                    sel.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Failed to load saved prompts:', err);
+            }
+        }
+
+        function onSavedPromptSelected() {
+            const sel = document.getElementById('comfySavedPromptSelect');
+            if (!sel || !sel.value) return;
+            const idx = parseInt(sel.value, 10);
+            const prompt = savedPromptsList[idx];
+            if (prompt) {
+                const promptInput = document.getElementById('comfyPrompt');
+                const negInput = document.getElementById('comfyNeg');
+                if (promptInput) promptInput.value = prompt.positive || '';
+                if (negInput) negInput.value = prompt.negative || '';
+            }
+        }
+
+        async function saveCurrentComfyPromptPreset() {
+            const promptInput = document.getElementById('comfyPrompt');
+            const negInput = document.getElementById('comfyNeg');
+            const pos = promptInput ? promptInput.value.trim() : '';
+            const neg = negInput ? negInput.value.trim() : '';
+
+            if (!pos) {
+                alert('Please enter a prompt first before saving as a preset.');
+                return;
+            }
+
+            const name = prompt('Enter a name for this prompt preset (e.g. "Cyberpunk Portrait"):');
+            if (!name || !name.trim()) return;
+
+            const category = prompt('Enter a category (optional, e.g. "Portrait", "Landscape", "Style"):', 'General') || 'General';
+
+            try {
+                const res = await fetch('/api/v1/prompts', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        name: name.trim(),
+                        positive: pos,
+                        negative: neg,
+                        category: category.trim()
+                    })
+                });
+
+                if (!res.ok) throw new Error('Failed to save prompt preset.');
+                alert(`✅ Preset "${name}" saved to ~/.loramancer/saved_prompts/!`);
+                await loadSavedPrompts();
+            } catch (err) {
+                alert('Could not save preset: ' + err.message);
+            }
+        }
+
         // INIT
         window.addEventListener('DOMContentLoaded', () => {
             updatePwaUi();
@@ -5636,6 +6629,9 @@ self.addEventListener('fetch', (e) => {
             resetOllamaPrompt();
             recalculateEstimators();
             loadDocsList();
+            loadHarvesterProviders();
+            loadPluginsList();
+            loadSavedPrompts();
         });
     </script>
 </body>

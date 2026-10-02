@@ -8,4 +8,13 @@ public sealed class PluginMetadata {
     public string Author { get; init; } = string.Empty;
     public string PluginType { get; init; } = "CSharp";
     public IReadOnlyList<string> Capabilities { get; init; } = Array.Empty<string>();
+    public string UiSlot { get; init; } = "None";
+    public string MenuSection { get; init; } = string.Empty;
+    public string NavLabel { get; init; } = string.Empty;
+    public string Icon { get; init; } = string.Empty;
+    public string UiType { get; init; } = "Command";
+    public bool IsModal { get; init; }
+    public int MenuOrder { get; init; } = 100;
+    public int? WebPort { get; init; }
+    public string? WebUrl { get; init; }
 }

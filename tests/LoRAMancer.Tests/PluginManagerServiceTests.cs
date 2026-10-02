@@ -213,6 +213,178 @@ public class PluginManagerServiceTests : IDisposable {
         Assert.Equal("Ollama Vision LoRA Tagger & Captioner", tagger.Name);
         Assert.Equal("plugin.py", tagger.EntryPoint);
         Assert.Equal("Python", tagger.PluginType);
+        Assert.Equal("StudioModalTools", tagger.UiSlot);
+        Assert.Equal("NativeModal", tagger.UiType);
+    }
+
+    [Fact]
+    public async Task DiscoverPlugins_FindsAndRegistersLoraUpdater_WithStudioWorkshopSlot() {
+        // Arrange
+        ProcessRunner runner = new();
+        using PluginManagerService service = new(runner);
+
+        // Act
+        await service.DiscoverAndInitializePluginsAsync();
+
+        // Assert
+        Assert.Contains(service.Plugins, p => p.Id == "lora-updater");
+        var updater = service.Plugins.First(p => p.Id == "lora-updater");
+        Assert.Equal("Lora Updater", updater.Name);
+        Assert.Equal("StudioWorkshop", updater.UiSlot);
+        Assert.Equal("Civitai LoRA Updater", updater.NavLabel);
+    }
+
+    [Fact]
+    public void PluginManifest_UiSlotProperties_ParseCorrectly() {
+        string json = """
+        {
+            "id": "post-forge-gallery",
+            "name": "Post-Forge Visual Grid",
+            "version": "1.0.0",
+            "uiSlot": "PostForge",
+            "uiType": "EmbeddedWeb",
+            "navLabel": "Visual Grid",
+            "icon": "PhotoLibrary",
+            "webPort": 9000
+        }
+        """;
+
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(json, new System.Text.Json.JsonSerializerOptions {
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.NotNull(parsed);
+        Assert.Equal("post-forge-gallery", parsed.Id);
+        Assert.Equal("PostForge", parsed.UiSlot);
+        Assert.Equal("EmbeddedWeb", parsed.UiType);
+        Assert.Equal("Visual Grid", parsed.NavLabel);
+        Assert.Equal("PhotoLibrary", parsed.Icon);
+        Assert.Equal(9000, parsed.WebPort);
+    }
+
+    [Fact]
+    public void GetPluginsForSection_ReturnsFilteredAndOrderedPlugins() {
+        ProcessRunner runner = new();
+        PluginManagerService service = new(runner);
+
+        PluginManifest p1 = new() {
+            Id = "p1",
+            Name = "Plugin One",
+            NavLabel = "B Tool",
+            MenuSection = "Civitai Tools",
+            MenuOrder = 20,
+            IsEnabled = true
+        };
+        PluginManifest p2 = new() {
+            Id = "p2",
+            Name = "Plugin Two",
+            NavLabel = "A Tool",
+            MenuSection = "Civitai Tools",
+            MenuOrder = 10,
+            IsEnabled = true
+        };
+        PluginManifest p3 = new() {
+            Id = "p3",
+            Name = "Plugin Three",
+            NavLabel = "Workshop Tool",
+            MenuSection = "workshop", // Normalized to "Studio Workshop"
+            MenuOrder = 5,
+            IsEnabled = true
+        };
+        PluginManifest pDisabled = new() {
+            Id = "pDisabled",
+            Name = "Disabled Tool",
+            MenuSection = "Civitai Tools",
+            MenuOrder = 1,
+            IsEnabled = false
+        };
+
+        var dictField = typeof(PluginManagerService).GetField("_registeredPlugins", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var dict = (Dictionary<string, PluginManifest>?)dictField?.GetValue(service);
+        Assert.NotNull(dict);
+        dict["p1"] = p1;
+        dict["p2"] = p2;
+        dict["p3"] = p3;
+        dict["pDisabled"] = pDisabled;
+
+        var civitaiPlugins = service.GetPluginsForSection("Civitai Tools");
+        Assert.Equal(2, civitaiPlugins.Count);
+        Assert.Equal("p2", civitaiPlugins[0].Id); // MenuOrder 10 before 20
+        Assert.Equal("p1", civitaiPlugins[1].Id);
+
+        var workshopPlugins = service.GetPluginsForSection("Studio Workshop");
+        Assert.Contains(workshopPlugins, p => p.Id == "p3");
+    }
+
+    [Fact]
+    public void GetCustomPluginSections_ReturnsCustomSectionsExcludingStandard() {
+        ProcessRunner runner = new();
+        PluginManagerService service = new(runner);
+
+        PluginManifest standard1 = new() {
+            Id = "std1",
+            Name = "Std 1",
+            MenuSection = "Studio Workshop",
+            IsEnabled = true
+        };
+        PluginManifest standard2 = new() {
+            Id = "std2",
+            Name = "Std 2",
+            UiSlot = "PostForge",
+            IsEnabled = true
+        };
+        PluginManifest custom1 = new() {
+            Id = "c1",
+            Name = "Custom 1",
+            MenuSection = "Community Feeds",
+            IsEnabled = true
+        };
+        PluginManifest custom2 = new() {
+            Id = "c2",
+            Name = "Custom 2",
+            MenuSection = "Civitai Tools",
+            IsEnabled = true
+        };
+
+        var dictField = typeof(PluginManagerService).GetField("_registeredPlugins", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var dict = (Dictionary<string, PluginManifest>?)dictField?.GetValue(service);
+        Assert.NotNull(dict);
+        dict["std1"] = standard1;
+        dict["std2"] = standard2;
+        dict["c1"] = custom1;
+        dict["c2"] = custom2;
+
+        var customSections = service.GetCustomPluginSections();
+        Assert.Equal(2, customSections.Count);
+        Assert.Contains("Civitai Tools", customSections);
+        Assert.Contains("Community Feeds", customSections);
+        Assert.DoesNotContain("Studio Workshop", customSections);
+        Assert.DoesNotContain("Post-Forge Showcase", customSections);
+    }
+
+    [Fact]
+    public void PluginManifest_MenuSectionAndModal_ParseAndNormalizeCorrectly() {
+        string json = """
+        {
+            "id": "custom-modal-tool",
+            "name": "Custom Tool",
+            "version": "1.0.0",
+            "menuSection": "modal",
+            "menuOrder": 15,
+            "isModal": true,
+            "navLabel": "Fast Tagger"
+        }
+        """;
+
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(json, new System.Text.Json.JsonSerializerOptions {
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.NotNull(parsed);
+        Assert.Equal("Studio Modal Tools", parsed.GetEffectiveSection());
+        Assert.True(parsed.GetIsModal());
+        Assert.Equal(15, parsed.MenuOrder);
+        Assert.Equal("Fast Tagger", parsed.NavLabel);
     }
 }
 

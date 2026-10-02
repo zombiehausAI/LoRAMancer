@@ -59,12 +59,199 @@ Each Python plugin lives in its own dedicated folder under `plugins/` and **must
 ### Plugin Manifest (`plugin.json`)
 ```json
 {
-  "id": "sample-python-plugin",
-  "name": "Sample Python Plugin",
+  "id": "dataset-web-annotator",
+  "name": "Dataset Web Annotator",
   "version": "1.0.0",
-  "description": "Demonstrates isolated Python plugin execution",
+  "description": "Embedded web application for visual dataset tagging and bounding-box annotation",
   "entryPoint": "plugin.py",
-  "pythonVersion": "3.12"
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "menuOrder": 30,
+  "uiSlot": "StudioWorkshop",
+  "uiType": "EmbeddedWeb",
+  "navLabel": "Web Annotator",
+  "icon": "Brush",
+  "webPort": 8501
+}
+```
+
+## Standalone Dynamic Menu System for Plugins
+
+Yes! Plugins can now declare and control all menu and navigation behaviors dynamically without touching any host project code.
+
+LoRAMancer treats plugins as first-class, standalone citizen modules. Plugin authors never need to edit the core application, submit pull requests to modify navigation templates, or touch C# Blazor code to insert menu items. When a plugin is dropped into `plugins/` or cloned via Git, LoRAMancer inspects its manifest (`plugin.json` for Python, or `PluginMetadata` for C#) and dynamically registers its sidebar links, section groupings, icons, order weights, and routing targets.
+
+### Key Capabilities of the Dynamic Menu System
+
+1. **Zero Host Code Modification**: All navigation and menu behaviors are configured entirely in the plugin's own folder via `plugin.json`.
+2. **Standard Section Targeting**: Effortlessly tuck tools under existing core sections (`"Studio Workshop"`, `"Studio Pipeline"`, `"Post-Forge Showcase"`, `"Studio Modal Tools"`, `"Subsystems"`).
+3. **Dynamic Custom Sections**: Specify any arbitrary string for `menuSection` (e.g., `"Civitai Tools"`, `"Dataset Studio"`, `"Community Extensions"`). LoRAMancer dynamically creates a visual divider, a capitalized section header, and groups all matching plugins underneath.
+4. **Ordering & Weighting**: Control the exact position in the sidebar using `menuOrder` (ascending; lower numbers appear first).
+5. **Modal vs. Embedded Page Routing**:
+   - Web applications (Streamlit, Gradio, React, Flask) set `"uiType": "EmbeddedWeb"` with a `webPort` to render seamlessly inside LoRAMancer's native workspace at `/plugins/host/{pluginId}`.
+   - Quick utilities set `"isModal": true` or `"uiType": "NativeModal"` to launch as focused dialogs over the active view without disrupting the user's workflow.
+6. **Dynamic Icon Mapping**: Specify standard Material Design icon names (`TravelExplore`, `PhotoLibrary`, `AutoAwesome`, `CloudSync`, `SmartToy`, `Handyman`, `Speed`, etc.) to instantly give your plugin a polished look.
+
+### Navigation Manifest Properties
+
+| Property | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **`menuSection`** | `string` | `""` (falls back to `uiSlot`) | The target sidebar section for the plugin's navigation link. Supports standard sections or any custom section name. |
+| **`menuOrder`** | `int` | `100` | Sort order within the section (ascending). Lower numbers appear higher in the menu list. |
+| **`navLabel`** | `string` | `name` | Custom label displayed on the sidebar menu button. |
+| **`icon`** | `string` | `"Extension"` | Material Design icon name (e.g., `TravelExplore`, `PhotoLibrary`, `AutoAwesome`, `CloudSync`, `Speed`, `Camera`, `Handyman`, `SmartToy`). |
+| **`isModal`** | `bool` | `false` | When `true` (or when `uiType` is `"Modal"` / `"NativeModal"`), clicking the menu item launches a modal dialog rather than full-page navigation. |
+| **`uiType`** | `string` | `"Command"` | `"EmbeddedWeb"`, `"NativeModal"`, or `"Command"`. |
+| **`uiSlot`** | `string` | `"None"` | Backward-compatible slot specifier (mapped to `menuSection` if `menuSection` is omitted). |
+| **`webPort`** | `int?` | `null` | Local port for embedded web apps (e.g. `8501` for Streamlit). |
+| **`webUrl`** | `string?` | `null` | External or pre-configured web URL if hosted independently. |
+| **`configSchema`** | `array?` | `null` | List of configurable options or API keys displayed in the plugin configuration modal. |
+
+### Plugin Configuration & API Keys (`configSchema`)
+
+Plugins often require user credentials, API keys, or custom endpoints (e.g. Civitai API key, Rule34 user credentials, custom model paths). LoRAMancer provides a built-in configuration modal accessible via the **Gear icon (⚙️)** on each plugin's card under `/plugins`. The gear icon is displayed dynamically whenever a plugin defines a `configSchema` or is an Image Harvester scraper.
+
+#### Declaring Configuration Schema in `plugin.json`
+
+```json
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "configSchema": [
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password",
+      "description": "Personal access token or API key.",
+      "defaultValue": "",
+      "isRequired": false
+    },
+    {
+      "key": "userId",
+      "label": "User ID",
+      "type": "text",
+      "description": "Optional account user ID.",
+      "defaultValue": "",
+      "isRequired": false
+    }
+  ]
+}
+```
+
+#### Storage & Execution Injection
+
+1. **User Profile Persistence**:
+   - **Image Scraper Plugins**: Configuration is saved directly in the user's home directory under `~/.loramancer/scrapers/<plugin_id>.json` (each scraper maintains its own JSON configuration file).
+   - **General Plugins**: Configuration is saved to `~/.loramancer/plugin_configs/<plugin_id>.json`.
+2. **Environment Variable Injection**: When LoRAMancer runs a Python plugin script or command, all configured key-value pairs are automatically injected as environment variables:
+   - `LORAMANCER_CONFIG_<KEY>` (e.g. `LORAMANCER_CONFIG_APIKEY`)
+   - `PLUGIN_<KEY>` (e.g. `PLUGIN_APIKEY`)
+   - `LORAMANCER_PLUGIN_CONFIG_FILE` (pointing to the configuration JSON file)
+   - `LORAMANCER_SCRAPER_CONFIG_FILE` (pointing to the scraper's JSON file under `~/.loramancer/scrapers/` for scraper plugins)
+3. **Generic Fallback**: If a plugin or scraper does not declare an explicit `configSchema`, the configuration modal provides a dynamic key-value editor so users can still supply custom keys, flags, or credentials.
+
+### Image Scraper Plugins & Shared `.venv` Architecture
+
+LoRAMancer treats image scrapers as a specialized plugin category to optimize performance, disk usage, and user experience:
+
+1. **Clean Navigation (No Sidebar Clutter)**: Scrapers are excluded from the main navigation sidebar. They integrate directly into the native **Image Harvester** (`/harvester`) search provider pool and are managed under a dedicated tab in the Plugin Manager.
+2. **Shared Virtual Environment (`~/.loramancer/scraper_venv`)**:
+   - Rather than creating a separate 2–3 GB `.venv` for every individual scraper, all scraper plugins share a single consolidated virtual environment located at `~/.loramancer/scraper_venv`.
+   - Automatically pre-installed with core web scraping and parsing libraries (`requests`, `beautifulsoup4`, `cloudscraper`, `urllib3`).
+   - Saving tens of gigabytes of disk space across 18+ scrapers while allowing 1-click provisioning via the "Setup Shared Scraper .venv" action in the UI.
+   - Non-scraper Python plugins (such as Streamlit apps or vision model taggers) continue to maintain their dedicated isolated `.venv` in their own folder.
+3. **Dedicated "Image Scrapers" Tab**: The Plugin Manager UI (`/plugins`) features dedicated tabs:
+   - **Image Scrapers**: Focused view of all installed harvester scrapers, showing shared `.venv` readiness, enabled status, and gear configuration buttons.
+   - **General Extensions**: Full-featured UI extensions, web apps, and modal tools.
+   - **All Installed**: Unified view of all installed C# and Python plugins.
+
+### Standard Target Sections
+
+Plugins can place themselves into any of the primary sections built into LoRAMancer:
+- **`"Studio Pipeline"`**: Rendered beneath the 5 core pipeline steps.
+- **`"Studio Workshop"`**: Dedicated tools for editing, inspecting, or workshop utilities (e.g., Web Annotator, LoRA Chop-Shop).
+- **`"Post-Forge Showcase"`**: Post-generation galleries, evaluation tools, and asset viewers.
+- **`"Studio Modal Tools"`**: Quick-action modal utilities (e.g., Ollama Vision Tagger, LoRA Surgery).
+- **`"Subsystems"`**: Administrative, environment, or system-level extensions.
+- **`"HarvesterScraper"`**: Specialized slot for dataset image scrapers integrated into `/harvester`. Auto-registered as search providers and invoked concurrently via `--query ... --limit ... --json`.
+
+> [!TIP]
+> Friendly alias names are normalized automatically. For example, `"workshop"` or `"studioworkshop"` normalizes to `"Studio Workshop"`, `"modal"` to `"Studio Modal Tools"`, and `"postforge"` to `"Post-Forge Showcase"`.
+
+### Dynamic Custom Sections
+
+If a plugin specifies a `menuSection` that is not one of the standard sections (for example `"Civitai Tools"`, `"Dataset Studio"`, or `"Community Feeds"`), LoRAMancer automatically renders:
+1. A visual section divider.
+2. A capitalized section header caption.
+3. Ordered links for all plugins belonging to that custom section.
+
+Multiple plugins sharing the same custom section name are grouped together seamlessly.
+
+### Example Manifests
+
+#### 1. Embedded Web App in Studio Workshop (Streamlit / Gradio)
+```json
+{
+  "id": "dataset-web-annotator",
+  "name": "Dataset Web Annotator",
+  "version": "1.0.0",
+  "description": "Embedded web application for visual dataset tagging and bounding-box annotation",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "menuOrder": 30,
+  "uiType": "EmbeddedWeb",
+  "navLabel": "Web Annotator",
+  "icon": "Brush",
+  "webPort": 8501
+}
+```
+
+#### 2. Modal Tool in Studio Modal Tools
+```json
+{
+  "id": "ollama_lora_tagger",
+  "name": "Ollama Vision LoRA Tagger",
+  "version": "1.0.0",
+  "entryPoint": "plugin.py",
+  "menuSection": "Studio Modal Tools",
+  "menuOrder": 20,
+  "isModal": true,
+  "uiType": "NativeModal",
+  "navLabel": "Ollama Auto-Tagger",
+  "icon": "AutoAwesome"
+}
+```
+
+#### 3. Custom Standalone Section for Third-Party Extension
+```json
+{
+  "id": "comfy_workflow_bridge",
+  "name": "ComfyUI Workflow Bridge",
+  "version": "1.0.0",
+  "entryPoint": "plugin.py",
+  "menuSection": "ComfyUI Tools",
+  "menuOrder": 10,
+  "uiType": "EmbeddedWeb",
+  "navLabel": "Workflow Bridge",
+  "icon": "SmartToy",
+  "webPort": 8188
+}
+```
+
+#### 4. Image Harvester Scraper Extension
+```json
+{
+  "id": "civitai-scraper",
+  "name": "Civitai Community Showcase",
+  "version": "1.0.0",
+  "description": "Python scraper harvesting generation showcase images and prompt metadata from Civitai",
+  "entryPoint": "plugin.py",
+  "pythonVersion": "3.12",
+  "menuSection": "Studio Workshop",
+  "uiSlot": "HarvesterScraper",
+  "navLabel": "Civitai Showcase",
+  "icon": "Brush"
 }
 ```
 
@@ -205,73 +392,130 @@ if __name__ == "__main__":
 
 ---
 
-### 3. Exposing Your Plugin in the User Interface
+### 3. Exposing Your Plugin in the User Interface (Zero Host Code Required)
 
-LoRAMancer provides three standard UI integration patterns depending on the plugin's workflow:
+Under LoRAMancer's standalone plugin model, **plugin authors never edit core application code, Razor views, or navigation files** (such as `NavMenu.razor`). All UI integration is driven declaratively through your plugin's manifest (`plugin.json` for Python plugins, or `PluginMetadata` attributes for C# plugins).
 
-#### Pattern A: Standalone Workflow (Left Navigation Bar & Dialog)
-Use this when your plugin performs a task that users want to trigger independently (e.g., dataset tagging, model conversion, Civitai syncing).
+When your plugin is added to `plugins/`, LoRAMancer automatically discovers it, registers its navigation links in the sidebar, mounts embedded web interfaces, and manages its lifecycle.
 
-1. **Create a Blazor Dialog Component** in `src/LoRAMancer.App/Components/Dialogs/MyPluginDialog.razor`:
-   ```razor
-   @using LoRAMancer.App.Services
-   @inject PluginManagerService PluginManager
-   @inject ISnackbar Snackbar
+#### Pattern A: Embedded Web UI (Streamlit, Gradio, Flask, React, HTML)
+This is the recommended pattern for full-featured visual tools, interactive scrapers, analyzers, and generators:
+1. **Develop Your UI**: Build your interface in Python using Streamlit, Gradio, Flask, FastAPI, or any local web server framework inside your plugin directory.
+2. **Declare in `plugin.json`**:
+   ```json
+   {
+     "id": "my_visual_tool",
+     "name": "My Visual Tool",
+     "version": "1.0.0",
+     "entryPoint": "plugin.py",
+     "menuSection": "Studio Workshop",
+     "menuOrder": 40,
+     "uiType": "EmbeddedWeb",
+     "navLabel": "Visual Tool",
+     "icon": "Palette",
+     "webPort": 8505
+   }
+   ```
+3. **Automatic Mounting**:
+   - When the user clicks the plugin's link in the sidebar (or navigates to it), LoRAMancer runs `plugin.py`, spins up the web server on its assigned `webPort`, and embeds the live interface seamlessly inside LoRAMancer's native workspace at `/plugins/host/my_visual_tool`.
+   - Zero changes to host C# or Blazor code are needed.
 
-   <MudDialog>
-       <TitleContent>
-           <MudText Typo="Typo.h6">My Plugin Tool</MudText>
-       </TitleContent>
-       <DialogContent>
-           <!-- Parameters & options -->
-           <MudTextField @bind-Value="_inputPath" Label="Target Path" Variant="Variant.Outlined" />
-       </DialogContent>
-       <DialogActions>
-           <MudButton OnClick="RunPluginAsync" Color="Color.Primary" Variant="Variant.Filled">Run</MudButton>
-       </DialogActions>
-   </MudDialog>
+#### Pattern B: Native Modal Dialog / Quick-Launch Utility
+For focused utility tools (e.g., one-off taggers, inspectors, format converters) that run as dialog overlays:
+1. **Declare in `plugin.json`**:
+   ```json
+   {
+     "id": "quick_converter",
+     "name": "Quick Format Converter",
+     "version": "1.0.0",
+     "entryPoint": "plugin.py",
+     "menuSection": "Studio Modal Tools",
+     "menuOrder": 25,
+     "isModal": true,
+     "uiType": "NativeModal",
+     "navLabel": "Quick Converter",
+     "icon": "Transform"
+   }
+   ```
+2. **Behavior**:
+   - LoRAMancer dynamically places a button in the specified `menuSection` (or renders a custom section).
+   - Clicking the button launches the tool in a dedicated modal without interrupting active training or navigation.
 
-   @code {
-       [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-       private string _inputPath = string.Empty;
+#### Pattern C: Dynamic Custom Sidebar Sections
+Need your tool or suite of tools grouped in their own dedicated sidebar area?
+- Simply specify any custom string for `"menuSection"` in `plugin.json`:
+  ```json
+  "menuSection": "Community Extensions"
+  ```
+- LoRAMancer automatically creates a visual divider, renders a capitalized section header (`COMMUNITY EXTENSIONS`), and places all matching plugins into that custom section.
 
-       private async Task RunPluginAsync() {
-           var parameters = new Dictionary<string, object?> { ["input_path"] = _inputPath };
-           var result = await PluginManager.ExecutePluginAsync("my-plugin-id", "my_custom_action", parameters);
-           if (result.Success) {
-               Snackbar.Add(result.Message, Severity.Success);
-               MudDialog.Close(DialogResult.Ok(result));
-           } else {
-               Snackbar.Add(result.Message, Severity.Error);
-           }
-       }
+#### Pattern D: Headless Command & Background Automation
+For plugins that provide automated background capabilities, batch CLI operations, or API bridges (e.g., Civitai sync, dataset verification):
+1. **Declare in `plugin.json`**:
+   ```json
+   {
+     "id": "dataset_auditor",
+     "name": "Dataset Auditor",
+     "version": "1.0.0",
+     "entryPoint": "plugin.py",
+     "uiType": "Command"
+   }
+   ```
+2. **Execution**:
+   - The plugin responds to CLI commands (`ping`, `audit`, etc.) using the standard JSON contract.
+   - Users can test, run, and inspect output directly from the **Plugin Manager** (`/plugins`) with real-time logs, without needing navigation bar real estate.
+
+#### Pattern E: Image Scraper Plugins (`uiSlot: "HarvesterScraper"`)
+For community search engines, media archives, and reference image discovery extensions that integrate directly into the **Image Harvester** (`/harvester`):
+
+1. **Declare in `plugin.json`**:
+   ```json
+   {
+     "id": "my_custom_scraper",
+     "name": "My Custom Scraper",
+     "version": "1.0.0",
+     "description": "Scrapes reference imagery from MySource API",
+     "entryPoint": "plugin.py",
+     "uiSlot": "HarvesterScraper",
+     "menuSection": "Harvester Scraper",
+     "icon": "TravelExplore",
+     "configSchema": [
+       { "key": "apiKey", "label": "API Key", "type": "password", "required": false },
+       { "key": "username", "label": "User ID / Account", "type": "text", "required": false }
+     ]
    }
    ```
 
-2. **Register a Link in the Navigation Bar** (`src/LoRAMancer.App/Components/Layout/NavMenu.razor`):
-   ```razor
-   <MudNavLink Icon="@Icons.Material.Filled.AutoFixHigh" OnClick="OpenMyPluginAsync">
-       My Plugin Tool
-   </MudNavLink>
+2. **Harvester Integration & Execution Contract**:
+   - Scrapers are automatically discovered by `ImageHarvesterService` and registered as selectable provider pills in `/harvester`.
+   - To save disk space, all scraper plugins share a consolidated environment at `~/.loramancer/scraper_venv` pre-configured with `requests`, `beautifulsoup4`, `cloudscraper`, and `urllib3`.
+   - Credentials and settings configured via the gear icon (⚙️) are persisted to `~/.loramancer/scrapers/<id>.json`.
+   - When a harvest search executes, LoRAMancer invokes the scraper via standardized CLI arguments:
+     ```bash
+     python plugin.py --query "<search phrase>" --limit <maxResults> --json
+     ```
 
-   @code {
-       private async Task OpenMyPluginAsync() {
-           var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-           await DialogService.ShowAsync<MyPluginDialog>("My Plugin Tool", options);
-       }
-   }
+3. **Mandatory Search Value Retention & Relevance Requirements**:
+   All scraper plugins **MUST strictly retain, respect, and apply the search value** passed via `--query`:
+   - **No Discarding or Silently Ignoring Queries**: Under no circumstances should a scraper drop the `--query` value or fall back to an unconstrained, all-time popular, or front-page image dump when a search query is provided.
+   - **Zero-Match Integrity**: If the upstream provider has 0 results for the query, the scraper **must return an empty JSON array `[]`**. Scrapers must *never* return unrelated "fallback masterpieces" or static default feeds when a user has entered a search phrase.
+   - **Query Translation & Routing**: If the upstream API does not support search on general image endpoints (for example, Civitai's `/api/v1/images` ignores queries), the scraper must route the query to an endpoint that supports keyword matching (such as Civitai's `/api/v1/models?query=...`) and extract images from the matching entities.
+   - **Score Thresholds for Fuzzy Engines**: When querying search engines with fuzzy/fallback matching (such as museum ElasticSearch APIs like ArtIC), scrapers must enforce a minimum relevance score cutoff (e.g. `score >= 1.0`) to avoid leaking zero-relevance fallback entries.
+   - **Default Queries**: Default keywords (such as `"concept art"` or `"portrait"`) should *only* be used if `--query` is completely empty or omitted by the caller.
+
+4. **Standard JSON Output Format**:
+   The scraper must print a JSON array to `stdout` containing candidate objects with the following fields:
+   ```json
+   [
+     {
+       "sourceUrl": "https://example.com/highres.jpg",
+       "thumbnailUrl": "https://example.com/thumb.jpg",
+       "title": "Descriptive title or prompt matching search query",
+       "width": 1920,
+       "height": 1080
+     }
+   ]
    ```
-
-#### Pattern B: In-Workflow Action (Toolbar or Wizard Integration)
-Use this when your plugin enriches an existing workflow (e.g., adding auto-captioning directly inside the **Civitai Training Wizard**, or adding model checking to the **LoRA Library Browser** toolbar):
-* Inject `IDialogService` into the existing page or wizard component.
-* Add an action button that opens your dialog pre-seeded with context (e.g., the currently selected model or dataset folder).
-
-#### Pattern C: Long-Running Asynchronous Background Services
-For tasks taking minutes or hours (e.g., bulk downloads or heavy inference):
-* Wrap plugin execution in a dedicated singleton service (similar to `LoraUpdaterService.cs`).
-* Maintain a background status object with progress percentages and logs.
-* Display a persistent banner in `MainLayout.razor` or `LoraManagerDashboard.razor` so users can monitor progress or continue working without keeping a dialog open.
 
 ---
 
@@ -304,3 +548,6 @@ To publish a plugin that any LoRAMancer user can install via **Install from Git*
    ```
 2. Users can paste the repository URL into **Plugin Manager > Install from Git**.
 3. LoRAMancer clones the repository, provisions an isolated `.venv`, and marks it ready for use.
+
+---
+

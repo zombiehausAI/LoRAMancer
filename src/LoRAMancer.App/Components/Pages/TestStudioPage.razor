@@ -7,6 +7,7 @@
 @inject StudioSessionService StudioSession
 @inject ComfyUiService ComfyUi
 @inject NativeFileDialogService FileDialogService
+@inject ModusFlowPromptService PromptService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
@@ -68,6 +69,35 @@
     <MudItem xs="12" md="6">
         <MudCard Elevation="1" Class="pa-4 h-100" Style="background-color: var(--bg-dark-surface, #181825); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
             <MudText Typo="Typo.subtitle1" Style="font-weight: 700; color: #cdd6f4;" Class="mb-3">Test Inference Controls</MudText>
+
+            <!-- Saved Prompt Selector -->
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Bookmark" Size="Size.Small" Color="Color.Info" />
+                    <MudText Typo="Typo.caption" Style="font-weight: 700; color: #89dceb; letter-spacing: 0.5px;">SAVED PROMPTS</MudText>
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.BookmarkAdd" OnClick="OpenSavePromptDialogAsync"
+                               Disabled="_isRendering || (string.IsNullOrWhiteSpace(_prompt) && string.IsNullOrWhiteSpace(_negativePrompt))">
+                        Save Preset
+                    </MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="OpenPromptManagerDialogAsync">
+                        Manage
+                    </MudButton>
+                </div>
+            </div>
+            <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
+                       Label="Load ModusFlow Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                       Class="mb-3" Disabled="_isRendering">
+                <MudSelectItem Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
+                @foreach (var p in _savedPrompts) {
+                    <MudSelectItem Value="@p.Name">
+                        @(!string.IsNullOrWhiteSpace(p.Category) ? $"[{p.Category}] " : "")@p.Name
+                    </MudSelectItem>
+                }
+            </MudSelect>
 
             <MudTextField @bind-Value="_prompt" Label="Positive Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" HelperText="LoRA trigger words are automatically inserted" Class="mb-3" />
             <MudTextField @bind-Value="_negativePrompt" Label="Negative Prompt" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-3" />
@@ -180,6 +210,8 @@
             _prompt = $"{StudioSession.TriggerWord}, {_prompt}";
         }
 
+        PromptService.OnPromptsUpdated += OnPromptsUpdatedHandler;
+        await LoadSavedPromptsAsync();
         await CheckComfyConnectionAsync();
     }
 
@@ -224,14 +256,26 @@
                 { x => x.LoraFilePath, _activeLoraPath },
                 { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
                 { x => x.BaseArchitecture, GetEffectiveArchitecture() },
-                { x => x.TriggerWords, StudioSession.TriggerWord }
+                { x => x.TriggerWords, StudioSession.TriggerWord },
+                { x => x.Prompt, _prompt },
+                { x => x.NegativePrompt, _negativePrompt },
+                { x => x.LoraWeight, _loraWeight }
             };
             var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
             var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
             var result = await dialog.Result;
-            if (result != null && !result.Canceled && result.Data is string imagePath && File.Exists(imagePath)) {
-                byte[] bytes = await File.ReadAllBytesAsync(imagePath);
-                _renderedImageBase64 = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+            if (result != null && !result.Canceled) {
+                if (result.Data is LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog.ComfyUiTestDialogResult dialogResult) {
+                    _prompt = dialogResult.Prompt;
+                    _negativePrompt = dialogResult.NegativePrompt;
+                    _loraWeight = dialogResult.LoraWeight;
+                    if (!string.IsNullOrWhiteSpace(dialogResult.RenderedBase64Image)) {
+                        _renderedImageBase64 = $"data:image/png;base64,{dialogResult.RenderedBase64Image}";
+                    }
+                } else if (result.Data is string imagePath && File.Exists(imagePath)) {
+                    byte[] bytes = await File.ReadAllBytesAsync(imagePath);
+                    _renderedImageBase64 = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+                }
             }
         } catch (Exception ex) {
             Snackbar.Add($"Render error: {ex.Message}", Severity.Error);
@@ -248,10 +292,23 @@
             { x => x.LoraFilePath, _activeLoraPath },
             { x => x.LoraName, string.IsNullOrWhiteSpace(_activeLoraPath) ? "Active LoRA" : Path.GetFileNameWithoutExtension(_activeLoraPath) },
             { x => x.BaseArchitecture, GetEffectiveArchitecture() },
-            { x => x.TriggerWords, StudioSession.TriggerWord }
+            { x => x.TriggerWords, StudioSession.TriggerWord },
+            { x => x.Prompt, _prompt },
+            { x => x.NegativePrompt, _negativePrompt },
+            { x => x.LoraWeight, _loraWeight }
         };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+        var dialog = await DialogService.ShowAsync<LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog>("ComfyUI Interactive Test Studio", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is LoRAMancer.App.Components.Dialogs.ComfyUiTestDialog.ComfyUiTestDialogResult dialogResult) {
+            _prompt = dialogResult.Prompt;
+            _negativePrompt = dialogResult.NegativePrompt;
+            _loraWeight = dialogResult.LoraWeight;
+            if (!string.IsNullOrWhiteSpace(dialogResult.RenderedBase64Image)) {
+                _renderedImageBase64 = $"data:image/png;base64,{dialogResult.RenderedBase64Image}";
+            }
+            StateHasChanged();
+        }
     }
 
     private async Task OpenBenchmarkDialogAsync() {
@@ -293,5 +350,64 @@
         }
     }
 
-    public void Dispose() { }
+    public void Dispose() {
+        PromptService.OnPromptsUpdated -= OnPromptsUpdatedHandler;
+    }
+
+    private IReadOnlyList<ModusFlowPrompt> _savedPrompts = new List<ModusFlowPrompt>();
+    private string _selectedSavedPromptName = string.Empty;
+
+    private async Task LoadSavedPromptsAsync() {
+        try {
+            _savedPrompts = await PromptService.GetAllPromptsAsync();
+        } catch {
+            _savedPrompts = new List<ModusFlowPrompt>();
+        }
+    }
+
+    private void OnPromptsUpdatedHandler() {
+        _ = InvokeAsync(async () => {
+            await LoadSavedPromptsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void OnSavedPromptSelected(string name) {
+        _selectedSavedPromptName = name;
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var match = _savedPrompts.FirstOrDefault(p => p.Name == name);
+        if (match != null) {
+            _prompt = match.Positive;
+            _negativePrompt = match.Negative;
+            Snackbar.Add($"Loaded prompt '{match.Name}'", Severity.Info);
+        }
+    }
+
+    private async Task OpenSavePromptDialogAsync() {
+        var parameters = new DialogParameters<SaveModusFlowPromptDialog> {
+            { x => x.PositivePrompt, _prompt },
+            { x => x.NegativePrompt, _negativePrompt },
+            { x => x.InitialName, !string.IsNullOrWhiteSpace(StudioSession.ProjectName) ? $"{StudioSession.ProjectName} Preset" : "Prompt Preset" }
+        };
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<SaveModusFlowPromptDialog>("Save Prompt", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt saved) {
+            await LoadSavedPromptsAsync();
+            _selectedSavedPromptName = saved.Name;
+        }
+    }
+
+    private async Task OpenPromptManagerDialogAsync() {
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ModusFlowPromptManagerDialog>("Saved Prompts", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt selected) {
+            _prompt = selected.Positive;
+            _negativePrompt = selected.Negative;
+            _selectedSavedPromptName = selected.Name;
+            Snackbar.Add($"Loaded prompt '{selected.Name}'", Severity.Info);
+        }
+        await LoadSavedPromptsAsync();
+    }
 }

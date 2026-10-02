@@ -74,6 +74,15 @@ if (-not $SkipPrereqCheck) {
         Write-Warning "Python 3.12+ was not detected on PATH. Python features will require configuring the Python path in LoRAMancer."
     }
 
+    # Check for Git
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        $gitVersion = (& git --version 2>&1)
+        Write-Host "  > Git Version: $gitVersion" -ForegroundColor Green
+    } else {
+        Write-Warning "Git was not detected on PATH. Git for Windows is required to clone and update the AI-Toolkit training engine (https://git-scm.com/)."
+    }
+
     # Detect GPU & Accelerator Architecture
     try {
         $videoControllers = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue

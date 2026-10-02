@@ -1,0 +1,703 @@
+@page "/harvester"
+@implements IDisposable
+@inject ImageHarvesterService HarvesterService
+@inject NativeFileDialogService FileDialogService
+@inject SettingsService SettingsService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+
+<div class="pa-4" style="max-width: 1750px; margin: 0 auto;">
+    <!-- Header -->
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
+        <div>
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Size="Size.Large" />
+                <MudText Typo="Typo.h5" Style="font-weight: 800; letter-spacing: -0.5px;">Image Harvester</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Style="font-size: 0.72rem; font-weight: 700;">
+                    MULTI-PROVIDER
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Harvest candidate training imagery across search engines, boorus, and public feeds with concurrent multi-engine scraping and Ollama vision auditing.
+            </MudText>
+        </div>
+
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune" OnClick="OpenProviderManager">
+                Configure Providers (@_providers.Count(p => p.IsEnabled) Active)
+            </MudButton>
+
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PickDestinationFolderAsync">
+                @(!string.IsNullOrWhiteSpace(_destinationFolder) ? Path.GetFileName(_destinationFolder) : "Choose Destination...")
+            </MudButton>
+
+            @if (HarvesterService.Candidates.Any(c => c.IsSelected && !string.IsNullOrWhiteSpace(c.DownloadedFilePath))) {
+                <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Collections" OnClick="NavigateToCurate">
+                    Send to Stage 1 (Curate)
+                </MudButton>
+            }
+        </div>
+    </div>
+
+    <!-- Mode Selector & Provider Chips -->
+    <!-- Main Search & Provider Controls -->
+    <MudCard Elevation="2" Class="pa-4 mb-4" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
+        <!-- Top Row: Query Input & Primary Search Buttons -->
+        <div class="d-flex align-center gap-2 flex-wrap mb-3">
+            <MudTextField @bind-Value="_query.Query"
+                          Immediate="true"
+                          Placeholder="Universal search query, tags, or topic (e.g. vintage sports cars, cyberpunk street, anime girl, macro photography)..."
+                          Variant="Variant.Outlined"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.TravelExplore"
+                          Margin="Margin.Dense"
+                          Class="flex-grow-1"
+                          Style="min-width: 280px;"
+                          OnKeyDown="HandleKeyDown" />
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="ExecuteSearchAsync"
+                       Disabled="@(HarvesterService.IsSearching || _selectedProviderIds.Count == 0 || string.IsNullOrWhiteSpace(_query.Query))"
+                       Style="font-weight: 700; white-space: nowrap; height: 40px; min-width: 175px;">
+                @if (HarvesterService.IsSearching) {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                    <span>Searching (@_selectedProviderIds.Count)...</span>
+                } else {
+                    <span>Harvest (@(_selectedProviderIds.Count == _providers.Count ? "All" : $"{_selectedProviderIds.Count} Selected"))</span>
+                }
+            </MudButton>
+
+            @if (HarvesterService.IsSearching) {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Cancel"
+                           OnClick="CancelSearch"
+                           Style="white-space: nowrap; height: 40px;">
+                    Cancel
+                </MudButton>
+            }
+        </div>
+
+        <!-- Query Filters & Special Parameters Row -->
+        <div class="d-flex align-center gap-3 flex-wrap mb-3 pb-3" style="border-bottom: 1px solid #313244;">
+            <MudNumericField @bind-Value="_query.MaxResults" Label="Results Limit" Variant="Variant.Outlined" Margin="Margin.Dense" Min="10" Max="300" Step="20" Style="max-width: 130px;" />
+            <MudNumericField @bind-Value="_query.MinWidth" Label="Min Width" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Max="4096" Step="128" Style="max-width: 110px;" />
+            <MudCheckBox @bind-Value="_query.SafeSearch" Label="Safe Search" Color="Color.Primary" Dense="true" />
+
+            @if (_selectedProvider?.Engine == HarvestEngine.Reddit) {
+                <MudTextField @bind-Value="_query.Subreddit"
+                              Label="Subreddit"
+                              Placeholder="wallpaper, itookapicture, EarthPorn..."
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Style="max-width: 250px;"
+                              OnKeyDown="HandleKeyDown" />
+            }
+
+            <MudSpacer />
+
+            <div class="d-flex align-center gap-2">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Active Details: <b>@(_selectedProvider?.Name ?? "None")</b>
+                </MudText>
+            </div>
+        </div>
+
+        @if (_selectedProvider?.Engine == HarvestEngine.DirectUrls) {
+            <div class="mb-3">
+                <MudTextField @bind-Value="_query.DirectUrlsText"
+                              Label="Direct Image URLs (separated by spaces or newlines)"
+                              Lines="3"
+                              Variant="Variant.Outlined"
+                              Placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.png" />
+            </div>
+        }
+
+        <!-- Provider Selection Chips -->
+        <div>
+            <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                        Selective Providers (@_selectedProviderIds.Count/@_providers.Count Selected):
+                    </MudText>
+                    <MudLink Typo="Typo.caption" Color="Color.Primary" OnClick="SelectAllProviders" Style="cursor: pointer; font-weight: 600;">Select All</MudLink>
+                    <span style="color: #6c7086;">•</span>
+                    <MudLink Typo="Typo.caption" Color="Color.Secondary" OnClick="ClearSelectedProviders" Style="cursor: pointer;">Clear</MudLink>
+                    <span style="color: #6c7086;">•</span>
+                    <MudLink Typo="Typo.caption" Color="Color.Info" OnClick="@(() => SelectCategoryProviders("general"))" Style="cursor: pointer;">General</MudLink>
+                    <span style="color: #6c7086;">•</span>
+                    <MudLink Typo="Typo.caption" Color="Color.Tertiary" OnClick="@(() => SelectCategoryProviders("booru"))" Style="cursor: pointer;">Boorus</MudLink>
+                    @if (_providers.Any(p => p.Engine == HarvestEngine.PythonPlugin)) {
+                        <span style="color: #6c7086;">•</span>
+                        <MudLink Typo="Typo.caption" Color="Color.Warning" OnClick="@(() => SelectCategoryProviders("scrapers"))" Style="cursor: pointer;">Scrapers</MudLink>
+                    }
+                </div>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Click pills to highlight &amp; toggle inclusion for selective search
+                </MudText>
+            </div>
+
+            <div class="d-flex align-center gap-1 flex-wrap">
+                @foreach (var provider in _providers) {
+                    bool isSelected = _selectedProviderIds.Contains(provider.Id);
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Variant="@(isSelected ? Variant.Filled : Variant.Outlined)"
+                             Color="@(isSelected ? Color.Primary : Color.Default)"
+                             OnClick="@(() => ToggleProviderSelection(provider))"
+                             Style="@($"cursor: pointer; font-size: 0.75rem; user-select: none; {(isSelected ? "font-weight: 700; border: 1px solid #89b4fa;" : "opacity: 0.7;")}")">
+                        <MudIcon Icon="@(isSelected ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.RadioButtonUnchecked)"
+                                 Size="Size.Small"
+                                 Color="@(isSelected ? Color.Primary : Color.Secondary)"
+                                 Class="mr-1"
+                                 Style="font-size: 0.85rem; vertical-align: middle;" />
+                        <span>@provider.Name</span>
+                    </MudChip>
+                }
+            </div>
+        </div>
+    </MudCard>
+
+    <!-- In-Progress Banner -->
+    @if (_progress != null && !_progress.IsComplete) {
+        <MudCard Elevation="2" Class="pa-3 mb-4" Style="background-color: #1e1e2e; border: 1px solid #89b4fa; border-radius: 8px;">
+            <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center gap-2">
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2" Style="font-weight: 600;">@_progressStatusText</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@_progress.CurrentFile</MudText>
+                </div>
+                <MudText Typo="Typo.caption" Style="font-family: 'JetBrains Mono', monospace;">
+                    @_progress.CurrentIndex / @_progress.TotalCount
+                </MudText>
+            </div>
+            <MudProgressLinear Color="Color.Primary" Value="@(_progress.TotalCount > 0 ? (_progress.CurrentIndex * 100.0 / _progress.TotalCount) : 0)" />
+        </MudCard>
+    }
+
+    <!-- Gallery Toolbar & Action Strip -->
+    @if (HarvesterService.Candidates.Count > 0) {
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-3 pa-2" style="background-color: #11111b; border-radius: 6px; border: 1px solid #313244;">
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Dark">
+                    @HarvesterService.Candidates.Count(c => c.IsSelected) / @HarvesterService.Candidates.Count Selected
+                </MudChip>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => HarvesterService.SelectAll(true))">
+                    Select All
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => HarvesterService.SelectAll(false))">
+                    Deselect All
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => HarvesterService.InvertSelection())">
+                    Invert
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => HarvesterService.ClearCandidates())">
+                    Clear Results
+                </MudButton>
+            </div>
+
+            <div class="d-flex align-center gap-2 flex-wrap">
+                <!-- Ollama Vision Model Selector -->
+                <MudSelect T="string" @bind-Value="_selectedOllamaModel" Label="Vision Model" Dense="true" Margin="Margin.Dense" Style="min-width: 175px;" Variant="Variant.Outlined">
+                    @foreach (var m in GetOllamaModelOptions()) {
+                        <MudSelectItem Value="@m">@m</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <!-- Ollama Vision Cleanse Dropdown -->
+                <MudSelect T="string" @bind-Value="_selectedOllamaPreset" Label="Ollama Filter" Dense="true" Margin="Margin.Dense" Style="min-width: 220px;" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("watermarks")">🔤 Watermarks &amp; Overlays</MudSelectItem>
+                    <MudSelectItem Value="@("blurry")">🌫️ Blurry / Low Quality</MudSelectItem>
+                    <MudSelectItem Value="@("nonphoto")">🎨 Non-Photographic Art / CGI</MudSelectItem>
+                    <MudSelectItem Value="@("memes")">🖼️ Memes &amp; Letterbox</MudSelectItem>
+                </MudSelect>
+
+                <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="AuditSelectedWithOllamaAsync" Disabled="HarvesterService.IsAuditing || !HarvesterService.Candidates.Any(c => c.IsSelected)">
+                    Cleanse with Ollama
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="DownloadSelectedAsync" Disabled="HarvesterService.IsDownloading || !HarvesterService.Candidates.Any(c => c.IsSelected)">
+                    Download Selected (@HarvesterService.Candidates.Count(c => c.IsSelected))
+                </MudButton>
+            </div>
+        </div>
+
+        <!-- Candidate Image Grid -->
+        <MudGrid Spacing="2">
+            @foreach (var item in HarvesterService.Candidates) {
+                <MudItem xs="12" sm="6" md="4" lg="3" xl="2" key="@item.Id">
+                    <MudCard Elevation="1" Class="harvester-card h-100 d-flex flex-column" Style="@GetCardStyle(item)">
+                        <div class="position-relative" style="height: 180px; background-color: #0b0b10; overflow: hidden; cursor: pointer;" @onclick="@(() => OpenPreview(item))">
+                            <img src="@(!string.IsNullOrWhiteSpace(item.ThumbnailUrl) ? item.ThumbnailUrl : item.SourceUrl)"
+                                 alt="@item.Title"
+                                 loading="lazy"
+                                 style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s;"
+                                 onerror="this.style.display='none';" />
+
+                            <!-- Top-Left Selection Checkbox -->
+                            <div class="position-absolute" style="top: 4px; left: 4px; z-index: 2;" @onclick:stopPropagation="true">
+                                <MudCheckBox @bind-Value="item.IsSelected" Color="Color.Primary" Dense="true" Style="background-color: rgba(17,17,27,0.7); border-radius: 4px;" />
+                            </div>
+
+                            <!-- Top-Right Provider & Dimension Badges -->
+                            <div class="position-absolute d-flex flex-column align-end gap-1" style="top: 6px; right: 6px; z-index: 2;">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Style="font-size: 0.62rem; font-weight: 700; background-color: rgba(30,30,46,0.9);">
+                                    @item.ProviderName
+                                </MudChip>
+
+                                @if (item.Width > 0 && item.Height > 0) {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Dark" Style="font-size: 0.62rem; background-color: rgba(17,17,27,0.85);">
+                                        @item.Width × @item.Height
+                                    </MudChip>
+                                }
+                            </div>
+
+                            <!-- Audit Status Badge -->
+                            @if (item.AuditStatus == OllamaAuditStatus.Flagged) {
+                                <div class="position-absolute" style="bottom: 6px; left: 6px; z-index: 2;">
+                                    <MudTooltip Text="@item.AuditReason">
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Error" Style="font-size: 0.68rem; font-weight: 700;">
+                                            FLAGGED
+                                        </MudChip>
+                                    </MudTooltip>
+                                </div>
+                            } else if (item.AuditStatus == OllamaAuditStatus.Clean) {
+                                <div class="position-absolute" style="bottom: 6px; left: 6px; z-index: 2;">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Style="font-size: 0.68rem; font-weight: 700;">
+                                        CLEAN
+                                    </MudChip>
+                                </div>
+                            }
+
+                            <!-- Downloaded Indicator -->
+                            @if (!string.IsNullOrWhiteSpace(item.DownloadedFilePath)) {
+                                <div class="position-absolute" style="bottom: 6px; right: 6px; z-index: 2;">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Card Footer / Title -->
+                        <div class="pa-2 d-flex align-center justify-space-between gap-1 flex-grow-1" style="background-color: #181825;">
+                            <MudTooltip Text="@item.Title">
+                                <MudText Typo="Typo.caption" Style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">
+                                    @item.Title
+                                </MudText>
+                            </MudTooltip>
+                            <MudTooltip Text="Remove candidate">
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Default" OnClick="@(() => HarvesterService.RemoveCandidate(item.Id))" />
+                            </MudTooltip>
+                        </div>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    } else if (!HarvesterService.IsSearching) {
+        <!-- Empty State -->
+        <MudCard Elevation="0" Class="pa-8 d-flex flex-column align-center justify-center text-center" Style="background-color: #181825; border: 1px dashed #313244; border-radius: 8px; min-height: 280px;">
+            <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Size="Size.Large" Color="Color.Secondary" Class="mb-3" />
+            <MudText Typo="Typo.h6" Style="font-weight: 700;">No Harvest Results Yet</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4" Style="max-width: 500px;">
+                Search across all enabled providers at once or harvest from specific engines and boorus to curate datasets for training.
+            </MudText>
+        </MudCard>
+    }
+</div>
+
+<!-- Provider Manager Drawer / Overlay -->
+@if (_showProviderManager) {
+    <MudOverlay Visible="true" DarkBackground="true" AutoClose="true" OnClosed="@(() => _showProviderManager = false)" ZIndex="1000">
+        <MudCard Elevation="8" Class="pa-4" Style="width: 90vw; max-width: 700px; max-height: 85vh; background-color: #181825; border: 1px solid #89b4fa; border-radius: 8px; display: flex; flex-direction: column;">
+            <div class="d-flex align-center justify-space-between mb-3 pb-2" style="border-bottom: 1px solid #313244;">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Tune" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Search Providers Manager</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showProviderManager = false)" />
+            </div>
+
+            <div class="flex-grow-1 overflow-auto pr-1" style="max-height: 55vh;">
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color: #cdd6f4;">Available Search Providers</MudText>
+                @foreach (var p in _providers) {
+                    <div class="d-flex align-center justify-space-between pa-2 mb-2" style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                        <div>
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.body2" Style="font-weight: 700;">@p.Name</MudText>
+                                @if (p.IsCustom) {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled" Style="font-size: 0.65rem;">CUSTOM</MudChip>
+                                }
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@p.Description</MudText>
+                        </div>
+                        <div class="d-flex align-center gap-2">
+                            <MudSwitch T="bool" Value="@p.IsEnabled" Color="Color.Primary" ValueChanged="@((bool val) => OnProviderToggled(p, val))" />
+                            @if (p.IsCustom) {
+                                <MudTooltip Text="Delete custom provider">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeleteCustomProvider(p))" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <MudDivider Class="my-3" />
+
+                <!-- Add Custom Provider Form -->
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color: #cdd6f4;">Add Custom REST Search Provider</MudText>
+                <div class="d-flex flex-column gap-2 pa-3" style="background-color: #11111b; border: 1px solid #45475a; border-radius: 6px;">
+                    <MudTextField @bind-Value="_newCustomProvider.Name" Label="Provider Name" Placeholder="e.g. My Custom Booru" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudTextField @bind-Value="_newCustomProvider.SearchUrlTemplate" Label="Search URL Template" Placeholder="https://api.example.com/search?q={query}&amp;limit={limit}" HelperText="Use {query} and {limit} tokens" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudTextField @bind-Value="_newCustomProvider.JsonResultsPath" Label="JSON Results Array Path (optional)" Placeholder="e.g. data.results or leave empty if root array" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+                    <div class="d-flex gap-2">
+                        <MudTextField @bind-Value="_newCustomProvider.JsonImageUrlKey" Label="Image URL Key" Placeholder="url or file_url" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+                        <MudTextField @bind-Value="_newCustomProvider.JsonThumbUrlKey" Label="Thumbnail URL Key" Placeholder="thumbnail or preview_url" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+                        <MudTextField @bind-Value="_newCustomProvider.JsonTitleKey" Label="Title Key" Placeholder="title or tags" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+                    </div>
+
+                    <div class="d-flex justify-end mt-1">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="SaveNewCustomProvider">
+                            Add Provider
+                        </MudButton>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-end mt-3 pt-2" style="border-top: 1px solid #313244;">
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="@(() => _showProviderManager = false)">
+                    Done
+                </MudButton>
+            </div>
+        </MudCard>
+    </MudOverlay>
+}
+
+<!-- Lightbox Modal for Full-Res Image Preview -->
+@if (_previewItem != null) {
+    <MudOverlay Visible="true" DarkBackground="true" AutoClose="true" OnClosed="@(() => _previewItem = null)" ZIndex="1000">
+        <MudCard Elevation="8" Class="pa-4" Style="max-width: 90vw; max-height: 90vh; background-color: #181825; border: 1px solid #89b4fa; border-radius: 8px; display: flex; flex-direction: column;">
+            <div class="d-flex align-center justify-space-between mb-3">
+                <div>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">@_previewItem.Title</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @_previewItem.Width × @_previewItem.Height • Source: @_previewItem.ProviderName
+                    </MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _previewItem = null)" />
+            </div>
+
+            <div class="d-flex justify-center align-center flex-grow-1" style="overflow: hidden; background-color: #0b0b10; border-radius: 6px;">
+                <img src="@_previewItem.SourceUrl" alt="@_previewItem.Title" style="max-width: 80vw; max-height: 65vh; object-fit: contain;" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_previewItem.AuditReason)) {
+                <MudAlert Severity="@(_previewItem.AuditStatus == OllamaAuditStatus.Flagged ? Severity.Error : Severity.Success)" Class="mt-2" Dense="true">
+                    <b>Ollama Audit:</b> @_previewItem.AuditReason
+                </MudAlert>
+            }
+        </MudCard>
+    </MudOverlay>
+}
+
+<style>
+    .harvester-card {
+        border-radius: 6px;
+        overflow: hidden;
+        transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .harvester-card:hover {
+        transform: translateY(-2px);
+    }
+</style>
+
+@code {
+    private readonly HarvestSearchQuery _query = new();
+    private string _destinationFolder = string.Empty;
+    private HarvestDownloadProgress? _progress = null;
+    private string _progressStatusText = string.Empty;
+    private string _selectedOllamaModel = string.Empty;
+    private string _selectedOllamaPreset = "watermarks";
+    private HarvestedCandidateItem? _previewItem = null;
+    private List<HarvestProviderDefinition> _providers = new();
+    private readonly HashSet<string> _selectedProviderIds = new(StringComparer.OrdinalIgnoreCase);
+    private HarvestProviderDefinition? _selectedProvider = null;
+    private bool _showProviderManager = false;
+    private HarvestProviderDefinition _newCustomProvider = new();
+
+    protected override void OnInitialized() {
+        HarvesterService.OnStateChanged += HandleStateChanged;
+        RefreshProviders();
+
+        _selectedOllamaModel = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+            ? SettingsService.Current.OllamaDefaultModel
+            : "llama3.2-vision";
+
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _destinationFolder = Path.Combine(userHome, ".loramancer", "harvested_datasets");
+    }
+
+    private IEnumerable<string> GetOllamaModelOptions() {
+        var list = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_selectedOllamaModel)) {
+            list.Add(_selectedOllamaModel.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)) {
+            string def = SettingsService.Current.OllamaDefaultModel.Trim();
+            if (!list.Contains(def, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(def);
+            }
+        }
+        string[] presets = { "llama3.2-vision", "llama3.2-vision:11b", "llava", "qwen2-vl", "minicpm-v" };
+        foreach (var p in presets) {
+            if (!list.Contains(p, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(p);
+            }
+        }
+        return list;
+    }
+
+    public void Dispose() {
+        HarvesterService.OnStateChanged -= HandleStateChanged;
+    }
+
+    private void HandleStateChanged() {
+        RefreshProviders();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshProviders() {
+        _providers = HarvesterService.GetProviders();
+
+        // Clean out IDs that no longer exist
+        _selectedProviderIds.RemoveWhere(id => !_providers.Any(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase)));
+
+        // If no providers are selected yet, default to all enabled providers
+        if (_selectedProviderIds.Count == 0) {
+            foreach (var p in _providers.Where(p => p.IsEnabled)) {
+                _selectedProviderIds.Add(p.Id);
+            }
+        }
+
+        if (_selectedProvider == null || !_providers.Any(p => string.Equals(p.Id, _selectedProvider.Id, StringComparison.OrdinalIgnoreCase))) {
+            _selectedProvider = _providers.FirstOrDefault(p => _selectedProviderIds.Contains(p.Id))
+                             ?? _providers.FirstOrDefault(p => p.IsEnabled)
+                             ?? _providers.FirstOrDefault();
+        }
+    }
+
+    private void ToggleProviderSelection(HarvestProviderDefinition provider) {
+        if (_selectedProviderIds.Contains(provider.Id)) {
+            _selectedProviderIds.Remove(provider.Id);
+        } else {
+            _selectedProviderIds.Add(provider.Id);
+        }
+        _selectedProvider = provider;
+        StateHasChanged();
+    }
+
+    private void SelectAllProviders() {
+        foreach (var p in _providers) {
+            _selectedProviderIds.Add(p.Id);
+        }
+        StateHasChanged();
+    }
+
+    private void ClearSelectedProviders() {
+        _selectedProviderIds.Clear();
+        StateHasChanged();
+    }
+
+    private void SelectCategoryProviders(string category) {
+        _selectedProviderIds.Clear();
+        foreach (var p in _providers) {
+            bool match = category switch {
+                "booru" => p.Engine == HarvestEngine.Safebooru || p.Engine == HarvestEngine.Danbooru || p.Name.Contains("booru", StringComparison.OrdinalIgnoreCase),
+                "general" => p.Engine == HarvestEngine.Wikimedia || p.Engine == HarvestEngine.Openverse || p.Engine == HarvestEngine.Unsplash || p.Engine == HarvestEngine.Flickr,
+                "scrapers" => p.Engine == HarvestEngine.PythonPlugin,
+                _ => true
+            };
+            if (match) {
+                _selectedProviderIds.Add(p.Id);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnProviderToggled(HarvestProviderDefinition provider, bool enabled) {
+        await HarvesterService.SetProviderEnabledAsync(provider.Id, enabled);
+        RefreshProviders();
+    }
+
+    private void OpenProviderManager() {
+        _newCustomProvider = new HarvestProviderDefinition();
+        _showProviderManager = true;
+    }
+
+    private async Task SaveNewCustomProvider() {
+        if (string.IsNullOrWhiteSpace(_newCustomProvider.Name) || string.IsNullOrWhiteSpace(_newCustomProvider.SearchUrlTemplate)) {
+            Snackbar.Add("Provider name and Search URL template are required.", Severity.Warning);
+            return;
+        }
+
+        await HarvesterService.AddCustomProviderAsync(_newCustomProvider);
+        _newCustomProvider = new HarvestProviderDefinition();
+        RefreshProviders();
+        Snackbar.Add("Custom provider added successfully!", Severity.Success);
+    }
+
+    private async Task DeleteCustomProvider(HarvestProviderDefinition provider) {
+        await HarvesterService.RemoveCustomProviderAsync(provider.Id);
+        RefreshProviders();
+        Snackbar.Add($"Removed {provider.Name}", Severity.Info);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e) {
+        if (e.Key == "Enter") {
+            await ExecuteSearchAsync();
+        }
+    }
+
+    private void CancelSearch() {
+        HarvesterService.CancelSearch();
+        Snackbar.Add("Harvest cancelled.", Severity.Info);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ExecuteSearchAsync() {
+        if (HarvesterService.IsSearching) return;
+
+        if (string.IsNullOrWhiteSpace(_query.Query) && (_selectedProvider?.Engine != HarvestEngine.DirectUrls || string.IsNullOrWhiteSpace(_query.DirectUrlsText))) {
+            Snackbar.Add("Please enter a search query.", Severity.Warning);
+            return;
+        }
+
+        if (_selectedProviderIds.Count == 0) {
+            Snackbar.Add("Please select at least one provider pill.", Severity.Warning);
+            return;
+        }
+
+        _query.SelectedProviderIds = _selectedProviderIds.ToList();
+        _query.SearchAllProviders = false;
+
+        // If only 1 provider is selected, set single provider properties as well
+        if (_selectedProviderIds.Count == 1) {
+            var single = _providers.FirstOrDefault(p => string.Equals(p.Id, _selectedProviderIds.First(), StringComparison.OrdinalIgnoreCase));
+            if (single != null) {
+                _query.Engine = single.Engine;
+                _query.ProviderId = single.Id;
+                if (single.Engine == HarvestEngine.PythonPlugin && !string.IsNullOrWhiteSpace(single.PluginId)) {
+                    _query.ProviderId = single.PluginId;
+                }
+            }
+        }
+
+        string target = _selectedProviderIds.Count == _providers.Count
+            ? $"all providers ({_providers.Count})"
+            : $"{_selectedProviderIds.Count} selected provider{(_selectedProviderIds.Count > 1 ? "s" : "")}";
+
+        Snackbar.Add($"Starting harvest across {target}...", Severity.Info);
+        try {
+            var results = await HarvesterService.SearchAsync(_query);
+            if (results.Count > 0) {
+                Snackbar.Add($"Harvested {results.Count} candidate images.", Severity.Success);
+            } else {
+                Snackbar.Add("No images found matching criteria.", Severity.Warning);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Harvest error: {ex.Message}", Severity.Error);
+        } finally {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PickDestinationFolderAsync() {
+        string? picked = await FileDialogService.PickFolderAsync();
+        if (!string.IsNullOrWhiteSpace(picked)) {
+            _destinationFolder = picked;
+            Snackbar.Add($"Destination set to '{Path.GetFileName(_destinationFolder)}'", Severity.Info);
+        }
+    }
+
+    private async Task DownloadSelectedAsync() {
+        if (string.IsNullOrWhiteSpace(_destinationFolder)) {
+            await PickDestinationFolderAsync();
+            if (string.IsNullOrWhiteSpace(_destinationFolder)) return;
+        }
+
+        _progressStatusText = "Downloading high-resolution images...";
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _progress = p;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try {
+            var downloaded = await HarvesterService.DownloadSelectedAsync(
+                _destinationFolder,
+                "harvest",
+                progressHandler);
+
+            Snackbar.Add($"Successfully downloaded {downloaded.Count} images to {_destinationFolder}!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
+        } finally {
+            _progress = null;
+        }
+    }
+
+    private async Task AuditSelectedWithOllamaAsync() {
+        string prompt = _selectedOllamaPreset switch {
+            "watermarks" => "Analyze this image. Does it contain text, watermarks, subtitles, logos, or artificial UI overlays?",
+            "blurry" => "Analyze this image. Is it blurry, out-of-focus, highly pixelated, or severe low quality?",
+            "nonphoto" => "Analyze this image. Is it a cartoon, 2D anime, sketch, drawing, or 3D CGI rendering rather than a real photograph?",
+            "memes" => "Analyze this image. Does it contain meme captions, top/bottom text, or thick black letterbox borders?",
+            _ => "Does this image have severe visual artifacts, watermarks, or quality flaws?"
+        };
+
+        string ollamaUrl = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaEndpointUrl)
+            ? SettingsService.Current.OllamaEndpointUrl.Trim().TrimEnd('/')
+            : (Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434");
+
+        string modelName = !string.IsNullOrWhiteSpace(_selectedOllamaModel)
+            ? _selectedOllamaModel.Trim()
+            : (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+                ? SettingsService.Current.OllamaDefaultModel.Trim()
+                : (Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision"));
+
+        _progressStatusText = $"Auditing with Ollama ({modelName})...";
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _progress = p;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try {
+            await HarvesterService.AuditCandidatesWithOllamaAsync(ollamaUrl, modelName, prompt, progressHandler);
+            int flaggedCount = HarvesterService.Candidates.Count(c => c.AuditStatus == OllamaAuditStatus.Flagged);
+            Snackbar.Add($"Ollama audit complete! Flagged and deselected {flaggedCount} images.", Severity.Info);
+        } catch (Exception ex) {
+            Snackbar.Add($"Ollama audit failed: {ex.Message}", Severity.Error);
+        } finally {
+            _progress = null;
+        }
+    }
+
+    private void OpenPreview(HarvestedCandidateItem item) {
+        _previewItem = item;
+    }
+
+    private void NavigateToCurate() {
+        Navigation.NavigateTo("curate");
+    }
+
+    private string GetCardStyle(HarvestedCandidateItem item) {
+        if (item.AuditStatus == OllamaAuditStatus.Flagged) {
+            return "border: 1px solid #f38ba8; opacity: 0.65;";
+        }
+        if (item.IsSelected) {
+            return "border: 1px solid #89b4fa;";
+        }
+        return "border: 1px solid #313244;";
+    }
+}

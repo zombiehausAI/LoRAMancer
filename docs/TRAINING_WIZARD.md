@@ -93,3 +93,13 @@ Training execution is decoupled from page navigation and UI lifecycle:
 - **Synchronous Process Tree Termination**: Clicking **Stop Training** halts Python and its worker tree synchronously (`WaitForExit`), preventing orphaned PyTorch processes.
 - **GPU Driver & VRAM Cooldown**: Windows ROCm / HIP driver context teardown requires 1–2 seconds to release pinned allocations. LoRAMancer enforces an automatic cooldown guard before initializing a new training run, preventing `HIP error` or `CUDA OutOfMemory` failures when stopping and quickly restarting.
 
+## 11. Favorite & Custom Training Recipes (JSON Presets)
+
+LoRAMancer lets creators save their battle-tested hyperparameter recipes and favorite configs for quick reuse whenever creating a new LoRA:
+- **Individual JSON Storage**: All custom recipes are stored as human-readable, portable JSON files in your user configuration directory (`~/.loramancer/training_recipes/<name>.json`).
+- **One-Click Recipe Dropdown**: Choose from your favorite recipes or built-in presets (FLUX.1 Dev Character, SDXL Artistic Style, Pony Booru Anime, Chroma Concept) directly at the top of the Training Wizard. Selecting a recipe instantly applies the architecture, rank, alpha, learning rates, optimizer, scheduler, repeats, augmentations, and sample prompts.
+- **Right-Click Any LoRA to Save as Favorite Recipe**: From either the Card View or Table View in the LoRA Library (`/`), right-click any model and select **Save as Favorite Recipe**. LoRAMancer extracts all mathematical hyperparameters (rank, alpha, learning rates, optimizer, precision, epochs, schedulers) without carrying over the old dataset folder, output paths, or previous model filenames. The recipe is saved straight into `~/.loramancer/training_recipes/` with `⭐` favorite status, ready to be selected in the wizard at any time.
+- **Save Current as Favorite**: Found a hyperparameter combination that produces great likeness or texture? Click **Save Favorite Recipe** in the wizard bar, enter a recipe name and description, and your exact configuration is instantly saved and marked as a favorite (`⭐`).
+- **Favorite & Deletion Management**: Toggle favorite status (`⭐`) on any recipe directly from the selector bar or delete obsolete custom presets with one click.
+
+

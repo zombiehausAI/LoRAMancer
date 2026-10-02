@@ -27,6 +27,12 @@ public record ComfyUiProgress(
     string? PreviewImageBase64 = null
 );
 
+public sealed class AdditionalLoraItem {
+    public string Name { get; set; } = string.Empty;
+    public float Weight { get; set; } = 1.0f;
+    public string? FilePath { get; set; }
+}
+
 public sealed class ComfyUiService : IDisposable {
     private readonly HttpClient _httpClient;
     private readonly SettingsService _settingsService;
@@ -189,7 +195,8 @@ public sealed class ComfyUiService : IDisposable {
         int width = 1024,
         int height = 1024,
         int steps = 20,
-        long seed = 42
+        long seed = 42,
+        IEnumerable<AdditionalLoraItem>? additionalLoras = null
     ) {
         var root = new JsonObject();
 
@@ -200,22 +207,57 @@ public sealed class ComfyUiService : IDisposable {
             }
         };
 
-        root["2"] = new JsonObject {
-            ["class_type"] = "LoraLoader",
-            ["inputs"] = new JsonObject {
-                ["lora_name"] = loraName,
-                ["strength_model"] = loraWeight,
-                ["strength_clip"] = loraWeight,
-                ["model"] = new JsonArray { "1", 0 },
-                ["clip"] = new JsonArray { "1", 1 }
+        string lastModelNode = "1";
+        string lastClipNode = "1";
+        int lastModelSlot = 0;
+        int lastClipSlot = 1;
+
+        if (!string.IsNullOrWhiteSpace(loraName)) {
+            root["2"] = new JsonObject {
+                ["class_type"] = "LoraLoader",
+                ["inputs"] = new JsonObject {
+                    ["lora_name"] = loraName,
+                    ["strength_model"] = loraWeight,
+                    ["strength_clip"] = loraWeight,
+                    ["model"] = new JsonArray { lastModelNode, lastModelSlot },
+                    ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
+                }
+            };
+            lastModelNode = "2";
+            lastClipNode = "2";
+            lastModelSlot = 0;
+            lastClipSlot = 1;
+        }
+
+        if (additionalLoras != null) {
+            int auxIndex = 1;
+            foreach (var aux in additionalLoras) {
+                if (string.IsNullOrWhiteSpace(aux?.Name)) {
+                    continue;
+                }
+                string auxId = $"2_{auxIndex++}";
+                root[auxId] = new JsonObject {
+                    ["class_type"] = "LoraLoader",
+                    ["inputs"] = new JsonObject {
+                        ["lora_name"] = aux.Name,
+                        ["strength_model"] = aux.Weight,
+                        ["strength_clip"] = aux.Weight,
+                        ["model"] = new JsonArray { lastModelNode, lastModelSlot },
+                        ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
+                    }
+                };
+                lastModelNode = auxId;
+                lastClipNode = auxId;
+                lastModelSlot = 0;
+                lastClipSlot = 1;
             }
-        };
+        }
 
         root["3"] = new JsonObject {
             ["class_type"] = "CLIPTextEncode",
             ["inputs"] = new JsonObject {
                 ["text"] = prompt,
-                ["clip"] = new JsonArray { "2", 1 }
+                ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
             }
         };
 
@@ -237,7 +279,7 @@ public sealed class ComfyUiService : IDisposable {
                 ["sampler_name"] = "euler",
                 ["scheduler"] = "simple",
                 ["denoise"] = 1.0,
-                ["model"] = new JsonArray { "2", 0 },
+                ["model"] = new JsonArray { lastModelNode, lastModelSlot },
                 ["positive"] = new JsonArray { "3", 0 },
                 ["negative"] = new JsonArray { "3", 0 },
                 ["latent_image"] = new JsonArray { "4", 0 }
@@ -273,7 +315,8 @@ public sealed class ComfyUiService : IDisposable {
         int height = 1024,
         int steps = 25,
         float cfg = 7.0f,
-        long seed = 42
+        long seed = 42,
+        IEnumerable<AdditionalLoraItem>? additionalLoras = null
     ) {
         var root = new JsonObject();
 
@@ -284,22 +327,57 @@ public sealed class ComfyUiService : IDisposable {
             }
         };
 
-        root["2"] = new JsonObject {
-            ["class_type"] = "LoraLoader",
-            ["inputs"] = new JsonObject {
-                ["lora_name"] = loraName,
-                ["strength_model"] = loraWeight,
-                ["strength_clip"] = loraWeight,
-                ["model"] = new JsonArray { "1", 0 },
-                ["clip"] = new JsonArray { "1", 1 }
+        string lastModelNode = "1";
+        string lastClipNode = "1";
+        int lastModelSlot = 0;
+        int lastClipSlot = 1;
+
+        if (!string.IsNullOrWhiteSpace(loraName)) {
+            root["2"] = new JsonObject {
+                ["class_type"] = "LoraLoader",
+                ["inputs"] = new JsonObject {
+                    ["lora_name"] = loraName,
+                    ["strength_model"] = loraWeight,
+                    ["strength_clip"] = loraWeight,
+                    ["model"] = new JsonArray { lastModelNode, lastModelSlot },
+                    ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
+                }
+            };
+            lastModelNode = "2";
+            lastClipNode = "2";
+            lastModelSlot = 0;
+            lastClipSlot = 1;
+        }
+
+        if (additionalLoras != null) {
+            int auxIndex = 1;
+            foreach (var aux in additionalLoras) {
+                if (string.IsNullOrWhiteSpace(aux?.Name)) {
+                    continue;
+                }
+                string auxId = $"2_{auxIndex++}";
+                root[auxId] = new JsonObject {
+                    ["class_type"] = "LoraLoader",
+                    ["inputs"] = new JsonObject {
+                        ["lora_name"] = aux.Name,
+                        ["strength_model"] = aux.Weight,
+                        ["strength_clip"] = aux.Weight,
+                        ["model"] = new JsonArray { lastModelNode, lastModelSlot },
+                        ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
+                    }
+                };
+                lastModelNode = auxId;
+                lastClipNode = auxId;
+                lastModelSlot = 0;
+                lastClipSlot = 1;
             }
-        };
+        }
 
         root["3"] = new JsonObject {
             ["class_type"] = "CLIPTextEncode",
             ["inputs"] = new JsonObject {
                 ["text"] = prompt,
-                ["clip"] = new JsonArray { "2", 1 }
+                ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
             }
         };
 
@@ -307,7 +385,7 @@ public sealed class ComfyUiService : IDisposable {
             ["class_type"] = "CLIPTextEncode",
             ["inputs"] = new JsonObject {
                 ["text"] = negativePrompt,
-                ["clip"] = new JsonArray { "2", 1 }
+                ["clip"] = new JsonArray { lastClipNode, lastClipSlot }
             }
         };
 
@@ -329,7 +407,7 @@ public sealed class ComfyUiService : IDisposable {
                 ["sampler_name"] = "euler_ancestral",
                 ["scheduler"] = "karras",
                 ["denoise"] = 1.0,
-                ["model"] = new JsonArray { "2", 0 },
+                ["model"] = new JsonArray { lastModelNode, lastModelSlot },
                 ["positive"] = new JsonArray { "3", 0 },
                 ["negative"] = new JsonArray { "4", 0 },
                 ["latent_image"] = new JsonArray { "5", 0 }

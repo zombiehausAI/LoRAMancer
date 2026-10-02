@@ -1,0 +1,189 @@
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@inject PluginManagerService PluginManager
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Primary" />
+            <div>
+                <MudText Typo="Typo.h6" Style="font-weight: 700;">Configure @(Plugin?.Name ?? "Plugin")</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Configuration settings and API credentials saved to user profile
+                </MudText>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3 pt-2">
+            <MudAlert Severity="Severity.Normal" Variant="Variant.Outlined" Dense="true" Style="border-color: #313244; background-color: #181825;">
+                <div class="d-flex flex-column gap-1">
+                    <div style="font-size: 0.75rem; color: #a6adc8;">Saved Configuration Location:</div>
+                    <code style="font-size: 0.75rem; color: #cba6f7; word-break: break-all;">@_configFilePath</code>
+                </div>
+            </MudAlert>
+
+            @if (Plugin?.ConfigSchema != null && Plugin.ConfigSchema.Count > 0) {
+                <!-- Render structured schema fields -->
+                @foreach (var field in Plugin.ConfigSchema) {
+                    <div class="d-flex flex-column gap-1">
+                        @if (string.Equals(field.Type, "password", StringComparison.OrdinalIgnoreCase)) {
+                            <MudTextField T="string"
+                                          Value="@GetFieldValue(field.Key)"
+                                          ValueChanged="@(val => SetFieldValue(field.Key, val))"
+                                          Label="@field.Label"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          InputType="InputType.Password"
+                                          HelperText="@field.Description"
+                                          Placeholder="@(string.IsNullOrEmpty(field.DefaultValue) ? "Enter API key / secret..." : field.DefaultValue)" />
+                        } else if (string.Equals(field.Type, "number", StringComparison.OrdinalIgnoreCase)) {
+                            <MudTextField T="string"
+                                          Value="@GetFieldValue(field.Key)"
+                                          ValueChanged="@(val => SetFieldValue(field.Key, val))"
+                                          Label="@field.Label"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          InputType="InputType.Number"
+                                          HelperText="@field.Description"
+                                          Placeholder="@field.DefaultValue" />
+                        } else {
+                            <MudTextField T="string"
+                                          Value="@GetFieldValue(field.Key)"
+                                          ValueChanged="@(val => SetFieldValue(field.Key, val))"
+                                          Label="@field.Label"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          HelperText="@field.Description"
+                                          Placeholder="@field.DefaultValue" />
+                        }
+                    </div>
+                }
+            } else {
+                <!-- Generic Key-Value Editor when no specific schema is declared -->
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 600; color: #cdd6f4;">Parameters & API Keys</MudText>
+                @if (_configValues.Count == 0) {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">No custom configuration set. Add settings or API keys below.</MudText>
+                } else {
+                    @foreach (var key in _configValues.Keys.ToList()) {
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField T="string"
+                                          Value="@key"
+                                          Label="Setting Key"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          ReadOnly="true"
+                                          Style="flex: 1;" />
+                            <MudTextField T="string"
+                                          Value="@_configValues[key]"
+                                          ValueChanged="@(val => _configValues[key] = val)"
+                                          Label="Value"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          InputType="@(key.Contains("key", StringComparison.OrdinalIgnoreCase) || key.Contains("token", StringComparison.OrdinalIgnoreCase) || key.Contains("secret", StringComparison.OrdinalIgnoreCase) ? InputType.Password : InputType.Text)"
+                                          Style="flex: 2;" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           OnClick="@(() => RemoveConfigKey(key))" />
+                        </div>
+                    }
+                }
+
+                <div class="d-flex align-center gap-2 mt-2">
+                    <MudTextField @bind-Value="_newKey"
+                                  Label="New Key (e.g. apiKey, baseUrl)"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Placeholder="apiKey"
+                                  Style="flex: 1;" />
+                    <MudTextField @bind-Value="_newValue"
+                                  Label="Value"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Placeholder="Value..."
+                                  Style="flex: 2;" />
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddNewKey"
+                               Disabled="@string.IsNullOrWhiteSpace(_newKey)">
+                        Add
+                    </MudButton>
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" OnClick="Save">
+            Save Configuration
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter]
+    public PluginManifest? Plugin { get; set; }
+
+    private readonly Dictionary<string, string> _configValues = new(StringComparer.OrdinalIgnoreCase);
+    private string _configFilePath = string.Empty;
+    private string _newKey = string.Empty;
+    private string _newValue = string.Empty;
+
+    protected override void OnInitialized() {
+        if (Plugin != null) {
+            _configFilePath = PluginManagerService.GetPluginConfigPath(Plugin.Id);
+            var loaded = PluginManager.GetPluginConfig(Plugin.Id);
+            foreach (var kvp in loaded) {
+                _configValues[kvp.Key] = kvp.Value;
+            }
+
+            // Ensure schema default values are populated if missing
+            if (Plugin.ConfigSchema != null) {
+                foreach (var field in Plugin.ConfigSchema) {
+                    if (!_configValues.ContainsKey(field.Key) && !string.IsNullOrEmpty(field.DefaultValue)) {
+                        _configValues[field.Key] = field.DefaultValue;
+                    }
+                }
+            }
+        }
+    }
+
+    private string GetFieldValue(string key) {
+        return _configValues.TryGetValue(key, out var val) ? val : string.Empty;
+    }
+
+    private void SetFieldValue(string key, string value) {
+        _configValues[key] = value ?? string.Empty;
+    }
+
+    private void AddNewKey() {
+        if (!string.IsNullOrWhiteSpace(_newKey)) {
+            _configValues[_newKey.Trim()] = _newValue ?? string.Empty;
+            _newKey = string.Empty;
+            _newValue = string.Empty;
+        }
+    }
+
+    private void RemoveConfigKey(string key) {
+        _configValues.Remove(key);
+    }
+
+    private void Save() {
+        if (Plugin != null) {
+            PluginManager.SavePluginConfig(Plugin.Id, _configValues);
+            Snackbar.Add($"Saved configuration for {Plugin.Name}", Severity.Success);
+            MudDialog?.Close(DialogResult.Ok(true));
+        }
+    }
+
+    private void Cancel() {
+        MudDialog?.Cancel();
+    }
+}

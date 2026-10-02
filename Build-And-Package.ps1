@@ -153,6 +153,11 @@ if (-not $SkipTests) {
 # -------------------------------------------------------------
 Write-Host "`n[3/4] Publishing LoRAMancer application ($Configuration)..." -ForegroundColor Cyan
 
+$cleanNumericVersion = "1.0.0"
+if ($appVersion -match '^(\d+\.\d+(\.\d+)?)') {
+    $cleanNumericVersion = $Matches[1]
+}
+
 $publishArgs = @(
     "publish",
     $appCsproj,
@@ -160,8 +165,8 @@ $publishArgs = @(
     "-f", "net10.0-windows10.0.19041.0",
     "-r", "win-x64",
     "--no-self-contained",
-    "-p:Version=$appVersion",
-    "-p:ApplicationDisplayVersion=$appVersion",
+    "-p:ApplicationDisplayVersion=$cleanNumericVersion",
+    "-p:InformationalVersion=$appVersion",
     "-o", $packageAppDir
 )
 

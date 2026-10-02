@@ -1,6 +1,8 @@
 @page "/plugins"
+@using LoRAMancer.App.Components.Dialogs
 @inject PluginManagerService PluginManager
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <div class="d-flex align-center justify-space-between mb-4">
     <div>
@@ -85,102 +87,178 @@
     Plugins live in <code>@PluginManager.PluginsDirectory</code>. Python plugins use isolated <code>.venv</code> virtual environments with hardware-specific PyTorch wheels.
 </MudAlert>
 
-<MudGrid>
-    @if (PluginManager.Plugins.Count == 0) {
-        <MudItem xs="12">
-            <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
-                <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-                <MudText Typo="Typo.h6">No Plugins Discovered</MudText>
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Add C# DLLs or install a Git repository above to extend LoRAMancer.</MudText>
-            </MudCard>
-        </MudItem>
-    } else {
-        @foreach (var plugin in PluginManager.Plugins) {
-            <MudItem xs="12" md="6">
-                <MudCard Elevation="1" Style="@($"background-color: #181825; border: 1px solid {(plugin.IsEnabled ? "#313244" : "#45475a")}; opacity: {(plugin.IsEnabled ? "1.0" : "0.65")}; height: 100%;")">
-                    <MudCardHeader>
-                        <CardHeaderAvatar>
-                            @if (plugin.PluginType == "CSharp") {
-                                <MudAvatar Color="Color.Primary" Variant="Variant.Filled">C#</MudAvatar>
-                            } else {
-                                <MudAvatar Color="Color.Secondary" Variant="Variant.Filled">Py</MudAvatar>
-                            }
-                        </CardHeaderAvatar>
-                        <CardHeaderContent>
-                            <div class="d-flex align-center gap-2">
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@plugin.Name</MudText>
-                                @if (plugin.IsGitRepo) {
-                                    <MudChip T="string" Color="Color.Dark" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Custom.Brands.GitHub" Style="font-size: 0.7rem; height: 22px;">Git</MudChip>
-                                }
-                                @if (plugin.RequiresPyTorch) {
-                                    <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">PyTorch</MudChip>
-                                }
-                                @if (plugin.PluginType == "Python") {
-                                    @if (plugin.HasDedicatedVenv) {
-                                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 22px;">.venv Ready</MudChip>
-                                    } else {
-                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">No .venv</MudChip>
-                                    }
-                                }
-                            </div>
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                v@plugin.Version • @plugin.PluginType Plugin
-                                @if (plugin.LastUpdated.HasValue) {
-                                    <span> • Updated @plugin.LastUpdated.Value.ToLocalTime().ToString("g")</span>
-                                }
-                            </MudText>
-                        </CardHeaderContent>
-                        <CardHeaderActions>
-                            <MudTooltip Text="@(plugin.IsEnabled ? "Plugin Enabled" : "Plugin Disabled")">
-                                <MudSwitch T="bool" Value="@plugin.IsEnabled" ValueChanged="@(val => OnTogglePlugin(plugin, val))" Color="Color.Success" Disabled="_isBusy" />
-                            </MudTooltip>
-                        </CardHeaderActions>
-                    </MudCardHeader>
-                    <MudCardContent>
-                        <MudText Typo="Typo.body2" Class="mb-2">@plugin.Description</MudText>
-                        <div style="font-size: 0.75rem; color: #6c7086; word-break: break-all;">
-                            Directory: @plugin.DirectoryPath
-                        </div>
-                        @if (!string.IsNullOrEmpty(plugin.GitRemoteUrl)) {
-                            <div style="font-size: 0.75rem; color: #89b4fa; word-break: break-all;" class="mt-1">
-                                Repo: @plugin.GitRemoteUrl
-                            </div>
+<MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" Color="Color.Dark" Class="mb-4">
+    <MudTabPanel Text="Image Scrapers" Icon="@Icons.Material.Filled.TravelExplore" BadgeData="@GetScraperPlugins().Count">
+        <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-4" Style="background-color: rgba(166, 227, 161, 0.12); color: #a6e3a1; border: 1px solid rgba(166, 227, 161, 0.3);">
+            Image Scraper plugins harvest training candidate images for Stage 1 Curate. All Python scrapers share a high-performance virtual environment at <code>@PluginManagerService.GetSharedScraperVenvPath()</code> to eliminate redundant disk space. Scraper settings and API keys are saved in <code>@PluginManagerService.GetScraperConfigDirectory()</code>.
+        </MudAlert>
+
+        <MudGrid>
+            @if (GetScraperPlugins().Count == 0) {
+                <MudItem xs="12">
+                    <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
+                        <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                        <MudText Typo="Typo.h6">No Scraper Plugins Discovered</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Add Python scrapers to plugins/ folder to extend Image Harvester.</MudText>
+                    </MudCard>
+                </MudItem>
+            } else {
+                @foreach (var plugin in GetScraperPlugins()) {
+                    @RenderPluginItem(plugin)
+                }
+            }
+        </MudGrid>
+    </MudTabPanel>
+
+    <MudTabPanel Text="General Extensions" Icon="@Icons.Material.Filled.Widgets" BadgeData="@GetGeneralPlugins().Count">
+        <MudGrid>
+            @if (GetGeneralPlugins().Count == 0) {
+                <MudItem xs="12">
+                    <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
+                        <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                        <MudText Typo="Typo.h6">No General Plugins Discovered</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Add C# DLLs or install a Git repository above to extend LoRAMancer.</MudText>
+                    </MudCard>
+                </MudItem>
+            } else {
+                @foreach (var plugin in GetGeneralPlugins()) {
+                    @RenderPluginItem(plugin)
+                }
+            }
+        </MudGrid>
+    </MudTabPanel>
+
+    <MudTabPanel Text="All Installed" Icon="@Icons.Material.Filled.Extension" BadgeData="@PluginManager.Plugins.Count">
+        <MudGrid>
+            @if (PluginManager.Plugins.Count == 0) {
+                <MudItem xs="12">
+                    <MudCard Elevation="1" Style="background-color: #181825; border: 1px solid #313244; text-align: center; padding: 48px;">
+                        <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                        <MudText Typo="Typo.h6">No Plugins Discovered</MudText>
+                    </MudCard>
+                </MudItem>
+            } else {
+                @foreach (var plugin in PluginManager.Plugins) {
+                    @RenderPluginItem(plugin)
+                }
+            }
+        </MudGrid>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private RenderFragment RenderPluginItem(PluginManifest plugin) => __builder => {
+        <MudItem xs="12" md="6">
+            <MudCard Elevation="1" Style="@($"background-color: #181825; border: 1px solid {(plugin.IsEnabled ? "#313244" : "#45475a")}; opacity: {(plugin.IsEnabled ? "1.0" : "0.65")}; height: 100%;")">
+                <MudCardHeader>
+                    <CardHeaderAvatar>
+                        @if (plugin.PluginType == "CSharp") {
+                            <MudAvatar Color="Color.Primary" Variant="Variant.Filled">C#</MudAvatar>
+                        } else if (PluginManagerService.IsScraperPlugin(plugin)) {
+                            <MudAvatar Color="Color.Tertiary" Variant="Variant.Filled">🌾</MudAvatar>
+                        } else {
+                            <MudAvatar Color="Color.Secondary" Variant="Variant.Filled">Py</MudAvatar>
                         }
-                    </MudCardContent>
-                    <MudCardActions Class="d-flex justify-space-between align-center flex-wrap gap-2">
-                        <div class="d-flex gap-1 align-center flex-wrap">
+                    </CardHeaderAvatar>
+                    <CardHeaderContent>
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">@plugin.Name</MudText>
+                            @if (plugin.IsGitRepo) {
+                                <MudChip T="string" Color="Color.Dark" Size="Size.Small" Variant="Variant.Filled" Icon="@Icons.Custom.Brands.GitHub" Style="font-size: 0.7rem; height: 22px;">Git</MudChip>
+                            }
+                            @if (plugin.RequiresPyTorch) {
+                                <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">PyTorch</MudChip>
+                            }
                             @if (plugin.PluginType == "Python") {
-                                @if (!plugin.HasDedicatedVenv) {
-                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))" Disabled="_isBusy">
-                                        Setup .venv
-                                    </MudButton>
+                                @if (PluginManagerService.IsScraperPlugin(plugin)) {
+                                    <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 22px;">Shared Scraper .venv</MudChip>
+                                } else if (plugin.HasDedicatedVenv) {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 22px;">.venv Ready</MudChip>
                                 } else {
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => RebuildPluginVenvAsync(plugin))" Disabled="_isBusy">
-                                        Rebuild .venv
-                                    </MudButton>
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="@(() => RemovePluginVenvAsync(plugin))" Disabled="_isBusy">
-                                        Remove .venv
-                                    </MudButton>
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">No .venv</MudChip>
                                 }
                             }
-                            @if (plugin.IsGitRepo) {
-                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="@(() => UpdateGitPluginAsync(plugin))" Disabled="_isBusy">
-                                    Git Pull
+                            @if (plugin.UiSlot != "None" && !string.IsNullOrWhiteSpace(plugin.UiSlot)) {
+                                <MudChip T="string" Color="Color.Tertiary" Size="Size.Small" Variant="Variant.Outlined" Style="font-size: 0.7rem; height: 22px;">
+                                    @(plugin.UiSlot switch {
+                                        "HarvesterScraper" => "Scraper",
+                                        "StudioWorkshop" => "Workshop Tool",
+                                        "StudioModalTools" => "Modal Tool",
+                                        "PostForge" => "Post-Forge",
+                                        _ => plugin.UiSlot
+                                    })
+                                </MudChip>
+                            }
+                        </div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            v@plugin.Version • @plugin.PluginType Plugin
+                            @if (plugin.LastUpdated.HasValue) {
+                                <span> • Updated @plugin.LastUpdated.Value.ToLocalTime().ToString("g")</span>
+                            }
+                        </MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudTooltip Text="@(plugin.IsEnabled ? "Plugin Enabled" : "Plugin Disabled")">
+                            <MudSwitch T="bool" Value="@plugin.IsEnabled" ValueChanged="@(val => OnTogglePlugin(plugin, val))" Color="Color.Success" Disabled="_isBusy" />
+                        </MudTooltip>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2" Class="mb-2">@plugin.Description</MudText>
+                    <div style="font-size: 0.75rem; color: #6c7086; word-break: break-all;">
+                        Directory: @plugin.DirectoryPath
+                    </div>
+                    @if (!string.IsNullOrEmpty(plugin.GitRemoteUrl)) {
+                        <div style="font-size: 0.75rem; color: #89b4fa; word-break: break-all;" class="mt-1">
+                            Repo: @plugin.GitRemoteUrl
+                        </div>
+                    }
+                </MudCardContent>
+                <MudCardActions Class="d-flex justify-space-between align-center flex-wrap gap-2">
+                    <div class="d-flex gap-1 align-center flex-wrap">
+                        @if (plugin.PluginType == "Python") {
+                            @if (!plugin.HasDedicatedVenv) {
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Build" OnClick="@(() => ProvisionPluginVenvAsync(plugin))" Disabled="_isBusy">
+                                    @(PluginManagerService.IsScraperPlugin(plugin) ? "Setup Shared .venv" : "Setup .venv")
+                                </MudButton>
+                            } else {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => RebuildPluginVenvAsync(plugin))" Disabled="_isBusy">
+                                    Rebuild .venv
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="@(() => RemovePluginVenvAsync(plugin))" Disabled="_isBusy">
+                                    Remove .venv
                                 </MudButton>
                             }
-                            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => TestPluginAsync(plugin))" Disabled="@(!plugin.IsEnabled || _isBusy)">
-                                Test
+                        }
+                        @if (plugin.IsGitRepo) {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudDownload" OnClick="@(() => UpdateGitPluginAsync(plugin))" Disabled="_isBusy">
+                                Git Pull
                             </MudButton>
-                        </div>
+                        }
+                        @if (plugin.UiType == "EmbeddedWeb" || plugin.UiSlot == "StudioWorkshop" || plugin.UiSlot == "PostForge") {
+                            <MudButton Variant="Variant.Filled" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Launch" Href="@($"plugins/host/{plugin.Id}")" Disabled="@(!plugin.IsEnabled)">
+                                Open UI
+                            </MudButton>
+                        }
+                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="@(() => TestPluginAsync(plugin))" Disabled="@(!plugin.IsEnabled || _isBusy)">
+                            Test
+                        </MudButton>
+                    </div>
+                    <div class="d-flex align-center gap-1">
+                        @if (HasConfigOptions(plugin)) {
+                            <MudTooltip Text="Configure Options &amp; API Keys">
+                                <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Primary" Size="Size.Small" OnClick="@(() => OpenPluginConfigDialogAsync(plugin))" Disabled="_isBusy" />
+                            </MudTooltip>
+                        }
                         <MudTooltip Text="Delete Plugin">
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeletePluginAsync(plugin))" Disabled="_isBusy" />
                         </MudTooltip>
-                    </MudCardActions>
-                </MudCard>
-            </MudItem>
-        }
-    }
-</MudGrid>
+                    </div>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    };
+}
 
 @code {
     private bool _showInstallCard = false;
@@ -335,6 +413,13 @@
         }
     }
 
+    private async Task OpenPluginConfigDialogAsync(PluginManifest plugin) {
+        var parameters = new DialogParameters { ["Plugin"] = plugin };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<PluginConfigDialog>($"Configure {plugin.Name}", parameters, options);
+        await dialog.Result;
+    }
+
     private async Task TestPluginAsync(PluginManifest plugin) {
         try {
             var result = await PluginManager.ExecutePluginAsync(plugin.Id, "ping", new Dictionary<string, object?> { ["test"] = true });
@@ -359,4 +444,16 @@
             StateHasChanged();
         });
     }
+
+    private bool HasConfigOptions(PluginManifest plugin) {
+        if (plugin.ConfigSchema != null && plugin.ConfigSchema.Count > 0) return true;
+        if (PluginManagerService.IsScraperPlugin(plugin)) return true;
+        return false;
+    }
+
+    private List<PluginManifest> GetScraperPlugins() =>
+        PluginManager.Plugins.Where(PluginManagerService.IsScraperPlugin).OrderBy(p => p.Name).ToList();
+
+    private List<PluginManifest> GetGeneralPlugins() =>
+        PluginManager.Plugins.Where(p => !PluginManagerService.IsScraperPlugin(p)).OrderBy(p => p.Name).ToList();
 }

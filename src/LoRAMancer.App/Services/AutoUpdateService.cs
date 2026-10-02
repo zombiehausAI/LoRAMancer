@@ -9,8 +9,8 @@ namespace LoRAMancer.App.Services;
 
 public sealed partial class AutoUpdateService {
     private readonly HttpClient _httpClient;
-    private const string GitHubApiBase = "https://api.github.com/repos/loramancer/loramancer/releases";
-    private const string FallbackStaticUrl = "https://raw.githubusercontent.com/loramancer/loramancer/main/installer/version.json";
+    private const string GitHubApiBase = "https://api.github.com/repos/zombiehausAI/LoRAMancer/releases";
+    private const string FallbackStaticUrl = "https://raw.githubusercontent.com/zombiehausAI/LoRAMancer/main/version.json";
 
     public event Action<int>? OnDownloadProgress;
 
@@ -26,6 +26,22 @@ public sealed partial class AutoUpdateService {
 
     public string CurrentVersion {
         get {
+            try {
+                string[] searchPaths = [
+                    Path.Combine(AppContext.BaseDirectory, "version.json"),
+                    Path.Combine(Directory.GetCurrentDirectory(), "version.json")
+                ];
+                foreach (string path in searchPaths) {
+                    if (File.Exists(path)) {
+                        string json = File.ReadAllText(path);
+                        using JsonDocument doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("version", out JsonElement vElem) && !string.IsNullOrWhiteSpace(vElem.GetString())) {
+                            return vElem.GetString()!.Trim();
+                        }
+                    }
+                }
+            } catch { }
+
             Assembly assembly = Assembly.GetExecutingAssembly();
             string? infoVer = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             if (!string.IsNullOrWhiteSpace(infoVer)) {
@@ -71,7 +87,9 @@ public sealed partial class AutoUpdateService {
                         string assetDownload = asset.TryGetProperty("browser_download_url", out JsonElement aUrl) ? (aUrl.GetString() ?? string.Empty) : string.Empty;
 
                         if (assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
-                            downloadUrl = assetDownload;
+                            if (string.IsNullOrEmpty(downloadUrl) || assetName.Contains(latestVersionStr, StringComparison.OrdinalIgnoreCase)) {
+                                downloadUrl = assetDownload;
+                            }
                         } else if (assetName.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)) {
                             checksumUrl = assetDownload;
                         }

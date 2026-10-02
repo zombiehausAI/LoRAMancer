@@ -8,15 +8,53 @@ using LoRAMancer.PluginSdk;
 
 namespace LoRAMancer.App.Services;
 
-public sealed class PluginManagerService {
+public sealed class PluginManagerService : IDisposable {
     private readonly ProcessRunner _processRunner;
     private readonly AmdVenvProvisioner? _provisioner;
     private readonly Dictionary<string, ILoRAMancerPlugin> _loadedCSharpPlugins = new();
     private readonly Dictionary<string, PluginManifest> _registeredPlugins = new();
+    private readonly Dictionary<string, System.Diagnostics.Process> _runningWebServers = new();
+    private readonly Dictionary<string, string> _runningWebServerUrls = new();
+    private readonly object _processLock = new();
+    private readonly object _pluginLock = new();
 
     public string PluginsDirectory { get; }
 
-    public IReadOnlyCollection<PluginManifest> Plugins => _registeredPlugins.Values;
+    public IReadOnlyCollection<PluginManifest> Plugins {
+        get {
+            lock (_pluginLock) {
+                return _registeredPlugins.Values.ToList();
+            }
+        }
+    }
+
+    public IReadOnlyList<PluginManifest> GetPluginsForSection(string sectionName) {
+        return Plugins
+            .Where(p => p.IsEnabled && !IsScraperPlugin(p) && string.Equals(p.GetEffectiveSection(), sectionName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.MenuOrder)
+            .ThenBy(p => p.NavLabel)
+            .ToList();
+    }
+
+    public IReadOnlyList<string> GetCustomPluginSections() {
+        HashSet<string> standardSections = new(StringComparer.OrdinalIgnoreCase) {
+            "Studio Pipeline",
+            "Studio Workshop",
+            "Post-Forge Showcase",
+            "Studio Modal Tools",
+            "Subsystems"
+        };
+
+        return Plugins
+            .Where(p => p.IsEnabled && !IsScraperPlugin(p))
+            .Select(p => p.GetEffectiveSection())
+            .Where(s => !string.IsNullOrWhiteSpace(s) && !standardSections.Contains(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s)
+            .ToList();
+    }
+
+    public event Action? OnPluginsUpdated;
 
     public PluginManagerService(ProcessRunner processRunner, AmdVenvProvisioner? provisioner = null, string? pluginsDirectory = null) {
         _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
@@ -24,6 +62,14 @@ public sealed class PluginManagerService {
         PluginsDirectory = !string.IsNullOrWhiteSpace(pluginsDirectory) && Directory.Exists(pluginsDirectory)
             ? pluginsDirectory
             : ResolvePluginsDirectory();
+
+        _ = Task.Run(async () => {
+            try {
+                await DiscoverAndInitializePluginsAsync();
+            } catch {
+                // Background scan fallback
+            }
+        });
     }
 
     public static string ResolvePluginsDirectory() {
@@ -98,6 +144,8 @@ public sealed class PluginManagerService {
                 }
             }
         }
+
+        OnPluginsUpdated?.Invoke();
     }
 
     private async Task LoadCSharpPluginFromDirectoryAsync(string dir, string[] dllFiles, bool isGit, bool isDisabled, CancellationToken cancellationToken) {
@@ -122,9 +170,20 @@ public sealed class PluginManagerService {
                             EntryPoint = Path.GetFileName(dllPath),
                             IsEnabled = !isDisabled,
                             HasDedicatedVenv = false,
-                            IsGitRepo = isGit
+                            IsGitRepo = isGit,
+                            UiSlot = string.IsNullOrWhiteSpace(plugin.Metadata.UiSlot) ? "None" : plugin.Metadata.UiSlot,
+                            NavLabel = string.IsNullOrWhiteSpace(plugin.Metadata.NavLabel) ? plugin.Metadata.Name : plugin.Metadata.NavLabel,
+                            Icon = plugin.Metadata.Icon,
+                            UiType = string.IsNullOrWhiteSpace(plugin.Metadata.UiType) ? "Command" : plugin.Metadata.UiType,
+                            WebPort = plugin.Metadata.WebPort,
+                            WebUrl = plugin.Metadata.WebUrl,
+                            MenuSection = plugin.Metadata.MenuSection,
+                            MenuOrder = plugin.Metadata.MenuOrder,
+                            IsModal = plugin.Metadata.IsModal
                         };
-                        _registeredPlugins[manifest.Id] = manifest;
+                        lock (_pluginLock) {
+                            _registeredPlugins[manifest.Id] = manifest;
+                        }
 
                         if (manifest.IsEnabled) {
                             PluginContext context = new(AppContext.BaseDirectory, dir, string.Empty);
@@ -167,10 +226,21 @@ public sealed class PluginManagerService {
         if (string.IsNullOrWhiteSpace(manifest.Name)) {
             manifest.Name = folderName;
         }
+        if (string.IsNullOrWhiteSpace(manifest.NavLabel)) {
+            manifest.NavLabel = manifest.Name;
+        }
+        if (string.IsNullOrWhiteSpace(manifest.UiSlot)) {
+            manifest.UiSlot = "None";
+        }
+        if (string.IsNullOrWhiteSpace(manifest.UiType)) {
+            manifest.UiType = "Command";
+        }
         manifest.DirectoryPath = dir;
         manifest.PluginType = "Python";
-        manifest.EntryPoint = File.Exists(pythonScript) ? Path.GetFileName(pythonScript) : "plugin.py";
-        manifest.IsEnabled = !isDisabled;
+        if (string.IsNullOrWhiteSpace(manifest.EntryPoint)) {
+            manifest.EntryPoint = File.Exists(pythonScript) ? Path.GetFileName(pythonScript) : (File.Exists(Path.Combine(dir, "app.py")) ? "app.py" : "plugin.py");
+        }
+        manifest.IsEnabled = !isDisabled && manifest.IsEnabled;
         manifest.IsGitRepo = isGit;
 
         if (File.Exists(reqFile)) {
@@ -183,9 +253,15 @@ public sealed class PluginManagerService {
         }
 
         string venvPath = Path.Combine(dir, ".venv");
-        manifest.HasDedicatedVenv = Directory.Exists(venvPath);
+        bool hasDedicated = Directory.Exists(venvPath);
+        bool isScraper = IsScraperPlugin(manifest);
+        string sharedScraperVenv = GetSharedScraperVenvPath();
+        bool hasSharedScraper = isScraper && Directory.Exists(sharedScraperVenv);
+        manifest.HasDedicatedVenv = hasDedicated || hasSharedScraper;
 
-        _registeredPlugins[manifest.Id] = manifest;
+        lock (_pluginLock) {
+            _registeredPlugins[manifest.Id] = manifest;
+        }
     }
 
     public async Task InstallPluginFromGitAsync(
@@ -297,6 +373,14 @@ public sealed class PluginManagerService {
     ) {
         ArgumentNullException.ThrowIfNull(plugin);
         if (plugin.PluginType != "Python") {
+            return;
+        }
+
+        if (IsScraperPlugin(plugin)) {
+            onProgress?.Invoke($"[Scraper: {plugin.Name}] Setting up shared scraper virtual environment (~/.loramancer/scraper_venv)...");
+            await EnsureSharedScraperVenvAsync(onProgress, cancellationToken);
+            plugin.HasDedicatedVenv = true;
+            OnPluginsUpdated?.Invoke();
             return;
         }
 
@@ -412,6 +496,23 @@ public sealed class PluginManagerService {
 
     public void RemovePythonPluginVenv(PluginManifest plugin) {
         ArgumentNullException.ThrowIfNull(plugin);
+        if (IsScraperPlugin(plugin)) {
+            string sharedVenv = GetSharedScraperVenvPath();
+            if (Directory.Exists(sharedVenv)) {
+                try {
+                    foreach (string file in Directory.GetFiles(sharedVenv, "*", SearchOption.AllDirectories)) {
+                        File.SetAttributes(file, FileAttributes.Normal);
+                    }
+                    Directory.Delete(sharedVenv, true);
+                } catch (Exception ex) {
+                    throw new InvalidOperationException($"Failed to remove shared scraper virtual environment: {ex.Message}", ex);
+                }
+            }
+            plugin.HasDedicatedVenv = false;
+            OnPluginsUpdated?.Invoke();
+            return;
+        }
+
         string venvPath = Path.Combine(plugin.DirectoryPath, ".venv");
         if (Directory.Exists(venvPath)) {
             try {
@@ -439,7 +540,11 @@ public sealed class PluginManagerService {
     }
 
     public void TogglePluginState(string pluginId, bool isEnabled) {
-        if (!_registeredPlugins.TryGetValue(pluginId, out PluginManifest? manifest)) {
+        PluginManifest? manifest;
+        lock (_pluginLock) {
+            _registeredPlugins.TryGetValue(pluginId, out manifest);
+        }
+        if (manifest == null) {
             return;
         }
 
@@ -451,10 +556,14 @@ public sealed class PluginManagerService {
         } else if (File.Exists(disabledFlag)) {
             File.Delete(disabledFlag);
         }
+
+        OnPluginsUpdated?.Invoke();
     }
 
     public void DeletePlugin(PluginManifest plugin) {
         ArgumentNullException.ThrowIfNull(plugin);
+
+        StopPluginServer(plugin.Id);
 
         if (Directory.Exists(plugin.DirectoryPath)) {
             try {
@@ -468,8 +577,11 @@ public sealed class PluginManagerService {
             }
         }
 
-        _registeredPlugins.Remove(plugin.Id);
+        lock (_pluginLock) {
+            _registeredPlugins.Remove(plugin.Id);
+        }
         _loadedCSharpPlugins.Remove(plugin.Id);
+        OnPluginsUpdated?.Invoke();
     }
 
     public async Task<PluginResult> ExecutePluginAsync(
@@ -480,9 +592,16 @@ public sealed class PluginManagerService {
         Action<string>? onErrorLine = null,
         CancellationToken cancellationToken = default
     ) {
-        if (!_registeredPlugins.TryGetValue(pluginId, out PluginManifest? manifest)) {
-            await DiscoverAndInitializePluginsAsync(cancellationToken);
+        PluginManifest? manifest;
+        lock (_pluginLock) {
             _registeredPlugins.TryGetValue(pluginId, out manifest);
+        }
+
+        if (manifest == null) {
+            await DiscoverAndInitializePluginsAsync(cancellationToken);
+            lock (_pluginLock) {
+                _registeredPlugins.TryGetValue(pluginId, out manifest);
+            }
         }
 
         if (manifest == null) {
@@ -528,12 +647,22 @@ public sealed class PluginManagerService {
 
         string outputData = string.Empty;
 
+        string configPath = GetPluginConfigPath(manifest.Id);
+        var envVars = new Dictionary<string, string> {
+            ["LORAMANCER_PLUGIN_CONFIG_FILE"] = configPath
+        };
+        var userConfig = GetPluginConfig(manifest.Id);
+        foreach (var kvp in userConfig) {
+            envVars[$"LORAMANCER_CONFIG_{kvp.Key.ToUpperInvariant()}"] = kvp.Value;
+            envVars[$"PLUGIN_{kvp.Key.ToUpperInvariant()}"] = kvp.Value;
+        }
+
         try {
             int exitCode = await _processRunner.RunAsync(
                 pythonExe,
                 $"\"{scriptPath}\" --cmd \"{command}\" --data-file \"{tempParamFile}\"",
                 manifest.DirectoryPath,
-                null,
+                envVars,
                 line => {
                     outputData += line + "\n";
                     onOutputLine?.Invoke(line);
@@ -599,5 +728,335 @@ public sealed class PluginManagerService {
         }
 
         return "powershell.exe";
+    }
+
+    public bool IsWebServerRunning(string pluginId) {
+        lock (_processLock) {
+            if (_runningWebServers.TryGetValue(pluginId, out var proc)) {
+                if (!proc.HasExited) {
+                    return true;
+                }
+                _runningWebServers.Remove(pluginId);
+                _runningWebServerUrls.Remove(pluginId);
+            }
+            return false;
+        }
+    }
+
+    public string? GetWebServerUrl(string pluginId) {
+        lock (_processLock) {
+            return _runningWebServerUrls.TryGetValue(pluginId, out string? url) ? url : null;
+        }
+    }
+
+    public async Task<string> StartPluginServerAsync(string pluginId, int? port = null, CancellationToken cancellationToken = default) {
+        PluginManifest? manifest;
+        lock (_pluginLock) {
+            _registeredPlugins.TryGetValue(pluginId, out manifest);
+        }
+        if (manifest == null) {
+            throw new InvalidOperationException($"Plugin '{pluginId}' is not registered.");
+        }
+
+        lock (_processLock) {
+            if (_runningWebServers.TryGetValue(pluginId, out var existingProc) && !existingProc.HasExited) {
+                return _runningWebServerUrls[pluginId];
+            }
+        }
+
+        int targetPort = port ?? manifest.WebPort ?? 8501;
+
+        // Resolve python executable
+        string venvPath = Path.Combine(manifest.DirectoryPath, ".venv");
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        if (!File.Exists(pythonExe)) {
+            string appVenv = Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe");
+            if (File.Exists(appVenv)) {
+                pythonExe = appVenv;
+            } else {
+                string currentVenv = Path.Combine(Directory.GetCurrentDirectory(), ".venv", "Scripts", "python.exe");
+                pythonExe = File.Exists(currentVenv) ? currentVenv : "python.exe";
+            }
+        }
+
+        string entryPoint = Path.Combine(manifest.DirectoryPath, manifest.EntryPoint);
+        string arguments;
+        if (File.Exists(Path.Combine(manifest.DirectoryPath, "app.py")) || manifest.EntryPoint.EndsWith("app.py", StringComparison.OrdinalIgnoreCase)) {
+            // Streamlit application
+            arguments = $"-m streamlit run \"{entryPoint}\" --server.port {targetPort} --server.headless true --browser.serverAddress 127.0.0.1";
+        } else {
+            arguments = $"\"{entryPoint}\" --port {targetPort}";
+        }
+
+        System.Diagnostics.ProcessStartInfo psi = new() {
+            FileName = pythonExe,
+            Arguments = arguments,
+            WorkingDirectory = manifest.DirectoryPath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        System.Diagnostics.Process process = new() { StartInfo = psi };
+        process.Start();
+
+        string serverUrl = $"http://127.0.0.1:{targetPort}";
+        lock (_processLock) {
+            _runningWebServers[pluginId] = process;
+            _runningWebServerUrls[pluginId] = serverUrl;
+        }
+
+        // Give server a moment to bind and launch
+        await Task.Delay(1200, cancellationToken);
+        return serverUrl;
+    }
+
+    public void StopPluginServer(string pluginId) {
+        lock (_processLock) {
+            if (_runningWebServers.TryGetValue(pluginId, out var proc)) {
+                try {
+                    if (!proc.HasExited) {
+                        proc.Kill(entireProcessTree: true);
+                    }
+                } catch {
+                    // Ignore errors during termination
+                }
+                _runningWebServers.Remove(pluginId);
+                _runningWebServerUrls.Remove(pluginId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks whether a plugin or plugin ID represents an image harvester scraper.
+    /// </summary>
+    public static bool IsScraperPluginId(string pluginId) {
+        if (string.IsNullOrWhiteSpace(pluginId)) return false;
+        return pluginId.EndsWith("-scraper", StringComparison.OrdinalIgnoreCase) ||
+               pluginId.EndsWith("_scraper", StringComparison.OrdinalIgnoreCase) ||
+               pluginId.StartsWith("scraper_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Checks whether a plugin is an image harvester scraper.
+    /// </summary>
+    public static bool IsScraperPlugin(PluginManifest plugin) {
+        if (plugin == null) return false;
+        return string.Equals(plugin.UiSlot, "HarvesterScraper", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(plugin.MenuSection, "Harvester Scraper", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(plugin.PluginType, "HarvesterScraper", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(plugin.PluginType, "scraper", StringComparison.OrdinalIgnoreCase) ||
+               IsScraperPluginId(plugin.Id);
+    }
+
+    /// <summary>
+    /// Gets the shared virtual environment directory for scraper plugins (~/.loramancer/scraper_venv).
+    /// </summary>
+    public static string GetSharedScraperVenvPath() {
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userHome, ".loramancer", "scraper_venv");
+    }
+
+    /// <summary>
+    /// Ensures that the shared scraper virtual environment (~/.loramancer/scraper_venv) is created and has common dependencies installed.
+    /// </summary>
+    public async Task<string> EnsureSharedScraperVenvAsync(Action<string>? onProgress = null, CancellationToken cancellationToken = default) {
+        string venvPath = GetSharedScraperVenvPath();
+        string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+        if (!File.Exists(pythonExe)) {
+            pythonExe = Path.Combine(venvPath, "bin", "python");
+        }
+
+        if (!File.Exists(pythonExe)) {
+            Directory.CreateDirectory(Path.GetDirectoryName(venvPath)!);
+            onProgress?.Invoke($"Creating shared scraper virtual environment in {venvPath}...");
+            string shellExe = Environment.OSVersion.Platform == PlatformID.Win32NT ? "powershell.exe" : "bash";
+            string cmd = Environment.OSVersion.Platform == PlatformID.Win32NT
+                ? $"-NoProfile -Command \"python -m venv '{venvPath}'\""
+                : $"-c \"python3 -m venv '{venvPath}'\"";
+
+            int exitCode = await _processRunner.RunAsync(shellExe, cmd, Environment.CurrentDirectory, null, msg => onProgress?.Invoke(msg), msg => onProgress?.Invoke(msg), cancellationToken);
+            if (exitCode != 0) {
+                throw new InvalidOperationException($"Failed to create shared scraper venv in {venvPath}.");
+            }
+
+            pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
+            if (!File.Exists(pythonExe)) pythonExe = Path.Combine(venvPath, "bin", "python");
+
+            onProgress?.Invoke("Installing shared scraper dependencies (requests, beautifulsoup4, cloudscraper, urllib3)...");
+            string pipArgs = "-m pip install --upgrade requests beautifulsoup4 cloudscraper urllib3";
+            await _processRunner.RunAsync(pythonExe, pipArgs, venvPath, null, msg => onProgress?.Invoke(msg), msg => onProgress?.Invoke(msg), cancellationToken);
+        }
+
+        return pythonExe;
+    }
+
+    /// <summary>
+    /// Resolves the python executable path for a given plugin, preferring dedicated or shared scraper .venv if available.
+    /// </summary>
+    public string ResolvePythonExecutable(PluginManifest plugin) {
+        // Scraper plugins check for shared scraper .venv first
+        if (IsScraperPlugin(plugin)) {
+            string sharedVenv = GetSharedScraperVenvPath();
+            string sharedWin = Path.Combine(sharedVenv, "Scripts", "python.exe");
+            if (File.Exists(sharedWin)) return sharedWin;
+            string sharedUnix = Path.Combine(sharedVenv, "bin", "python");
+            if (File.Exists(sharedUnix)) return sharedUnix;
+        }
+
+        if (!string.IsNullOrWhiteSpace(plugin.DirectoryPath)) {
+            string winVenv = Path.Combine(plugin.DirectoryPath, ".venv", "Scripts", "python.exe");
+            if (File.Exists(winVenv)) return winVenv;
+
+            string unixVenv = Path.Combine(plugin.DirectoryPath, ".venv", "bin", "python");
+            if (File.Exists(unixVenv)) return unixVenv;
+        }
+
+        string appVenv = Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe");
+        if (File.Exists(appVenv)) return appVenv;
+
+        string currentVenv = Path.Combine(Directory.GetCurrentDirectory(), ".venv", "Scripts", "python.exe");
+        if (File.Exists(currentVenv)) return currentVenv;
+
+        return "python.exe";
+    }
+
+    /// <summary>
+    /// Gets the base directory where scraper configuration files are stored (~/.loramancer/scrapers).
+    /// </summary>
+    public static string GetScraperConfigDirectory() {
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string scraperDir = Path.Combine(userHome, ".loramancer", "scrapers");
+        if (!Directory.Exists(scraperDir)) {
+            Directory.CreateDirectory(scraperDir);
+        }
+        return scraperDir;
+    }
+
+    /// <summary>
+    /// Gets the base directory where general user plugin configuration files are stored (~/.loramancer/plugin_configs).
+    /// </summary>
+    public static string GetPluginConfigDirectory() {
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string configDir = Path.Combine(userHome, ".loramancer", "plugin_configs");
+        if (!Directory.Exists(configDir)) {
+            Directory.CreateDirectory(configDir);
+        }
+        return configDir;
+    }
+
+    /// <summary>
+    /// Gets the path to the configuration JSON file for a specific plugin.
+    /// Scrapers are saved under ~/.loramancer/scrapers/<id>.json, other plugins under ~/.loramancer/plugin_configs/<id>.json.
+    /// </summary>
+    public static string GetPluginConfigPath(string pluginId) {
+        string safeId = string.Join("_", pluginId.Split(Path.GetInvalidFileNameChars()));
+        if (IsScraperPluginId(pluginId)) {
+            return Path.Combine(GetScraperConfigDirectory(), $"{safeId}.json");
+        }
+        return Path.Combine(GetPluginConfigDirectory(), $"{safeId}.json");
+    }
+
+    /// <summary>
+    /// Loads user configuration key-value pairs for a plugin.
+    /// </summary>
+    public Dictionary<string, string> GetPluginConfig(string pluginId) {
+        string configPath = GetPluginConfigPath(pluginId);
+        
+        // Migrate / fallback from legacy plugin_configs if scraper
+        if (!File.Exists(configPath) && IsScraperPluginId(pluginId)) {
+            string safeId = string.Join("_", pluginId.Split(Path.GetInvalidFileNameChars()));
+            string legacyPath = Path.Combine(GetPluginConfigDirectory(), $"{safeId}.json");
+            if (File.Exists(legacyPath)) {
+                try {
+                    File.Copy(legacyPath, configPath, overwrite: true);
+                } catch {
+                    configPath = legacyPath;
+                }
+            }
+        }
+
+        if (!File.Exists(configPath)) {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try {
+            string json = File.ReadAllText(configPath);
+            var loaded = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return loaded != null 
+                ? new Dictionary<string, string>(loaded, StringComparer.OrdinalIgnoreCase) 
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        } catch {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Saves user configuration key-value pairs for a plugin.
+    /// </summary>
+    public void SavePluginConfig(string pluginId, Dictionary<string, string> config) {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        ArgumentNullException.ThrowIfNull(config);
+
+        string configPath = GetPluginConfigPath(pluginId);
+        string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(configPath, json);
+    }
+
+    /// <summary>
+    /// Executes a Python plugin script and captures stdout/stderr with user configuration injected as environment variables.
+    /// </summary>
+    public async Task<(int ExitCode, string Stdout, string Stderr)> RunPythonPluginScriptAsync(
+        PluginManifest plugin,
+        string scriptArgs,
+        CancellationToken cancellationToken = default
+    ) {
+        ArgumentNullException.ThrowIfNull(plugin);
+
+        string pythonExe = ResolvePythonExecutable(plugin);
+        string scriptPath = Path.Combine(plugin.DirectoryPath, plugin.EntryPoint);
+        var stdout = new System.Text.StringBuilder();
+        var stderr = new System.Text.StringBuilder();
+
+        string configPath = GetPluginConfigPath(plugin.Id);
+        var envVars = new Dictionary<string, string> {
+            ["LORAMANCER_PLUGIN_CONFIG_FILE"] = configPath,
+            ["LORAMANCER_SCRAPER_CONFIG_FILE"] = configPath
+        };
+
+        var userConfig = GetPluginConfig(plugin.Id);
+        foreach (var kvp in userConfig) {
+            envVars[$"LORAMANCER_CONFIG_{kvp.Key.ToUpperInvariant()}"] = kvp.Value;
+            envVars[$"PLUGIN_{kvp.Key.ToUpperInvariant()}"] = kvp.Value;
+        }
+
+        int exitCode = await _processRunner.RunAsync(
+            pythonExe,
+            $"\"{scriptPath}\" {scriptArgs}",
+            plugin.DirectoryPath,
+            envVars,
+            line => stdout.AppendLine(line),
+            line => stderr.AppendLine(line),
+            cancellationToken
+        );
+
+        return (exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    public void Dispose() {
+        lock (_processLock) {
+            foreach (var kvp in _runningWebServers) {
+                try {
+                    if (!kvp.Value.HasExited) {
+                        kvp.Value.Kill(entireProcessTree: true);
+                    }
+                } catch {
+                    // Ignore
+                }
+            }
+            _runningWebServers.Clear();
+            _runningWebServerUrls.Clear();
+        }
     }
 }
