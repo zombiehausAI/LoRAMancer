@@ -35,15 +35,21 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
             Ollama Vision Tagger
         </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isLoading || _isSavingZip">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isSavingZip">
             Select Dataset
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync" Disabled="_isLoading || _isSavingZip">
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync" Disabled="_isSavingZip">
             Import ZIP
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isLoading || _isSavingZip || string.IsNullOrWhiteSpace(_datasetFolder)">
-            @(_isLoading ? "Scanning..." : "Rescan")
-        </MudButton>
+        @if (_isLoading) {
+            <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Cancel" OnClick="CancelScan">
+                Stop Loading
+            </MudButton>
+        } else {
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isSavingZip || string.IsNullOrWhiteSpace(_datasetFolder)">
+                Rescan
+            </MudButton>
+        }
         @if (!string.IsNullOrWhiteSpace(_datasetFolder)) {
             @if (_isZipWorkingCopy) {
                 <MudTooltip Text="@($"Save all changes and update original {Path.GetFileName(_zipSourcePath)}")">
@@ -98,7 +104,12 @@
 </MudCard>
 
 @if (_isLoading) {
-    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-3" Rounded="true" />
+    <div class="d-flex align-center gap-3 mb-3">
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Rounded="true" Style="flex-grow: 1;" />
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Cancel" OnClick="CancelScan">
+            Stop Loading
+        </MudButton>
+    </div>
 }
 
 @if (_report != null && _report.TotalImages > 0) {
@@ -1057,7 +1068,14 @@
     private readonly ConcurrentDictionary<string, byte> _loadingThumbnails = new();
     private readonly SemaphoreSlim _thumbSemaphore = new(4, 4);
     private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _scanCts;
     private bool _disposed;
+
+    private void CancelScan() {
+        if (_isLoading) {
+            _scanCts?.Cancel();
+        }
+    }
 
     private string _radarTestToken = "";
     private string _radarFilter = "";
@@ -1082,6 +1100,7 @@
     }
 
     private async Task BrowseFolderAsync() {
+        CancelScan();
         string? folder = await FileDialogService.PickFolderAsync("Select Dataset Folder to Curate");
         if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder)) {
             if (_isZipWorkingCopy && !string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
@@ -1098,6 +1117,7 @@
     }
 
     private async Task BrowseZipAsync() {
+        CancelScan();
         string? zipFile = await FileDialogService.PickZipFileAsync("Select Dataset ZIP Archive to Import");
         if (string.IsNullOrWhiteSpace(zipFile) || !File.Exists(zipFile)) {
             return;
@@ -1184,18 +1204,22 @@
             return;
         }
 
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        var token = _scanCts.Token;
+
         _isLoading = true;
         _currentPage = 1;
         _thumbnailCache.Clear();
         StateHasChanged();
 
         try {
-            var token = _cts.Token;
             _report = await Task.Run(async () => await CuratorService.ScanDatasetAsync(_datasetFolder, token), token);
             StudioSession.SetDatasetFolder(_datasetFolder);
             Snackbar.Add($"Scanned {_report.TotalImages} images and {_report.TotalCaptions} captions.", Severity.Success);
         } catch (OperationCanceledException) {
-            // Task canceled
+            Snackbar.Add("Folder scanning was stopped.", Severity.Info);
         } catch (Exception ex) {
             Snackbar.Add($"Scan failed: {ex.Message}", Severity.Error);
         } finally {
@@ -1685,6 +1709,8 @@
 
     public void Dispose() {
         _disposed = true;
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
         _cts?.Cancel();
         _cts?.Dispose();
         _thumbSemaphore?.Dispose();
