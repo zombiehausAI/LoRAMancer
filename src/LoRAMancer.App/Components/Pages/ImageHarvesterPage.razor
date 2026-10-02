@@ -1008,4 +1008,47 @@
         _destinationFolder = cat.DestinationFolder;
         Navigation.NavigateTo("curate");
     }
+
+    private async Task AuditCatalogWithOllamaAsync(HarvestCatalog cat) {
+        _showCatalogManager = false;
+
+        string prompt = _selectedOllamaPreset switch {
+            "watermarks" => "Analyze this image. Does it contain text, watermarks, subtitles, logos, or artificial UI overlays?",
+            "blurry" => "Analyze this image. Is it blurry, out-of-focus, highly pixelated, or severe low quality?",
+            "nonphoto" => "Analyze this image. Is it a cartoon, 2D anime, sketch, drawing, or 3D CGI rendering rather than a real photograph?",
+            "memes" => "Analyze this image. Does it contain meme captions, top/bottom text, or thick black letterbox borders?",
+            _ => "Does this image have severe visual artifacts, watermarks, or quality flaws?"
+        };
+
+        string ollamaUrl = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaEndpointUrl)
+            ? SettingsService.Current.OllamaEndpointUrl.Trim().TrimEnd('/')
+            : (Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434");
+
+        string modelName = !string.IsNullOrWhiteSpace(_selectedOllamaModel)
+            ? _selectedOllamaModel.Trim()
+            : (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+                ? SettingsService.Current.OllamaDefaultModel.Trim()
+                : (Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision"));
+
+        _progressStatusText = $"Ollama Cleanse ({modelName}) on catalog '{cat.Name}'...";
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _progress = p;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try {
+            int flaggedCount = await HarvesterService.AuditCatalogWithOllamaAsync(cat, ollamaUrl, modelName, prompt, progressHandler);
+            await LoadCatalogsAsync();
+            if (flaggedCount > 0) {
+                Snackbar.Add($"Ollama cleanse complete: Quarantined {flaggedCount} flagged images to '{cat.Name}/_flagged/'!", Severity.Warning);
+            } else {
+                Snackbar.Add($"Ollama cleanse complete: All images in '{cat.Name}' are clean!", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Ollama cleanse failed: {ex.Message}", Severity.Error);
+        } finally {
+            _progress = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 }

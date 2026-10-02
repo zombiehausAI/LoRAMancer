@@ -1703,4 +1703,105 @@ public sealed class ImageHarvesterService {
         } catch { }
         return set;
     }
+
+    public async Task<int> AuditCatalogWithOllamaAsync(
+        HarvestCatalog catalog,
+        string ollamaUrl,
+        string modelName,
+        string auditPrompt,
+        IProgress<HarvestDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default) {
+
+        if (string.IsNullOrWhiteSpace(catalog.DestinationFolder) || !Directory.Exists(catalog.DestinationFolder)) return 0;
+
+        IsAuditing = true;
+        OnStateChanged?.Invoke();
+
+        int flaggedCount = 0;
+        var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif" };
+        var files = Directory.EnumerateFiles(catalog.DestinationFolder)
+            .Where(f => exts.Contains(Path.GetExtension(f)))
+            .ToList();
+
+        int total = files.Count;
+        int current = 0;
+        string quarantineDir = Path.Combine(catalog.DestinationFolder, "_flagged");
+
+        try {
+            foreach (var filePath in files) {
+                cancellationToken.ThrowIfCancellationRequested();
+                current++;
+                string fileName = Path.GetFileName(filePath);
+
+                try {
+                    byte[] imageBytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
+                    if (imageBytes.Length > 0) {
+                        string base64 = Convert.ToBase64String(imageBytes);
+
+                        var payload = new {
+                            model = modelName,
+                            prompt = $"{auditPrompt}\nRespond ONLY in JSON format: {{\"flagged\": true/false, \"reason\": \"brief explanation\"}}",
+                            images = new[] { base64 },
+                            stream = false,
+                            format = "json"
+                        };
+
+                        string jsonPayload = JsonSerializer.Serialize(payload);
+                        using var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+                        string endpoint = $"{ollamaUrl.TrimEnd('/')}/api/generate";
+                        using var ollamaResp = await _httpClient.PostAsync(endpoint, content, cancellationToken);
+
+                        if (ollamaResp.IsSuccessStatusCode) {
+                            string resultJson = await ollamaResp.Content.ReadAsStringAsync(cancellationToken);
+                            using var doc = JsonDocument.Parse(resultJson);
+                            if (doc.RootElement.TryGetProperty("response", out var respText)) {
+                                string raw = respText.GetString() ?? "";
+                                using var parsedDoc = JsonDocument.Parse(raw);
+                                bool flagged = parsedDoc.RootElement.TryGetProperty("flagged", out var flg) && flg.GetBoolean();
+                                string reason = parsedDoc.RootElement.TryGetProperty("reason", out var rsn) ? rsn.GetString() ?? "" : "";
+
+                                if (flagged) {
+                                    flaggedCount++;
+                                    Directory.CreateDirectory(quarantineDir);
+                                    string destPath = Path.Combine(quarantineDir, fileName);
+                                    int counter = 1;
+                                    while (File.Exists(destPath)) {
+                                        string withoutExt = Path.GetFileNameWithoutExtension(fileName);
+                                        string ext = Path.GetExtension(fileName);
+                                        destPath = Path.Combine(quarantineDir, $"{withoutExt}_{counter}{ext}");
+                                        counter++;
+                                    }
+                                    File.Move(filePath, destPath);
+
+                                    try {
+                                        string notePath = Path.ChangeExtension(destPath, ".flagged.txt");
+                                        await File.WriteAllTextAsync(notePath, $"Flagged by {modelName}: {reason}", cancellationToken);
+                                    } catch {
+                                        // Ignore note write failure
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    // Suppress individual file audit error
+                }
+
+                progress?.Report(new HarvestDownloadProgress {
+                    CurrentIndex = current,
+                    TotalCount = total,
+                    CurrentFile = fileName,
+                    IsComplete = current >= total
+                });
+            }
+
+            catalog.TotalDownloadedCount = Math.Max(0, total - flaggedCount);
+            await SaveCatalogAsync(catalog);
+        } finally {
+            IsAuditing = false;
+            OnStateChanged?.Invoke();
+        }
+
+        return flaggedCount;
+    }
 }

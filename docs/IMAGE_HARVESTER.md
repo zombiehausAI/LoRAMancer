@@ -74,6 +74,7 @@ Inspired by the `imagetaker` workflow, the Image Harvester allows creators to sa
 - **Automatic History Tracking & Deduplication**: Each catalog folder maintains a `download_history.json` tracking all previously downloaded image URLs and scanned local filenames.
 - **Omit Existing Images**: When searching or syncing against a catalog (or any chosen destination folder), the harvester automatically checks history and local files on disk. Previously downloaded images are automatically omitted so you only see newly discovered candidates.
 - **Continuous 1-Click Sync**: Click **"Sync New"** on any catalog in the Catalogs Manager to immediately scrape fresh images across your saved providers, omit duplicates, download the new additions directly into the catalog folder, and update the catalog count.
+- **Direct Catalog Ollama Cleanse**: Click **"Ollama Cleanse"** on any catalog to run local vision models (`llama3.2-vision`) over all saved images in that catalog. Any images flagged for watermarks, blur, non-photographic artifacts, or memes are automatically quarantined into a `_flagged/` subfolder along with a `.flagged.txt` explanation note, leaving the active catalog pristine without data loss.
 - **100% ImageTaker Compatibility**: Uses standard `download_history.json` array format compatible with existing `imagetaker` project folders.
 
 ### 7. Seamless Stage 1 (Curate & Caption) Integration
