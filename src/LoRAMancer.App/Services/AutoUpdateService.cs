@@ -10,7 +10,7 @@ namespace LoRAMancer.App.Services;
 public sealed partial class AutoUpdateService {
     private readonly HttpClient _httpClient;
     private const string GitHubApiBase = "https://api.github.com/repos/zombiehausAI/LoRAMancer/releases";
-    private const string FallbackStaticUrl = "https://raw.githubusercontent.com/zombiehausAI/LoRAMancer/main/version.json";
+    private const string FallbackStaticUrl = "https://raw.githubusercontent.com/zombiehausAI/LoRAMancer/main/installer/version.json";
 
     public event Action<int>? OnDownloadProgress;
 
@@ -100,7 +100,8 @@ public sealed partial class AutoUpdateService {
                 if (!string.IsNullOrWhiteSpace(checksumUrl)) {
                     try {
                         string checksumContent = await _httpClient.GetStringAsync(checksumUrl, cancellationToken);
-                        sha256 = ParseSha256Checksum(checksumContent);
+                        string assetName = !string.IsNullOrWhiteSpace(downloadUrl) ? Path.GetFileName(new Uri(downloadUrl).AbsolutePath) : string.Empty;
+                        sha256 = ParseSha256Checksum(checksumContent, assetName);
                     } catch { }
                 }
 
@@ -173,32 +174,38 @@ public sealed partial class AutoUpdateService {
 
         long? totalBytes = response.Content.Headers.ContentLength;
         await using Stream contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using FileStream fileStream = new(tempFile, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true);
 
-        byte[] buffer = new byte[8192];
-        long totalRead = 0;
-        int bytesRead;
+        using IncrementalHash? incrementalSha = !string.IsNullOrWhiteSpace(expectedSha256)
+            ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+            : null;
 
-        while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) != 0) {
-            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-            totalRead += bytesRead;
+        await using (FileStream fileStream = new(tempFile, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true)) {
+            byte[] buffer = new byte[65536];
+            long totalRead = 0;
+            int bytesRead;
 
-            if (totalBytes.HasValue && totalBytes.Value > 0) {
-                int progress = (int)((double)totalRead / totalBytes.Value * 100);
-                OnDownloadProgress?.Invoke(progress);
+            while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) != 0) {
+                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                incrementalSha?.AppendData(buffer.AsSpan(0, bytesRead));
+                totalRead += bytesRead;
+
+                if (totalBytes.HasValue && totalBytes.Value > 0) {
+                    int progress = (int)((double)totalRead / totalBytes.Value * 100);
+                    OnDownloadProgress?.Invoke(progress);
+                }
             }
+
+            await fileStream.FlushAsync(cancellationToken);
         }
 
-        await fileStream.FlushAsync(cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(expectedSha256)) {
-            fileStream.Position = 0;
-            using SHA256 sha = SHA256.Create();
-            byte[] hash = await sha.ComputeHashAsync(fileStream, cancellationToken);
+        if (incrementalSha != null && !string.IsNullOrWhiteSpace(expectedSha256)) {
+            byte[] hash = incrementalSha.GetHashAndReset();
             string calculatedHash = Convert.ToHexString(hash);
             if (!string.Equals(calculatedHash, expectedSha256, StringComparison.OrdinalIgnoreCase)) {
-                File.Delete(tempFile);
-                throw new InvalidOperationException("Downloaded update failed SHA256 checksum verification.");
+                try {
+                    File.Delete(tempFile);
+                } catch { }
+                throw new InvalidOperationException($"Downloaded update failed SHA256 checksum verification. (Expected: {expectedSha256}, Got: {calculatedHash})");
             }
         }
 
@@ -234,13 +241,43 @@ public sealed partial class AutoUpdateService {
         return tag.TrimStart('v', 'V');
     }
 
-    private static string ParseSha256Checksum(string content) {
+    private static string ParseSha256Checksum(string content, string targetAssetName = "") {
         if (string.IsNullOrWhiteSpace(content)) {
             return string.Empty;
         }
-        string firstLine = content.Split('\n', StringSplitOptions.TrimEntries)[0];
-        string[] parts = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length > 0 ? parts[0] : string.Empty;
+
+        string[] lines = content.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (!string.IsNullOrWhiteSpace(targetAssetName)) {
+            foreach (string line in lines) {
+                if (line.Contains(targetAssetName, StringComparison.OrdinalIgnoreCase)) {
+                    string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length > 0 && parts[0].Length == 64) {
+                        return parts[0];
+                    }
+                }
+            }
+        }
+
+        foreach (string line in lines) {
+            if (line.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
+                string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length > 0 && parts[0].Length == 64) {
+                    return parts[0];
+                }
+            }
+        }
+
+        if (lines.Length > 0) {
+            string[] parts = lines[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 1 && parts[0].Length == 64) {
+                return parts[0];
+            }
+            if (parts.Length > 1 && parts[0].Length == 64 && (string.IsNullOrWhiteSpace(targetAssetName) || parts[1].Equals(targetAssetName, StringComparison.OrdinalIgnoreCase))) {
+                return parts[0];
+            }
+        }
+
+        return string.Empty;
     }
 
     public static int CompareVersions(string v1, string v2) {

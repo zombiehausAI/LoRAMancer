@@ -77,15 +77,18 @@ To deliver fast, responsive loading without freezing the UI or tripping WebView2
 - **In-Memory & Background Concurrency**: Non-blocking asynchronous loading with `ConcurrentDictionary` deduplication ensures instant UI rendering and smooth scrolling.
 - **WebView2 Safe Delivery**: Delivered as base64 data URIs (`data:image/jpeg;base64,...`), bypassing Chromium/WebView2 cross-origin local file restrictions.
 
-### 7. Root Library Management (Add, Remove & Browse)
+### 7. Root Library Management (Add, Remove & Settings Configuration)
 Users have full control over the root output directories scanned by LoRAMancer:
 - **Add Root Folder**: Click **"Add Folder"** to open a native Windows folder picker and add any local or network drive directory.
-- **Manage Folders Dialog**: Dedicated management panel displaying all registered libraries with indexed item counts, quick 1-click **Open in Windows File Explorer**, and **Remove Library** buttons.
+- **Settings Page Management**: Manage configured directories directly in **Settings > General & Paths > Post-Forge Showcase & Media Gallery Directories**, where users can review all registered folders, detect missing paths with warning badges, add new directories, and remove troublesome or high-latency paths.
+- **Manage Folders Dialog**: Dedicated in-gallery panel displaying all registered libraries with indexed item counts, quick 1-click **Open in Windows File Explorer**, and **Remove Library** buttons.
 - **1-Click Card Removal**: In folder hierarchy view at the root level, each library card features a direct **Remove (🗑️)** button to detach the library immediately from the Showcase.
 - **Persistence**: Configured libraries are stored in `ShowcaseDirectories` inside `~/.loramancer/settings.json`.
 
-### 8. Non-Blocking Background Scanning & Zero-Lag UI Architecture
-Scanning massive generation folders or thousands of models runs entirely decoupled from the UI thread without micro-stutter, lag, or thread contention:
+### 8. Non-Blocking Background Scanning & High-Throughput Parallel Pipeline
+Scanning massive generation folders runs entirely decoupled from the UI thread with optimized parallel I/O and zero UI lag:
+- **Directory Tree Pruning**: Safe filesystem traversal automatically prunes build artifacts and dependency trees (`.git`, `.venv`, `node_modules`, `obj`, `bin`, `.cache`), avoiding wasted disk operations and long traversal stalls.
+- **Parallel Metadata Extraction**: Newly discovered media files have their binary headers and generation recipes extracted concurrently using a throttled thread-pool worker semaphore (`SemaphoreSlim`), accelerating scan speeds on multi-core systems.
 - **True Background Thread Offloading**: Scans execute via `Task.Run` on thread-pool workers managed by `PostForgeShowcaseService` and `LoraLibraryService`.
 - **Cooperative Async Yielding**: Every 30–40 items scanned, background tasks yield cooperatively (`await Task.Delay(1, cancellationToken)`), guaranteeing CPU time slices for UI rendering and system I/O.
 - **Throttled Progress Dispatching**: Progress notifications are throttled to at most once per 250ms with batch milestones, preventing Blazor render queue flooding.

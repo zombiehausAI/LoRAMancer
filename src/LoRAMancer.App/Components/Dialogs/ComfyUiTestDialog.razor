@@ -178,7 +178,7 @@
                     </div>
                     <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
                                Label="Load ModusFlow Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
-                               Disabled="_isRendering">
+                               ShrinkLabel="true" Disabled="_isRendering">
                         <MudSelectItem Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
                         @foreach (var p in _savedPrompts) {
                             <MudSelectItem Value="@p.Name">
