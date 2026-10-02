@@ -71,8 +71,14 @@ public class ModusFlowPromptTests : IDisposable {
         Assert.True(root.TryGetProperty("positive", out var posProp));
         Assert.Equal("masterpiece, 1boy, cybernetic katana, neon rainy street", posProp.GetString());
 
+        Assert.True(root.TryGetProperty("type", out var typeProp));
+        Assert.Equal("prompt", typeProp.GetString());
+
         Assert.True(root.TryGetProperty("negative", out var negProp));
         Assert.Equal("blurry, low quality, deformed, extra arms", negProp.GetString());
+
+        // Verify file is placed in the dedicated prompts/ subdirectory
+        Assert.Contains(Path.DirectorySeparatorChar + "prompts" + Path.DirectorySeparatorChar, saved.FilePath);
     }
 
     [Fact]
@@ -85,6 +91,54 @@ public class ModusFlowPromptTests : IDisposable {
         bool deleted = await service.DeletePromptAsync("To Be Deleted");
         Assert.True(deleted);
         Assert.False(File.Exists(saved.FilePath));
+    }
+
+    [Fact]
+    public async Task GetAllPromptsAsync_AutoMigratesLooseFilesAndScansSubdirectories() {
+        var service = new ModusFlowPromptService(_settingsService);
+
+        // Create loose files in root directory
+        string loosePromptPath = Path.Combine(_testTempDir, "Legacy Loose Prompt.json");
+        string looseSongPath = Path.Combine(_testTempDir, "Legacy Song.json");
+
+        await File.WriteAllTextAsync(loosePromptPath, JsonSerializer.Serialize(new {
+            category = "Legacy",
+            positive = "vintage loose prompt",
+            negative = "bad"
+        }));
+
+        await File.WriteAllTextAsync(looseSongPath, JsonSerializer.Serialize(new {
+            type = "song",
+            category = "Rock",
+            title = "Neon Nights",
+            tags = "80s Rock, Guitar Solo",
+            lyrics = "[Verse 1]\nDriving through the night",
+            negative_style = "acoustic, slow"
+        }));
+
+        // Trigger GetAllPromptsAsync which executes auto-migration and subdirectory scan
+        var prompts = await service.GetAllPromptsAsync();
+
+        // 1. Verify auto-migration moved loose files into their subdirectories
+        Assert.False(File.Exists(loosePromptPath));
+        Assert.False(File.Exists(looseSongPath));
+
+        string migratedPromptPath = Path.Combine(_testTempDir, "prompts", "Legacy Loose Prompt.json");
+        string migratedSongPath = Path.Combine(_testTempDir, "songs", "Legacy Song.json");
+        Assert.True(File.Exists(migratedPromptPath));
+        Assert.True(File.Exists(migratedSongPath));
+
+        // 2. Verify all prompts were loaded with proper fallback handling
+        var promptItem = prompts.FirstOrDefault(p => p.Name == "Legacy Loose Prompt");
+        Assert.NotNull(promptItem);
+        Assert.Equal("vintage loose prompt", promptItem.Positive);
+
+        var songItem = prompts.FirstOrDefault(p => p.Name == "Legacy Song");
+        Assert.NotNull(songItem);
+        Assert.Equal("Rock", songItem.Category);
+        Assert.Contains("80s Rock", songItem.Positive);
+        Assert.Contains("[Verse 1]", songItem.Positive);
+        Assert.Equal("acoustic, slow", songItem.Negative);
     }
 
     [Fact]

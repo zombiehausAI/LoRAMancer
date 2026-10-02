@@ -22,7 +22,7 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Resolves the active directory containing saved prompts.
+    /// Resolves the root directory containing saved prompts.
     /// Checks AppSettings first, defaulting to the user's home settings directory (~/.loramancer/saved_prompts/).
     /// </summary>
     public string ResolvePromptsDirectory() {
@@ -49,32 +49,127 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Loads all ModusFlow-compatible prompt JSON files from the prompt directory.
-    /// If the directory is empty, seeds default high-quality starter prompts.
+    /// Resolves the dedicated prompts subdirectory under saved_prompts (e.g. saved_prompts/prompts/).
+    /// Matches ComfyUI-ModusFlow's organized directory placement.
+    /// </summary>
+    public string ResolvePromptsSubdirectory() {
+        string baseDir = ResolvePromptsDirectory();
+        string subDir = Path.Combine(baseDir, "prompts");
+        Directory.CreateDirectory(subDir);
+        return subDir;
+    }
+
+    /// <summary>
+    /// Ensures ModusFlow subdirectory structure exists and auto-migrates any loose .json files
+    /// from the root saved_prompts directory into prompts/ or songs/ subdirectories.
+    /// </summary>
+    public void EnsureDirectoryStructure() {
+        try {
+            string baseDir = ResolvePromptsDirectory();
+            string promptsDir = Path.Combine(baseDir, "prompts");
+            string songsDir = Path.Combine(baseDir, "songs");
+
+            Directory.CreateDirectory(promptsDir);
+            Directory.CreateDirectory(songsDir);
+
+            // Auto-migrate loose .json files in root saved_prompts/
+            string[] looseFiles = Directory.GetFiles(baseDir, "*.json", SearchOption.TopDirectoryOnly);
+            foreach (string file in looseFiles) {
+                string filename = Path.GetFileName(file);
+                bool isSong = false;
+                try {
+                    string text = File.ReadAllText(file);
+                    using var doc = JsonDocument.Parse(text);
+                    var root = doc.RootElement;
+                    if ((root.TryGetProperty("type", out var typeElem) && (typeElem.ValueEquals("song") || typeElem.ValueEquals("ace_song"))) ||
+                        root.TryGetProperty("lyrics", out _)) {
+                        isSong = true;
+                    }
+                } catch {
+                    // Fall back to treating as regular prompt
+                }
+
+                string destDir = isSong ? songsDir : promptsDir;
+                string destFile = Path.Combine(destDir, filename);
+                if (!File.Exists(destFile)) {
+                    File.Move(file, destFile);
+                }
+            }
+        } catch {
+            // Best-effort auto-migration, never crash caller
+        }
+    }
+
+    /// <summary>
+    /// Loads all ModusFlow-compatible prompt JSON files across prompts/, root saved_prompts/, and songs/.
+    /// If completely empty, seeds default high-quality starter prompts.
     /// </summary>
     public async Task<IReadOnlyList<ModusFlowPrompt>> GetAllPromptsAsync(CancellationToken cancellationToken = default) {
-        string dir = ResolvePromptsDirectory();
-        Directory.CreateDirectory(dir);
+        string baseDir = ResolvePromptsDirectory();
+        EnsureDirectoryStructure();
 
-        string[] jsonFiles = Directory.GetFiles(dir, "*.json", SearchOption.TopDirectoryOnly);
-        if (jsonFiles.Length == 0) {
-            await SeedDefaultPromptsAsync(dir, cancellationToken);
-            jsonFiles = Directory.GetFiles(dir, "*.json", SearchOption.TopDirectoryOnly);
+        string promptsDir = Path.Combine(baseDir, "prompts");
+        string songsDir = Path.Combine(baseDir, "songs");
+
+        string[] scanDirs = [promptsDir, baseDir, songsDir];
+
+        bool anyFilesFound = scanDirs.Any(d => Directory.Exists(d) && Directory.GetFiles(d, "*.json", SearchOption.TopDirectoryOnly).Length > 0);
+        if (!anyFilesFound) {
+            await SeedDefaultPromptsAsync(promptsDir, cancellationToken);
         }
 
+        HashSet<string> seenFilenames = new(StringComparer.OrdinalIgnoreCase);
         List<ModusFlowPrompt> list = new();
-        foreach (string file in jsonFiles) {
-            try {
-                string json = await File.ReadAllTextAsync(file, cancellationToken);
-                var prompt = JsonSerializer.Deserialize<ModusFlowPrompt>(json, JsonOptions);
-                if (prompt != null) {
-                    prompt.Name = Path.GetFileNameWithoutExtension(file);
-                    prompt.FilePath = file;
-                    prompt.LastModified = File.GetLastWriteTimeUtc(file);
-                    list.Add(prompt);
+
+        foreach (string dir in scanDirs) {
+            if (!Directory.Exists(dir)) {
+                continue;
+            }
+
+            string[] jsonFiles = Directory.GetFiles(dir, "*.json", SearchOption.TopDirectoryOnly);
+            foreach (string file in jsonFiles) {
+                string filename = Path.GetFileName(file);
+                if (!seenFilenames.Add(filename)) {
+                    continue; // Skip files already loaded from a higher-priority directory
                 }
-            } catch {
-                // Ignore corrupt or unreadable files
+
+                try {
+                    string json = await File.ReadAllTextAsync(file, cancellationToken);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    string category = root.TryGetProperty("category", out var catProp) ? catProp.GetString() ?? "" : "";
+
+                    // Support standard positive prompt with ModusFlow fallback for lyrics/tags/text
+                    string positive = root.TryGetProperty("positive", out var posProp) ? posProp.GetString() ?? "" : "";
+                    if (string.IsNullOrWhiteSpace(positive)) {
+                        if (root.TryGetProperty("lyrics", out var lyrProp) && root.TryGetProperty("tags", out var tagProp)) {
+                            positive = $"{tagProp.GetString()}\n\n{lyrProp.GetString()}".Trim();
+                        } else if (root.TryGetProperty("lyrics", out lyrProp)) {
+                            positive = lyrProp.GetString() ?? "";
+                        } else if (root.TryGetProperty("text", out var txtProp)) {
+                            positive = txtProp.GetString() ?? "";
+                        }
+                    }
+
+                    // Support standard negative prompt with ModusFlow fallback for negative_style
+                    string negative = root.TryGetProperty("negative", out var negProp) ? negProp.GetString() ?? "" : "";
+                    if (string.IsNullOrWhiteSpace(negative) && root.TryGetProperty("negative_style", out var nsProp)) {
+                        negative = nsProp.GetString() ?? "";
+                    }
+
+                    var prompt = new ModusFlowPrompt {
+                        Name = Path.GetFileNameWithoutExtension(file),
+                        Category = category,
+                        Positive = positive,
+                        Negative = negative,
+                        FilePath = file,
+                        LastModified = File.GetLastWriteTimeUtc(file)
+                    };
+                    list.Add(prompt);
+                } catch {
+                    // Ignore corrupt or unreadable files
+                }
             }
         }
 
@@ -85,7 +180,8 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Saves a positive and negative prompt pair to a ModusFlow-compatible JSON file.
+    /// Saves a positive and negative prompt pair to a ModusFlow-compatible JSON file
+    /// into the dedicated prompts/ subdirectory.
     /// </summary>
     public async Task<ModusFlowPrompt> SavePromptAsync(
         string name,
@@ -96,8 +192,7 @@ public sealed class ModusFlowPromptService {
     ) {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        string dir = ResolvePromptsDirectory();
-        Directory.CreateDirectory(dir);
+        string promptsDir = ResolvePromptsSubdirectory();
 
         // Sanitize name for filename
         string safeName = Path.GetInvalidFileNameChars()
@@ -107,7 +202,28 @@ public sealed class ModusFlowPromptService {
             safeName += ".json";
         }
 
-        string filePath = Path.Combine(dir, safeName);
+        string filePath = Path.Combine(promptsDir, safeName);
+
+        // ModusFlow 100% compatible schema (including "type": "prompt")
+        var payload = new Dictionary<string, object> {
+            ["type"] = "prompt",
+            ["category"] = category.Trim(),
+            ["positive"] = positive ?? string.Empty,
+            ["negative"] = negative ?? string.Empty
+        };
+
+        string json = JsonSerializer.Serialize(payload, JsonOptions);
+        await File.WriteAllTextAsync(filePath, json, cancellationToken);
+
+        // If a legacy loose copy existed in root saved_prompts, remove it to keep directories clean
+        string baseDir = ResolvePromptsDirectory();
+        string legacyPath = Path.Combine(baseDir, safeName);
+        if (File.Exists(legacyPath)) {
+            try {
+                File.Delete(legacyPath);
+            } catch { }
+        }
+
         var prompt = new ModusFlowPrompt {
             Name = Path.GetFileNameWithoutExtension(safeName),
             Category = category.Trim(),
@@ -117,30 +233,39 @@ public sealed class ModusFlowPromptService {
             LastModified = DateTime.UtcNow
         };
 
-        string json = JsonSerializer.Serialize(prompt, JsonOptions);
-        await File.WriteAllTextAsync(filePath, json, cancellationToken);
-
         OnPromptsUpdated?.Invoke();
         return prompt;
     }
 
     /// <summary>
-    /// Deletes a prompt JSON file by name or path.
+    /// Deletes a prompt JSON file by name or path across prompts/, root saved_prompts/, or songs/.
     /// </summary>
     public async Task<bool> DeletePromptAsync(string nameOrPath, CancellationToken cancellationToken = default) {
         if (string.IsNullOrWhiteSpace(nameOrPath)) {
             return false;
         }
 
-        string dir = ResolvePromptsDirectory();
-        string targetPath = File.Exists(nameOrPath)
-            ? nameOrPath
-            : Path.Combine(dir, nameOrPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? nameOrPath : $"{nameOrPath}.json");
-
-        if (File.Exists(targetPath)) {
-            File.Delete(targetPath);
+        if (File.Exists(nameOrPath)) {
+            File.Delete(nameOrPath);
             OnPromptsUpdated?.Invoke();
             return true;
+        }
+
+        string baseDir = ResolvePromptsDirectory();
+        string safeName = nameOrPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? nameOrPath : $"{nameOrPath}.json";
+
+        string[] candidatePaths = [
+            Path.Combine(baseDir, "prompts", safeName),
+            Path.Combine(baseDir, safeName),
+            Path.Combine(baseDir, "songs", safeName)
+        ];
+
+        foreach (string candidate in candidatePaths) {
+            if (File.Exists(candidate)) {
+                File.Delete(candidate);
+                OnPromptsUpdated?.Invoke();
+                return true;
+            }
         }
 
         return false;
@@ -160,6 +285,8 @@ public sealed class ModusFlowPromptService {
     }
 
     private async Task SeedDefaultPromptsAsync(string dir, CancellationToken cancellationToken) {
+        Directory.CreateDirectory(dir);
+
         var defaults = new[] {
             new {
                 File = "Default Studio Portrait.json",
@@ -190,14 +317,16 @@ public sealed class ModusFlowPromptService {
         foreach (var def in defaults) {
             string path = Path.Combine(dir, def.File);
             if (!File.Exists(path)) {
-                var p = new ModusFlowPrompt {
-                    Category = def.Category,
-                    Positive = def.Positive,
-                    Negative = def.Negative
+                var payload = new Dictionary<string, object> {
+                    ["type"] = "prompt",
+                    ["category"] = def.Category,
+                    ["positive"] = def.Positive,
+                    ["negative"] = def.Negative
                 };
-                string json = JsonSerializer.Serialize(p, JsonOptions);
+                string json = JsonSerializer.Serialize(payload, JsonOptions);
                 await File.WriteAllTextAsync(path, json, cancellationToken);
             }
         }
     }
 }
+
