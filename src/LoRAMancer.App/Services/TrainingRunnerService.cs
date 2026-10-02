@@ -22,6 +22,8 @@ public sealed class TrainingRunnerService {
     private readonly object _queueLock = new();
     private bool _isProcessingQueue;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _completionSources = new();
+    private volatile bool _completionDetected;
+    private TaskCompletionSource<bool>? _completionSignal;
 
     public TrainingProgress CurrentProgress { get; } = new();
     public TrainingJob? CurrentJob { get; private set; }
@@ -346,6 +348,11 @@ public sealed class TrainingRunnerService {
             }
         }
 
+        _completionDetected = false;
+        _completionSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        EnsureRunPyPatched(effectiveScriptPath, msg => OnLogReceived?.Invoke(msg));
+
         _currentProcess = new Process { StartInfo = startInfo };
 
         _currentProcess.OutputDataReceived += (_, e) => {
@@ -377,14 +384,29 @@ public sealed class TrainingRunnerService {
             _currentProcess.BeginOutputReadLine();
             _currentProcess.BeginErrorReadLine();
 
-            await _currentProcess.WaitForExitAsync(_trainingCts.Token);
+            var processExitTask = _currentProcess.WaitForExitAsync(_trainingCts.Token);
+            var signalTask = _completionSignal?.Task ?? Task.CompletedTask;
+            var firstCompleted = await Task.WhenAny(processExitTask, signalTask);
+
+            if (firstCompleted == signalTask && _completionDetected) {
+                OnLogReceived?.Invoke("[HOST] Training complete! Checkpoints and samples finalized. Reaping idle worker processes...");
+                try {
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                    await processExitTask.WaitAsync(timeoutCts.Token);
+                } catch (OperationCanceledException) {
+                    KillCurrentProcess();
+                }
+            } else {
+                await processExitTask;
+            }
 
             if (_trainingCts.Token.IsCancellationRequested) {
                 CurrentProgress.Status = TrainingStatus.Cancelled;
                 job.Status = TrainingStatus.Cancelled;
-            } else if (_currentProcess.ExitCode == 0) {
+            } else if (_completionDetected || _currentProcess.ExitCode == 0) {
                 CurrentProgress.Status = TrainingStatus.Completed;
                 job.Status = TrainingStatus.Completed;
+                OnLogReceived?.Invoke($"[HOST] Job '{job.Name}' marked as COMPLETED successfully.");
             } else {
                 CurrentProgress.Status = TrainingStatus.Failed;
                 job.Status = TrainingStatus.Failed;
@@ -501,6 +523,57 @@ public sealed class TrainingRunnerService {
             CurrentJob.Status = CurrentProgress.Status;
         }
 
+        if (line.Contains("completed job", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("All training jobs finished", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Job completed", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Training complete", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Training finished", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Done training", StringComparison.OrdinalIgnoreCase)) {
+            _completionDetected = true;
+            _completionSignal?.TrySetResult(true);
+        }
+
+        if (CurrentProgress.CurrentStep >= CurrentProgress.TotalSteps && CurrentProgress.TotalSteps > 0) {
+            if (line.Contains("Saved to", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Saving to", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Generating samples", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("samples/", StringComparison.OrdinalIgnoreCase)) {
+                _ = Task.Run(async () => {
+                    await Task.Delay(8000);
+                    _completionDetected = true;
+                    _completionSignal?.TrySetResult(true);
+                });
+            }
+        }
+
         OnProgressUpdated?.Invoke(CurrentProgress);
+    }
+
+    private static void EnsureRunPyPatched(string scriptPath, Action<string>? onLog) {
+        try {
+            if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath)) {
+                return;
+            }
+
+            string content = File.ReadAllText(scriptPath);
+            if (content.Contains("# [loramancer] run-py-clean-exit")) {
+                return;
+            }
+
+            string normalized = content.Replace("\r\n", "\n");
+            string target = "                sys.exit(0)\n\n\nif __name__ == '__main__':";
+            if (!normalized.Contains(target)) {
+                target = "                sys.exit(0)\n\nif __name__ == '__main__':";
+            }
+
+            if (normalized.Contains(target)) {
+                string exitPatch = "                sys.exit(0)\n\n    # [loramancer] run-py-clean-exit\n    print_end_message(jobs_completed, jobs_failed)\n    print_acc(\"[AI-Toolkit] All training jobs finished successfully.\")\n    sys.stdout.flush()\n    sys.stderr.flush()\n    import os\n    os._exit(0 if jobs_failed == 0 else 1)\n\nif __name__ == '__main__':";
+                normalized = normalized.Replace(target, exitPatch);
+                File.WriteAllText(scriptPath, normalized);
+                onLog?.Invoke("[HOST] Auto-patched AI-Toolkit run.py with clean process exit guard.");
+            }
+        } catch {
+            // Non-fatal if script is read-only
+        }
     }
 }
