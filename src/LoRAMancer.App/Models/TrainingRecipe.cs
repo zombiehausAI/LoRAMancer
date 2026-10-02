@@ -36,6 +36,7 @@ public sealed class TrainingRecipe {
 
     public string SamplePrompt1 { get; set; } = string.Empty;
     public string SamplePrompt2 { get; set; } = string.Empty;
+    public string SamplePrompt3 { get; set; } = string.Empty;
     public string NegativePrompt { get; set; } = string.Empty;
 
     public bool IsFavorite { get; set; } = true;

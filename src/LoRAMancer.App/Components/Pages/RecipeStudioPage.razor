@@ -454,7 +454,7 @@
 
                     <!-- ModusFlow Prompt Preset Integration -->
                     <MudSelect T="string" 
-                               Label="Load ModusFlow Preset into Sample Prompt" 
+                               Label="@($"Load ModusFlow Preset into Active Sample ({_activePromptTab + 1})")" 
                                Variant="Variant.Outlined" 
                                Margin="Margin.Dense" 
                                ShrinkLabel="true"
@@ -468,11 +468,52 @@
                         }
                     </MudSelect>
 
-                    <MudTextField @bind-Value="_samplePrompt" 
-                                  Label="Milestone Validation Sample Prompt" 
-                                  Variant="Variant.Outlined" 
-                                  Margin="Margin.Dense" 
-                                  Lines="2" />
+                    <!-- Milestone Validation Sample Prompts (Up to 3 Slots) -->
+                    <div class="pa-2 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                        <MudTabs @bind-ActivePanelIndex="_activePromptTab" Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-2">
+                            <MudTabPanel Text="Sample 1 (Primary)" Icon="@Icons.Material.Filled.LooksOne">
+                                <MudTextField @bind-Value="_samplePrompt1" 
+                                              Label="Sample Prompt 1 (Primary)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. A photo of {trigger}, cinematic lighting, highly detailed" />
+                            </MudTabPanel>
+                            <MudTabPanel Text="Sample 2" Icon="@Icons.Material.Filled.LooksTwo">
+                                <MudTextField @bind-Value="_samplePrompt2" 
+                                              Label="Sample Prompt 2 (Optional - Alternate Angle)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. Close-up portrait of {trigger}, studio lighting" />
+                            </MudTabPanel>
+                            <MudTabPanel Text="Sample 3" Icon="@Icons.Material.Filled.Looks3">
+                                <MudTextField @bind-Value="_samplePrompt3" 
+                                              Label="Sample Prompt 3 (Optional - Dynamic Action)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. Full-body shot of {trigger}, dynamic pose, outdoor natural sunlight" />
+                            </MudTabPanel>
+                        </MudTabs>
+
+                        <div class="d-flex align-center gap-2 mt-2">
+                            <MudTextField @bind-Value="_negativePrompt" 
+                                          Label="Validation Negative Prompt (Shared across samples)" 
+                                          Variant="Variant.Outlined" 
+                                          Margin="Margin.Dense" 
+                                          Lines="2" 
+                                          Class="flex-grow-1"
+                                          Placeholder="e.g. blurry, low quality, distorted, bad anatomy" 
+                                          HelperText="Negative visual qualities penalized across all milestone validation renders" />
+                            <MudTooltip Text="Reset to Architecture Default Negative Prompt">
+                                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" 
+                                               Variant="Variant.Outlined" 
+                                               Color="Color.Default" 
+                                               OnClick="ResetNegativePromptToDefault" />
+                            </MudTooltip>
+                        </div>
+                    </div>
                 </div>
             </MudCardContent>
         </MudCard>
@@ -630,7 +671,11 @@
     private string _datasetDirectory = string.Empty;
     private string _outputDirectory = string.Empty;
     private string _triggerWord = string.Empty;
-    private string _samplePrompt = string.Empty;
+    private int _activePromptTab = 0;
+    private string _samplePrompt1 = string.Empty;
+    private string _samplePrompt2 = string.Empty;
+    private string _samplePrompt3 = string.Empty;
+    private string _negativePrompt = string.Empty;
 
     // Auxiliary LoRA State
     private bool _enableAuxiliaryLora = false;
@@ -705,6 +750,19 @@
             _enableAuxiliaryLora = true;
         }
 
+        var defaultArch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
+        if (defaultArch != null) {
+            if (string.IsNullOrWhiteSpace(_samplePrompt1)) {
+                _samplePrompt1 = defaultArch.RecommendedSamplePrompt;
+            }
+            if (string.IsNullOrWhiteSpace(_samplePrompt2) && !string.IsNullOrWhiteSpace(defaultArch.RecommendedSamplePrompt2)) {
+                _samplePrompt2 = defaultArch.RecommendedSamplePrompt2;
+            }
+            if (string.IsNullOrWhiteSpace(_negativePrompt)) {
+                _negativePrompt = defaultArch.RecommendedNegativePrompt ?? string.Empty;
+            }
+        }
+
         await InspectDatasetAsync();
     }
 
@@ -747,6 +805,18 @@
         _epochs = cloned.MaxTrainEpochs;
         _flipAug = cloned.FlipAug;
         _shuffleTokens = cloned.ShuffleTokens;
+        if (donor.CivitaiInfo?.SamplePrompts != null && donor.CivitaiInfo.SamplePrompts.Count > 0) {
+            _samplePrompt1 = donor.CivitaiInfo.SamplePrompts[0];
+            if (donor.CivitaiInfo.SamplePrompts.Count > 1) _samplePrompt2 = donor.CivitaiInfo.SamplePrompts[1];
+            if (donor.CivitaiInfo.SamplePrompts.Count > 2) _samplePrompt3 = donor.CivitaiInfo.SamplePrompts[2];
+        } else if (cloned.SamplePrompts.Count > 0) {
+            _samplePrompt1 = cloned.SamplePrompts[0];
+            if (cloned.SamplePrompts.Count > 1) _samplePrompt2 = cloned.SamplePrompts[1];
+            if (cloned.SamplePrompts.Count > 2) _samplePrompt3 = cloned.SamplePrompts[2];
+        }
+        if (!string.IsNullOrWhiteSpace(cloned.NegativePrompt)) {
+            _negativePrompt = cloned.NegativePrompt;
+        }
     }
 
     private void ClearDonorLora() {
@@ -889,8 +959,24 @@
 
     private void OnTargetBaseModelChanged() {
         var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
-        if (arch != null && string.IsNullOrWhiteSpace(_samplePrompt)) {
-            _samplePrompt = arch.RecommendedSamplePrompt;
+        if (arch != null) {
+            if (string.IsNullOrWhiteSpace(_samplePrompt1)) {
+                _samplePrompt1 = arch.RecommendedSamplePrompt;
+            }
+            if (string.IsNullOrWhiteSpace(_samplePrompt2) && !string.IsNullOrWhiteSpace(arch.RecommendedSamplePrompt2)) {
+                _samplePrompt2 = arch.RecommendedSamplePrompt2;
+            }
+            if (string.IsNullOrWhiteSpace(_negativePrompt) && !string.IsNullOrWhiteSpace(arch.RecommendedNegativePrompt)) {
+                _negativePrompt = arch.RecommendedNegativePrompt;
+            }
+        }
+    }
+
+    private void ResetNegativePromptToDefault() {
+        var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
+        if (arch != null) {
+            _negativePrompt = arch.RecommendedNegativePrompt ?? string.Empty;
+            Snackbar.Add("Reset negative prompt to architecture defaults.", Severity.Info);
         }
     }
 
@@ -967,6 +1053,19 @@
         _flipAug = recipe.FlipAug;
         _shuffleTokens = recipe.ShuffleTokens;
 
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt1)) {
+            _samplePrompt1 = recipe.SamplePrompt1;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt2)) {
+            _samplePrompt2 = recipe.SamplePrompt2;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt3)) {
+            _samplePrompt3 = recipe.SamplePrompt3;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.NegativePrompt)) {
+            _negativePrompt = recipe.NegativePrompt;
+        }
+
         if (!string.IsNullOrWhiteSpace(recipe.AuxiliaryLoraPath)) {
             _auxiliaryLoraPath = recipe.AuxiliaryLoraPath;
             _auxiliaryLoraWeight = recipe.AuxiliaryLoraWeight;
@@ -980,7 +1079,17 @@
         if (string.IsNullOrWhiteSpace(name)) return;
         var p = _savedModusPrompts.FirstOrDefault(x => x.Name == name);
         if (p != null) {
-            _samplePrompt = p.Positive;
+            if (_activePromptTab == 1) {
+                _samplePrompt2 = p.Positive;
+            } else if (_activePromptTab == 2) {
+                _samplePrompt3 = p.Positive;
+            } else {
+                _samplePrompt1 = p.Positive;
+            }
+
+            if (!string.IsNullOrWhiteSpace(p.Negative)) {
+                _negativePrompt = p.Negative;
+            }
         }
     }
 
@@ -997,6 +1106,11 @@
     }
 
     private TrainingConfig BuildConfig(string? auxiliaryPathOverride = null) {
+        var samplePrompts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_samplePrompt1)) samplePrompts.Add(_samplePrompt1.Trim());
+        if (!string.IsNullOrWhiteSpace(_samplePrompt2)) samplePrompts.Add(_samplePrompt2.Trim());
+        if (!string.IsNullOrWhiteSpace(_samplePrompt3)) samplePrompts.Add(_samplePrompt3.Trim());
+
         return new TrainingConfig {
             RunName = _runName.Trim(),
             TargetBaseModel = !string.IsNullOrWhiteSpace(_customBaseModelPath) ? _customBaseModelPath : _targetBaseModel,
@@ -1020,7 +1134,8 @@
             CacheLatentsToDisk = _cacheLatentsToDisk,
             ShuffleTokens = _shuffleTokens,
             FlipAug = _flipAug,
-            SamplePrompts = !string.IsNullOrWhiteSpace(_samplePrompt) ? new List<string> { _samplePrompt } : new List<string>()
+            SamplePrompts = samplePrompts,
+            NegativePrompt = _negativePrompt.Trim()
         };
     }
 
@@ -1090,7 +1205,10 @@
                 SaveEveryNEpochs = _saveEveryNEpochs,
                 FlipAug = _flipAug,
                 ShuffleTokens = _shuffleTokens,
-                SamplePrompt1 = _samplePrompt
+                SamplePrompt1 = _samplePrompt1,
+                SamplePrompt2 = _samplePrompt2,
+                SamplePrompt3 = _samplePrompt3,
+                NegativePrompt = _negativePrompt.Trim()
             };
 
             await RecipeService.SaveRecipeAsync(recipe);
