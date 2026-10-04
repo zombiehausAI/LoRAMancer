@@ -612,6 +612,10 @@
                         <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="32" Class="flex-grow-1" />
                     </div>
 
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_totalSteps" Label="Manual Total Steps (Override)" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100000" Clearable="true" HelperText="Leave empty to auto-calculate from epochs, repeats & dataset" Class="flex-grow-1" />
+                    </div>
+
                     <div class="d-flex align-center flex-wrap gap-4 pt-1">
                         <MudCheckBox @bind-Value="_cacheLatentsToDisk" Label="Cache Latents to Disk" Color="Color.Primary" Dense="true" />
                         <MudCheckBox @bind-Value="_shuffleTokens" Label="Shuffle Caption Tokens" Color="Color.Primary" Dense="true" />
@@ -654,13 +658,22 @@
                     <div class="pa-3 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
                         <div class="d-flex align-center justify-space-between">
                             <div>
-                                <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Total Training Steps</MudText>
+                                <div class="d-flex align-center gap-2">
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Total Training Steps</MudText>
+                                    @if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Manual Override</MudChip>
+                                    }
+                                </div>
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    @_datasetImageCount images &times; @_repeats repeats &times; @_epochs epochs / batch @_batchSize
+                                    @if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+                                        <span>Manual override: @_totalSteps.Value.ToString("N0") steps (Auto formula: @GetCalculatedAutomaticSteps().ToString("N0") steps)</span>
+                                    } else {
+                                        <span>@_datasetImageCount images &times; @_repeats repeats &times; @_epochs epochs / batch @_batchSize</span>
+                                    }
                                 </MudText>
                             </div>
                             <MudText Typo="Typo.h6" Style="font-weight: 800; color: #89b4fa;">
-                                @GetCalculatedTotalSteps() Steps
+                                @GetCalculatedTotalSteps().ToString("N0") Steps
                             </MudText>
                         </div>
                     </div>
@@ -739,6 +752,7 @@
     private int _epochs = 10;
     private int _repeats = 10;
     private int _batchSize = 1;
+    private int? _totalSteps;
     private int _saveEveryNEpochs = 1;
     private bool _cacheLatentsToDisk = true;
     private bool _shuffleTokens = true;
@@ -837,6 +851,7 @@
         _precision = cloned.Precision;
         _targetBaseModel = cloned.TargetBaseModel;
         _epochs = cloned.MaxTrainEpochs;
+        _totalSteps = cloned.TotalSteps;
         _flipAug = cloned.FlipAug;
         _shuffleTokens = cloned.ShuffleTokens;
         if (donor.CivitaiInfo?.SamplePrompts != null && donor.CivitaiInfo.SamplePrompts.Count > 0) {
@@ -1083,6 +1098,7 @@
         _epochs = recipe.Epochs;
         _repeats = recipe.Repeats;
         _batchSize = recipe.BatchSize;
+        _totalSteps = recipe.TotalSteps;
         _saveEveryNEpochs = recipe.SaveEveryNEpochs;
         _flipAug = recipe.FlipAug;
         _shuffleTokens = recipe.ShuffleTokens;
@@ -1134,9 +1150,16 @@
         return estimates.EstimatedVramGb;
     }
 
-    private int GetCalculatedTotalSteps() {
+    private int GetCalculatedAutomaticSteps() {
         int images = Math.Max(1, _datasetImageCount);
         return (images * Math.Max(1, _repeats) * Math.Max(1, _epochs)) / Math.Max(1, _batchSize);
+    }
+
+    private int GetCalculatedTotalSteps() {
+        if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+            return _totalSteps.Value;
+        }
+        return GetCalculatedAutomaticSteps();
     }
 
     private TrainingConfig BuildConfig(string? auxiliaryPathOverride = null) {
@@ -1162,6 +1185,7 @@
             LrScheduler = _lrScheduler,
             Precision = _precision,
             MaxTrainEpochs = _epochs,
+            TotalSteps = _totalSteps,
             Repeats = _repeats,
             BatchSize = _batchSize,
             SaveEveryNEpochs = _saveEveryNEpochs,
@@ -1236,6 +1260,7 @@
                 Epochs = _epochs,
                 Repeats = _repeats,
                 BatchSize = _batchSize,
+                TotalSteps = _totalSteps,
                 SaveEveryNEpochs = _saveEveryNEpochs,
                 FlipAug = _flipAug,
                 ShuffleTokens = _shuffleTokens,
@@ -1444,6 +1469,9 @@
 
                 int? epochs = GetInt(GetValueCaseInsensitive(trainDict, "epochs", "max_train_epochs"));
                 if (epochs.HasValue && epochs.Value > 0) _epochs = epochs.Value;
+
+                int? steps = GetInt(GetValueCaseInsensitive(trainDict, "steps", "max_train_steps", "total_steps"));
+                if (steps.HasValue && steps.Value > 0) _totalSteps = steps.Value;
 
                 double? lr = GetDouble(GetValueCaseInsensitive(trainDict, "lr", "learning_rate", "learningRate"));
                 if (lr.HasValue && lr.Value > 0) _learningRate = lr.Value;
