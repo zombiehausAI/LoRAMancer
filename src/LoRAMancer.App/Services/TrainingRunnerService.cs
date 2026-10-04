@@ -293,16 +293,30 @@ public sealed class TrainingRunnerService {
             pythonExe = "python.exe";
         }
 
+        int configuredSteps = 0;
+        if (!string.IsNullOrWhiteSpace(configYamlPath) && File.Exists(configYamlPath)) {
+            try {
+                string yamlText = File.ReadAllText(configYamlPath);
+                Match stepsMatch = Regex.Match(yamlText, @"(?:steps|max_train_steps)\s*:\s*(\d+)", RegexOptions.IgnoreCase);
+                if (stepsMatch.Success && int.TryParse(stepsMatch.Groups[1].Value, out int s)) {
+                    configuredSteps = s;
+                }
+            } catch {
+                // Non-fatal if config file cannot be read
+            }
+        }
+
         DateTime startedAt = DateTime.UtcNow;
         job.StartedAt = startedAt;
         _trainingCts?.Dispose();
         _trainingCts = new CancellationTokenSource();
         CurrentProgress.Status = TrainingStatus.Initializing;
         CurrentProgress.CurrentStep = 0;
-        CurrentProgress.TotalSteps = 1000;
+        CurrentProgress.TotalSteps = configuredSteps > 0 ? configuredSteps : 1000;
         CurrentProgress.CurrentLoss = 0.0;
         CurrentProgress.Elapsed = TimeSpan.Zero;
         job.Status = TrainingStatus.Initializing;
+        job.TotalSteps = CurrentProgress.TotalSteps;
         OnProgressUpdated?.Invoke(CurrentProgress);
 
         _stopwatch.Restart();
@@ -391,7 +405,7 @@ public sealed class TrainingRunnerService {
             if (firstCompleted == signalTask && _completionDetected) {
                 OnLogReceived?.Invoke("[HOST] Training complete! Checkpoints and samples finalized. Reaping idle worker processes...");
                 try {
-                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                     await processExitTask.WaitAsync(timeoutCts.Token);
                 } catch (OperationCanceledException) {
                     KillCurrentProcess();
@@ -488,11 +502,20 @@ public sealed class TrainingRunnerService {
 
         OnLogReceived?.Invoke(line);
 
-        Match stepMatch = Regex.Match(line, @"(?:step|Step|\b)(\d+)\s*/\s*(\d+)", RegexOptions.IgnoreCase);
+        // Training progress step extraction (avoiding sub-progress like diffusers 20/20 sampling steps)
+        Match stepMatch = Regex.Match(line, @"(?:(?:\bstep\b|\bsteps\b)\s*[:=]?\s*(\d+)\s*/\s*(\d+)|\|\s*(\d+)\s*/\s*(\d+)\s*\[)", RegexOptions.IgnoreCase);
         if (stepMatch.Success) {
-            if (int.TryParse(stepMatch.Groups[1].Value, out int current) && int.TryParse(stepMatch.Groups[2].Value, out int total)) {
-                CurrentProgress.CurrentStep = current;
-                CurrentProgress.TotalSteps = total;
+            string curStr = !string.IsNullOrEmpty(stepMatch.Groups[1].Value) ? stepMatch.Groups[1].Value : stepMatch.Groups[3].Value;
+            string totStr = !string.IsNullOrEmpty(stepMatch.Groups[2].Value) ? stepMatch.Groups[2].Value : stepMatch.Groups[4].Value;
+
+            if (int.TryParse(curStr, out int current) && int.TryParse(totStr, out int total)) {
+                // Ensure sub-progress bars (e.g. 20/20 sampling iterations) do not overwrite macro training steps
+                if (total >= CurrentProgress.TotalSteps || CurrentProgress.TotalSteps <= 1) {
+                    CurrentProgress.TotalSteps = total;
+                    CurrentProgress.CurrentStep = current;
+                } else if (total == CurrentProgress.TotalSteps) {
+                    CurrentProgress.CurrentStep = current;
+                }
             }
         }
 
@@ -531,19 +554,6 @@ public sealed class TrainingRunnerService {
             line.Contains("Done training", StringComparison.OrdinalIgnoreCase)) {
             _completionDetected = true;
             _completionSignal?.TrySetResult(true);
-        }
-
-        if (CurrentProgress.CurrentStep >= CurrentProgress.TotalSteps && CurrentProgress.TotalSteps > 0) {
-            if (line.Contains("Saved to", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("Saving to", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("Generating samples", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("samples/", StringComparison.OrdinalIgnoreCase)) {
-                _ = Task.Run(async () => {
-                    await Task.Delay(8000);
-                    _completionDetected = true;
-                    _completionSignal?.TrySetResult(true);
-                });
-            }
         }
 
         OnProgressUpdated?.Invoke(CurrentProgress);
