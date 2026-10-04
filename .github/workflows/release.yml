@@ -83,3 +83,46 @@ jobs:
               Write-Host "Creating new official release $tag..."
               gh release create $tag @files --title "$title" --notes "$notes" --latest
           }
+
+      - name: Automatically Increment Dev Version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $appVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          if (-not $appVersion) {
+              Write-Warning "Could not read version from version.json. Skipping dev version increment."
+              exit 0
+          }
+
+          if ($appVersion -match '^(\d+)\.(\d+)\.(\d+)') {
+              $major = [int]$Matches[1]
+              $minor = [int]$Matches[2]
+              $patch = [int]$Matches[3]
+              $nextDevVersion = "$major.$minor.$($patch + 1)-dev.01"
+          } else {
+              Write-Warning "Version '$appVersion' does not match semver format X.Y.Z. Skipping dev version increment."
+              exit 0
+          }
+
+          Write-Host "Released version: $appVersion"
+          Write-Host "Next dev version: $nextDevVersion"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin dev
+          git checkout -B dev origin/dev
+
+          $versionContent = "{`n  `"version`": `"$nextDevVersion`"`n}"
+          Set-Content -Path "version.json" -Value $versionContent
+
+          git add version.json
+          $status = git status --porcelain
+          if ($status) {
+              git commit -m "chore: bump version to $nextDevVersion"
+              git push origin dev
+              Write-Host "Successfully bumped dev branch version to $nextDevVersion"
+          } else {
+              Write-Host "Dev branch is already set to $nextDevVersion or no changes detected."
+          }
