@@ -114,6 +114,23 @@ public sealed class AiToolkitConfigBuilder {
                             trainDict["clip_skip"] = sanitized.ClipSkip.Value;
                         }
 
+                        var modelDict = new Dictionary<string, object> {
+                            ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
+                            ["is_flux"] = archInfo.IsFlux,
+                            ["quantize"] = false,
+                            ["arch"] = archInfo.Family.ToLowerInvariant()
+                        };
+
+                        if (!string.IsNullOrWhiteSpace(sanitized.AuxiliaryLoraPath)) {
+                            modelDict["lora_path"] = sanitized.AuxiliaryLoraPath;
+                            modelDict["extra_loras"] = new List<object> {
+                                new Dictionary<string, object> {
+                                    ["path"] = sanitized.AuxiliaryLoraPath,
+                                    ["scale"] = sanitized.AuxiliaryLoraWeight
+                                }
+                            };
+                        }
+
                         var trainerProcess = new Dictionary<string, object> {
                             ["type"] = "sd_trainer",
                             ["training_folder"] = sanitized.OutputDirectory,
@@ -135,18 +152,14 @@ public sealed class AiToolkitConfigBuilder {
                                     ["caption_dropout_rate"] = 0.05,
                                     ["shuffle_tokens"] = sanitized.ShuffleTokens,
                                     ["keep_tokens"] = sanitized.KeepTokens,
+                                    ["flip_x"] = sanitized.FlipAug,
                                     ["flip_aug"] = sanitized.FlipAug,
                                     ["cache_latents_to_disk"] = sanitized.CacheLatentsToDisk,
                                     ["resolution"] = new List<int> { archInfo.DefaultResolution }
                                 }
                             },
                             ["train"] = trainDict,
-                            ["model"] = new Dictionary<string, object> {
-                                ["name_or_path"] = ResolveModelPath(sanitized.TargetBaseModel, archInfo),
-                                ["is_flux"] = archInfo.IsFlux,
-                                ["quantize"] = false,
-                                ["arch"] = archInfo.Family.ToLowerInvariant()
-                            },
+                            ["model"] = modelDict,
                             ["sample"] = sampleDict
                         };
 
@@ -204,6 +217,10 @@ public sealed class AiToolkitConfigBuilder {
         if (sanitized.ClipSkip.HasValue && sanitized.ClipSkip.Value > 0) {
             sb.AppendLine($"clip_skip = {sanitized.ClipSkip.Value}");
         }
+        if (!string.IsNullOrWhiteSpace(sanitized.AuxiliaryLoraPath)) {
+            sb.AppendLine($"network_weights = \"{sanitized.AuxiliaryLoraPath}\"");
+            sb.AppendLine($"network_multiplier = {sanitized.AuxiliaryLoraWeight}");
+        }
         return sb.ToString();
     }
 
@@ -213,6 +230,8 @@ public sealed class AiToolkitConfigBuilder {
         return new TrainingConfig {
             RunName = config.RunName,
             DonorLoraPath = config.DonorLoraPath,
+            AuxiliaryLoraPath = config.AuxiliaryLoraPath,
+            AuxiliaryLoraWeight = config.AuxiliaryLoraWeight,
             DatasetDirectory = config.DatasetDirectory,
             OutputDirectory = config.OutputDirectory,
             TargetBaseModel = config.TargetBaseModel,

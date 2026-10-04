@@ -3,6 +3,8 @@ namespace LoRAMancer.App.Models;
 public sealed class TrainingConfig {
     public string RunName { get; set; } = "lora_run_01";
     public string DonorLoraPath { get; set; } = string.Empty;
+    public string AuxiliaryLoraPath { get; set; } = string.Empty;
+    public double AuxiliaryLoraWeight { get; set; } = 1.0;
     public string DatasetDirectory { get; set; } = string.Empty;
     public string OutputDirectory { get; set; } = string.Empty;
     public string TargetBaseModel { get; set; } = "FLUX.1-dev";

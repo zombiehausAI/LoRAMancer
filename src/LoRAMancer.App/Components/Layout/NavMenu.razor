@@ -8,17 +8,20 @@
     <MudNavLink Href="curate" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Collections">
         1. Curate &amp; Caption
     </MudNavLink>
+    <MudNavLink Href="recipe" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AutoAwesome">
+        2. Recipe &amp; Prep
+    </MudNavLink>
     <MudNavLink Href="training" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Terminal">
-        2. Train &amp; Forge
+        3. Train &amp; Forge
     </MudNavLink>
     <MudNavLink Href="lab" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Biotech">
-        3. Diagnostic Lab
+        4. Diagnostic Lab
     </MudNavLink>
     <MudNavLink Href="test" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.SmartToy">
-        4. ComfyUI Test
+        5. ComfyUI Test
     </MudNavLink>
     <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderSpecial">
-        5. Library &amp; Vault
+        6. Library &amp; Vault
     </MudNavLink>
     @foreach (var plugin in PluginManager.GetPluginsForSection("Studio Pipeline")) {
         @if (plugin.GetIsModal()) {

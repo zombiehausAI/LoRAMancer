@@ -11,6 +11,7 @@
 @inject AuthTokenManagerService TokenManager
 @inject ThemeService ThemeManager
 @inject LoraDatabaseService DatabaseService
+@inject PostForgeShowcaseService ShowcaseService
 @inject ISnackbar Snackbar
 
 <div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4">
@@ -727,6 +728,52 @@
                             </MudTooltip>
                         }
                     </div>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <div class="d-flex align-center justify-space-between mb-1">
+                        <div>
+                            <MudText Typo="Typo.subtitle2">Post-Forge Showcase &amp; Media Gallery Directories</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Folders scanned by the Post-Forge Showcase gallery. Remove slow, network, or troublesome folders here to keep scans instant.
+                            </MudText>
+                        </div>
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddShowcaseFolderAsync">
+                                Add Folder...
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.CleaningServices" OnClick="PurgeOrphanedShowcaseMediaAsync">
+                                Purge Removed Folders &amp; Sync DB
+                            </MudButton>
+                        </div>
+                    </div>
+
+                    @if (_settings.ShowcaseDirectories == null || _settings.ShowcaseDirectories.Count == 0) {
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-1">
+                            No custom showcase directories configured. Defaulting to local <code>outputs/</code> folder.
+                        </MudAlert>
+                    } else {
+                        <MudPaper Elevation="0" Class="pa-2 mt-2" Style="background-color: var(--bg-dark-surface, #11111b); border: 1px solid var(--border-dark, #313244); border-radius: 8px;">
+                            <MudList T="string" Dense="true">
+                                @foreach (var dir in _settings.ShowcaseDirectories.ToList()) {
+                                    <MudListItem T="string">
+                                        <div class="d-flex align-center justify-space-between w-100 gap-2">
+                                            <div class="d-flex align-center gap-2 overflow-hidden text-truncate">
+                                                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Color="Color.Tertiary" />
+                                                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #cdd6f4;">@dir</span>
+                                                @if (!Directory.Exists(dir)) {
+                                                    <MudChip T="string" Color="Color.Error" Size="Size.Small" Variant="Variant.Text">Missing</MudChip>
+                                                }
+                                            </div>
+                                            <MudTooltip Text="Remove folder from gallery scans">
+                                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => RemoveShowcaseFolder(dir))" />
+                                            </MudTooltip>
+                                        </div>
+                                    </MudListItem>
+                                }
+                            </MudList>
+                        </MudPaper>
+                    }
                 </MudItem>
 
                 <MudItem xs="12">
@@ -1984,6 +2031,42 @@
         string? folder = await FileDialogService.PickFolderAsync("Select Saved Prompts Directory");
         if (!string.IsNullOrEmpty(folder)) {
             _settings.SavedPromptsDirectory = folder;
+        }
+    }
+
+    private async Task AddShowcaseFolderAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Showcase / Gallery Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _settings.ShowcaseDirectories ??= new List<string>();
+            if (!_settings.ShowcaseDirectories.Contains(folder, StringComparer.OrdinalIgnoreCase)) {
+                _settings.ShowcaseDirectories.Add(folder);
+                Snackbar.Add($"Added '{folder}' to Showcase directories. Click 'Save Settings' to apply.", Severity.Info);
+            }
+        }
+    }
+
+    private async Task RemoveShowcaseFolder(string folder) {
+        if (_settings.ShowcaseDirectories != null) {
+            _settings.ShowcaseDirectories.RemoveAll(d => string.Equals(d, folder, StringComparison.OrdinalIgnoreCase));
+            try {
+                await ShowcaseService.RemoveFolderAsync(folder);
+                Snackbar.Add($"Removed '{folder}' from Showcase and purged gallery database records.", Severity.Success);
+            } catch (Exception ex) {
+                Snackbar.Add($"Removed '{folder}' from settings: {ex.Message}", Severity.Warning);
+            }
+        }
+    }
+
+    private async Task PurgeOrphanedShowcaseMediaAsync() {
+        try {
+            int purged = await ShowcaseService.PurgeOrphanedMediaAsync();
+            if (purged > 0) {
+                Snackbar.Add($"Successfully purged {purged} orphaned media items from showcase database and cache!", Severity.Success);
+            } else {
+                Snackbar.Add("Showcase database is clean. No orphaned records found.", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to purge showcase media: {ex.Message}", Severity.Error);
         }
     }
 

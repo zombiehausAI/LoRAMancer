@@ -559,4 +559,205 @@ if __name__ == '__main__':
             if (File.Exists(jsonConfigPath)) try { File.Delete(jsonConfigPath); } catch { }
         }
     }
+
+    public async Task<string> PrepareAuxiliarySliceAsync(
+        string sourceLoraPath,
+        IReadOnlyDictionary<ChopPartCategory, double> partWeights,
+        Action<string>? onLog = null,
+        CancellationToken cancellationToken = default
+    ) {
+        if (!File.Exists(sourceLoraPath)) {
+            return sourceLoraPath;
+        }
+
+        // If all 7 parts are present and within ~1.0 (+- 0.001), no slicing needed
+        var allCategories = Enum.GetValues<ChopPartCategory>();
+        bool isFullPassthrough = true;
+        foreach (var cat in allCategories) {
+            if (!partWeights.TryGetValue(cat, out double w) || Math.Abs(w - 1.0) > 0.001) {
+                isFullPassthrough = false;
+                break;
+            }
+        }
+
+        if (isFullPassthrough) {
+            return sourceLoraPath;
+        }
+
+        // Calculate cache key
+        string weightsSignature = string.Join(";", allCategories.OrderBy(c => c).Select(c => $"{c}:{partWeights.GetValueOrDefault(c, 0.0):F2}"));
+        long fileLength = new FileInfo(sourceLoraPath).Length;
+        string hashInput = $"{sourceLoraPath}_{fileLength}_{weightsSignature}";
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        string hash = Convert.ToHexString(md5.ComputeHash(Encoding.UTF8.GetBytes(hashInput)))[..12].ToLowerInvariant();
+
+        string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "aux_slices");
+        Directory.CreateDirectory(outDir);
+        string baseName = Path.GetFileNameWithoutExtension(sourceLoraPath);
+        string outputPath = Path.Combine(outDir, $"{baseName}_slice_{hash}.safetensors");
+
+        if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 1024) {
+            onLog?.Invoke($"[LoRAMancer] Reusing cached auxiliary LoRA surgical slice: {Path.GetFileName(outputPath)}");
+            return outputPath;
+        }
+
+        var sw = Stopwatch.StartNew();
+        string pythonExe = ResolvePythonExecutable();
+        string scriptPath = Path.Combine(Path.GetTempPath(), $"loramancer_auxslice_{Guid.NewGuid():N}.py");
+        string jsonConfigPath = Path.Combine(Path.GetTempPath(), $"loramancer_auxslice_config_{Guid.NewGuid():N}.json");
+
+        var configObj = new {
+            source_path = sourceLoraPath,
+            output_path = outputPath,
+            part_weights = partWeights.ToDictionary(kvp => kvp.Key.ToString(), kvp => kvp.Value)
+        };
+
+        await File.WriteAllTextAsync(jsonConfigPath, JsonSerializer.Serialize(configObj, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+
+        string pythonCode = $$"""
+import sys, os, time, json
+import torch
+from safetensors.torch import load_file, save_file
+import safetensors
+
+def classify_tensor(key):
+    k = key.lower()
+    if "lora_te" in k or "text_encoder" in k or "clip" in k:
+        return "PromptTriggers"
+    
+    if "input_blocks" in k:
+        if any(f"input_blocks.{i}" in k for i in range(4)):
+            return "LightingAndAmbiance"
+        return "ClothingAndOutfit"
+    if "middle_block" in k:
+        return "FaceAndAnatomy"
+    if "output_blocks" in k:
+        if any(f"output_blocks.{i}" in k for i in range(0, 6)):
+            return "ClothingAndOutfit"
+        if any(f"output_blocks.{i}" in k for i in range(6, 9)):
+            return "HairAndHairstyle"
+        if any(f"output_blocks.{i}" in k for i in range(9, 12)):
+            return "EyesAndIris"
+        return "SkinAndMicroDetails"
+        
+    if "double_blocks" in k:
+        for i in range(6):
+            if f"double_blocks.{i}" in k or f"double_blocks_{i}" in k:
+                return "LightingAndAmbiance"
+        for i in range(6, 13):
+            if f"double_blocks.{i}" in k or f"double_blocks_{i}" in k:
+                return "FaceAndAnatomy"
+        return "ClothingAndOutfit"
+    if "single_blocks" in k:
+        for i in range(25):
+            if f"single_blocks.{i}" in k or f"single_blocks_{i}" in k:
+                return "ClothingAndOutfit"
+        for i in range(25, 32):
+            if f"single_blocks.{i}" in k or f"single_blocks_{i}" in k:
+                return "HairAndHairstyle"
+        return "SkinAndMicroDetails"
+
+    import re
+    m = re.search(r'(?:layers|transformer_blocks|blocks)[\._](\d+)', k)
+    if m:
+        idx = int(m.group(1))
+        if idx < 4:
+            return "LightingAndAmbiance"
+        elif idx < 10:
+            return "FaceAndAnatomy"
+        elif idx < 16:
+            return "ClothingAndOutfit"
+        elif idx < 22:
+            return "HairAndHairstyle"
+        elif idx < 26:
+            return "EyesAndIris"
+        else:
+            return "SkinAndMicroDetails"
+        
+    return "FaceAndAnatomy"
+
+def run_slice():
+    cfg_path = r"{{jsonConfigPath}}"
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+        
+    src_path = cfg["source_path"]
+    out_path = cfg["output_path"]
+    part_weights = cfg["part_weights"]
+    
+    print(f"[ChopShop Slicer] Loading auxiliary LoRA: {src_path}")
+    sd = load_file(src_path, device="cpu")
+    
+    with safetensors.safe_open(src_path, framework="pt") as f:
+        meta = dict(f.metadata() or {})
+        
+    meta["loramancer_auxiliary_slice"] = "true"
+    meta["loramancer_slice_timestamp"] = str(time.time())
+    
+    zeroed_tensors = 0
+    attenuated_tensors = 0
+    retained_tensors = 0
+    
+    for k in list(sd.keys()):
+        cat = classify_tensor(k)
+        weight = float(part_weights.get(cat, 1.0))
+        
+        is_weight = ("lora_down" in k or "down.weight" in k or "lora_up" in k or "up.weight" in k or "lora_A" in k or "lora_B" in k)
+        
+        if weight <= 0.001:
+            if is_weight:
+                sd[k] = torch.zeros_like(sd[k])
+                zeroed_tensors += 1
+            else:
+                retained_tensors += 1
+        elif abs(weight - 1.0) > 0.001:
+            if "lora_down" in k or "down.weight" in k or "lora_A" in k:
+                sd[k] = (sd[k].float() * weight).to(sd[k].dtype)
+                attenuated_tensors += 1
+            else:
+                retained_tensors += 1
+        else:
+            retained_tensors += 1
+            
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    save_file(sd, out_path, metadata=meta)
+    print(f"[ChopShop Slicer] Saved surgical slice with {zeroed_tensors} zeroed, {attenuated_tensors} attenuated, {retained_tensors} retained.")
+
+if __name__ == '__main__':
+    run_slice()
+""";
+
+        try {
+            await File.WriteAllTextAsync(scriptPath, pythonCode, Encoding.UTF8, cancellationToken);
+            onLog?.Invoke($"[LoRAMancer] Slicing auxiliary LoRA {Path.GetFileName(sourceLoraPath)} according to Chop-Shop part selection...");
+
+            var envVars = _toolkitSetup?.GetIsolatedEnvironmentVariables() ?? new Dictionary<string, string>();
+            int exitCode = await _processRunner.RunAsync(
+                pythonExe,
+                $"\"{scriptPath}\"",
+                outDir,
+                envVars,
+                line => onLog?.Invoke(line),
+                line => onLog?.Invoke($"[WARN] {line}"),
+                cancellationToken
+            );
+
+            sw.Stop();
+
+            if (exitCode == 0 && File.Exists(outputPath)) {
+                onLog?.Invoke($"[LoRAMancer] Auxiliary surgical slice created in {sw.ElapsedMilliseconds}ms: {Path.GetFileName(outputPath)}");
+                return outputPath;
+            } else {
+                onLog?.Invoke($"[LoRAMancer] Warning: Auxiliary slice failed (code {exitCode}). Falling back to full LoRA.");
+                return sourceLoraPath;
+            }
+        } catch (Exception ex) {
+            onLog?.Invoke($"[LoRAMancer] Error during auxiliary slice: {ex.Message}. Falling back to full LoRA.");
+            return sourceLoraPath;
+        } finally {
+            if (File.Exists(scriptPath)) try { File.Delete(scriptPath); } catch { }
+            if (File.Exists(jsonConfigPath)) try { File.Delete(jsonConfigPath); } catch { }
+        }
+    }
 }
+

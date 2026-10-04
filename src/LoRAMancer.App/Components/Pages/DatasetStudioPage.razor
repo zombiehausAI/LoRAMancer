@@ -35,15 +35,21 @@
         <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenOllamaTaggerAsync">
             Ollama Vision Tagger
         </MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isLoading || _isSavingZip">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseFolderAsync" Disabled="_isSavingZip">
             Select Dataset
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync" Disabled="_isLoading || _isSavingZip">
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.FolderZip" OnClick="BrowseZipAsync" Disabled="_isSavingZip">
             Import ZIP
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isLoading || _isSavingZip || string.IsNullOrWhiteSpace(_datasetFolder)">
-            @(_isLoading ? "Scanning..." : "Rescan")
-        </MudButton>
+        @if (_isLoading) {
+            <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Cancel" OnClick="CancelScan">
+                Stop Loading
+            </MudButton>
+        } else {
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanFolderAsync" Disabled="_isSavingZip || string.IsNullOrWhiteSpace(_datasetFolder)">
+                Rescan
+            </MudButton>
+        }
         @if (!string.IsNullOrWhiteSpace(_datasetFolder)) {
             @if (_isZipWorkingCopy) {
                 <MudTooltip Text="@($"Save all changes and update original {Path.GetFileName(_zipSourcePath)}")">
@@ -97,6 +103,15 @@
     </div>
 </MudCard>
 
+@if (_isLoading) {
+    <div class="d-flex align-center gap-3 mb-3">
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Rounded="true" Style="flex-grow: 1;" />
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Cancel" OnClick="CancelScan">
+            Stop Loading
+        </MudButton>
+    </div>
+}
+
 @if (_report != null && _report.TotalImages > 0) {
     <!-- Studio Metric Summary Cards -->
     <MudGrid Spacing="2" Class="mb-4">
@@ -142,7 +157,7 @@
         <MudTabPanel Text="Image Gallery &amp; Captions" Icon="@Icons.Material.Filled.GridView">
             <div class="d-flex align-center justify-space-between mb-3 mt-1 flex-wrap gap-2">
                 <div class="d-flex align-center gap-2 flex-wrap">
-                    <MudSelect T="string" @bind-Value="_galleryFilter" Label="Filter View" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 200px;">
+                    <MudSelect T="string" @bind-Value="GalleryFilter" Label="Filter View" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width: 200px;">
                         <MudSelectItem Value="@("all")">All Images (@_report.TotalImages)</MudSelectItem>
                         <MudSelectItem Value="@("missing")">Missing Captions (@_report.MissingCaptions)</MudSelectItem>
                         <MudSelectItem Value="@("corrupt")">Corrupt / Errors (@_report.CorruptCount)</MudSelectItem>
@@ -180,7 +195,7 @@
 
                 <div class="d-flex align-center gap-3">
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
-                        Showing @FilteredGalleryItems.Count items
+                        @ShowingCountLabel
                     </MudText>
 
                     <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
@@ -203,7 +218,7 @@
             @if (_isGridView) {
                 <!-- Dynamically Resizing CSS Grid of Cards -->
                 <div style="@($"display: grid; grid-template-columns: repeat(auto-fill, minmax({_cardMinWidth}px, 1fr)); gap: 14px; max-height: 640px; overflow-y: auto; padding-right: 6px;")">
-                    @foreach (var item in FilteredGalleryItems) {
+                    @foreach (var item in PagedGalleryItems) {
                         <div class="dataset-image-card d-flex flex-column justify-space-between h-100 pa-3"
                              style="background-color: #11111b; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
                             
@@ -219,6 +234,8 @@
                                 } else {
                                     <img src="@GetImageSrc(item.ImagePath)" 
                                          alt="@Path.GetFileName(item.ImagePath)" 
+                                         loading="lazy"
+                                         decoding="async"
                                          style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.25s ease;" 
                                          class="dataset-card-thumb" />
                                 }
@@ -304,7 +321,7 @@
             } else {
                 <!-- Compact List View with Scrollable Multi-line Textboxes -->
                 <div class="d-flex flex-column gap-3" style="max-height: 640px; overflow-y: auto; padding-right: 6px;">
-                    @foreach (var item in FilteredGalleryItems) {
+                    @foreach (var item in PagedGalleryItems) {
                         <MudCard Elevation="0" Class="pa-3" Style="background-color: #11111b; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
                             <div class="d-flex gap-3 align-start">
                                 <div class="cursor-pointer" 
@@ -313,7 +330,7 @@
                                     @if (item.IsCorrupt) {
                                         <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" />
                                     } else {
-                                        <img src="@GetImageSrc(item.ImagePath)" alt="thumb" style="width: 100%; height: 100%; object-fit: cover;" />
+                                        <img src="@GetImageSrc(item.ImagePath)" alt="thumb" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
                                     }
                                 </div>
 
@@ -360,6 +377,23 @@
                             </div>
                         </MudCard>
                     }
+                </div>
+            }
+
+            @if (TotalPages > 1) {
+                <div class="d-flex justify-center align-center gap-4 my-3 flex-wrap">
+                    <MudPagination Count="@TotalPages" SelectedChanged="OnPageChanged" Selected="_currentPage" Color="Color.Primary" Size="Size.Medium" ShowFirstButton="true" ShowLastButton="true" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        Page @_currentPage of @TotalPages (@FilteredGalleryItems.Count total)
+                    </MudText>
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Per page:</MudText>
+                        <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="width: 85px;">
+                            <MudSelectItem Value="24">24</MudSelectItem>
+                            <MudSelectItem Value="48">48</MudSelectItem>
+                            <MudSelectItem Value="96">96</MudSelectItem>
+                        </MudSelect>
+                    </div>
                 </div>
             }
         </MudTabPanel>
@@ -878,6 +912,54 @@
     private bool _matchCase;
     private bool _useRegex;
     private string _galleryFilter = "all";
+    private int _currentPage = 1;
+    private int _pageSize = 24;
+
+    private string GalleryFilter {
+        get => _galleryFilter;
+        set {
+            if (_galleryFilter != value) {
+                _galleryFilter = value;
+                _currentPage = 1;
+            }
+        }
+    }
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(FilteredGalleryItems.Count / (double)_pageSize));
+
+    private IEnumerable<DatasetCuratorItem> PagedGalleryItems {
+        get {
+            int total = TotalPages;
+            if (_currentPage > total) {
+                _currentPage = total;
+            }
+            if (_currentPage < 1) {
+                _currentPage = 1;
+            }
+            return FilteredGalleryItems.Skip((_currentPage - 1) * _pageSize).Take(_pageSize);
+        }
+    }
+
+    private string ShowingCountLabel {
+        get {
+            int total = FilteredGalleryItems.Count;
+            if (total == 0) return "Showing 0 items";
+            int start = (_currentPage - 1) * _pageSize + 1;
+            int end = Math.Min(total, _currentPage * _pageSize);
+            return $"Showing {start}–{end} of {total} items";
+        }
+    }
+
+    private void OnPageChanged(int newPage) {
+        _currentPage = Math.Clamp(newPage, 1, TotalPages);
+        StateHasChanged();
+    }
+
+    private void OnPageSizeChanged(int newSize) {
+        _pageSize = newSize;
+        _currentPage = 1;
+        StateHasChanged();
+    }
 
     // Dynamic Card Grid & Full Caption Editor State
     private bool _isGridView = true;
@@ -902,6 +984,12 @@
     }
 
     private void CloseCaptionEditor() {
+        if (_editingIndex >= 0) {
+            int targetPage = (_editingIndex / _pageSize) + 1;
+            if (targetPage >= 1 && targetPage <= TotalPages) {
+                _currentPage = targetPage;
+            }
+        }
         _editingItem = null;
         _editingIndex = -1;
         _editingCaptionDraft = "";
@@ -978,8 +1066,16 @@
 
     private readonly ConcurrentDictionary<string, string> _thumbnailCache = new();
     private readonly ConcurrentDictionary<string, byte> _loadingThumbnails = new();
+    private readonly SemaphoreSlim _thumbSemaphore = new(4, 4);
     private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _scanCts;
     private bool _disposed;
+
+    private void CancelScan() {
+        if (_isLoading) {
+            _scanCts?.Cancel();
+        }
+    }
 
     private string _radarTestToken = "";
     private string _radarFilter = "";
@@ -1004,6 +1100,7 @@
     }
 
     private async Task BrowseFolderAsync() {
+        CancelScan();
         string? folder = await FileDialogService.PickFolderAsync("Select Dataset Folder to Curate");
         if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder)) {
             if (_isZipWorkingCopy && !string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
@@ -1020,6 +1117,7 @@
     }
 
     private async Task BrowseZipAsync() {
+        CancelScan();
         string? zipFile = await FileDialogService.PickZipFileAsync("Select Dataset ZIP Archive to Import");
         if (string.IsNullOrWhiteSpace(zipFile) || !File.Exists(zipFile)) {
             return;
@@ -1106,13 +1204,22 @@
             return;
         }
 
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        var token = _scanCts.Token;
+
         _isLoading = true;
+        _currentPage = 1;
+        _thumbnailCache.Clear();
         StateHasChanged();
 
         try {
-            _report = await CuratorService.ScanDatasetAsync(_datasetFolder);
+            _report = await Task.Run(async () => await CuratorService.ScanDatasetAsync(_datasetFolder, token), token);
             StudioSession.SetDatasetFolder(_datasetFolder);
             Snackbar.Add($"Scanned {_report.TotalImages} images and {_report.TotalCaptions} captions.", Severity.Success);
+        } catch (OperationCanceledException) {
+            Snackbar.Add("Folder scanning was stopped.", Severity.Info);
         } catch (Exception ex) {
             Snackbar.Add($"Scan failed: {ex.Message}", Severity.Error);
         } finally {
@@ -1372,7 +1479,10 @@
         if (_loadingThumbnails.TryAdd(path, 0)) {
             var token = _cts.Token;
             _ = Task.Run(async () => {
+                bool acquired = false;
                 try {
+                    await _thumbSemaphore.WaitAsync(token);
+                    acquired = true;
                     if (!_disposed && !token.IsCancellationRequested) {
                         string dataUri = await CreateSafeThumbnailDataUriAsync(path, token);
                         _thumbnailCache[path] = dataUri;
@@ -1383,6 +1493,9 @@
                 } catch {
                     _thumbnailCache[path] = string.Empty;
                 } finally {
+                    if (acquired) {
+                        _thumbSemaphore.Release();
+                    }
                     _loadingThumbnails.TryRemove(path, out _);
                 }
             }, token);
@@ -1596,7 +1709,10 @@
 
     public void Dispose() {
         _disposed = true;
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
         _cts?.Cancel();
         _cts?.Dispose();
+        _thumbSemaphore?.Dispose();
     }
 }

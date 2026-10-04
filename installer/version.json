@@ -1,7 +1,7 @@
 {
-  "version": "1.0.1",
-  "releaseDate": "2026-10-01T00:00:00Z",
-  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.0.1/LoRAMancer-Setup-1.0.1.exe",
-  "changelog": "- Dataset Curator & Caption Studio with tag frequency inspection and bucketing\n- LoRA Library manager with SafeTensors metadata parser\n- Image Harvester scraper plugin ecosystem\n- PostForge showcase media extraction\n- AMD ROCm hardware sanitization and AI-Toolkit engine integration",
+  "version": "1.0.2",
+  "releaseDate": "2026-10-04T00:00:00Z",
+  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.0.2/LoRAMancer-Setup-1.0.2.exe",
+  "changelog": "- Recipe Studio with AI-Toolkit configuration builder and presets\n- Training Runner queue execution and monitoring\n- Dataset Studio caption curation and tag bucketing\n- Media metadata extractor for AI generation parameters\n- Image Harvester multi-provider discovery\n- ModusFlow and ComfyUI testing integration",
   "mandatory": false
 }

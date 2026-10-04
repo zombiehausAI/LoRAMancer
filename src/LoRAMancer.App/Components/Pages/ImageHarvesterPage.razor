@@ -1,5 +1,6 @@
 @page "/harvester"
 @implements IDisposable
+@using System.Text.RegularExpressions
 @inject ImageHarvesterService HarvesterService
 @inject NativeFileDialogService FileDialogService
 @inject SettingsService SettingsService
@@ -24,6 +25,10 @@
         </div>
 
         <div class="d-flex align-center gap-2 flex-wrap">
+            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderSpecial" OnClick="OpenCatalogManager">
+                Catalogs &amp; Saved Searches (@_catalogs.Count)
+            </MudButton>
+
             <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune" OnClick="OpenProviderManager">
                 Configure Providers (@_providers.Count(p => p.IsEnabled) Active)
             </MudButton>
@@ -86,6 +91,22 @@
             <MudNumericField @bind-Value="_query.MaxResults" Label="Results Limit" Variant="Variant.Outlined" Margin="Margin.Dense" Min="10" Max="300" Step="20" Style="max-width: 130px;" />
             <MudNumericField @bind-Value="_query.MinWidth" Label="Min Width" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" Max="4096" Step="128" Style="max-width: 110px;" />
             <MudCheckBox @bind-Value="_query.SafeSearch" Label="Safe Search" Color="Color.Primary" Dense="true" />
+            <MudCheckBox @bind-Value="_query.OmitExistingInCatalog" Label="Omit Existing / Duplicates" Color="Color.Tertiary" Dense="true" title="Omits images that were already downloaded in this catalog or destination folder" />
+
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Tertiary"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.BookmarkAdd"
+                       OnClick="OpenSaveCatalogModal"
+                       Disabled="@string.IsNullOrWhiteSpace(_query.Query)">
+                Save as Catalog
+            </MudButton>
+
+            @if (_activeCatalog != null) {
+                <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small" OnClose="ClearActiveCatalog">
+                    Catalog: @_activeCatalog.Name
+                </MudChip>
+            }
 
             @if (_selectedProvider?.Engine == HarvestEngine.Reddit) {
                 <MudTextField @bind-Value="_query.Subreddit"
@@ -272,10 +293,12 @@
                                 </div>
                             }
 
-                            <!-- Downloaded Indicator -->
-                            @if (!string.IsNullOrWhiteSpace(item.DownloadedFilePath)) {
+                            <!-- Downloaded / In-Catalog Indicator -->
+                            @if (!string.IsNullOrWhiteSpace(item.DownloadedFilePath) || item.IsAlreadyDownloaded) {
                                 <div class="position-absolute" style="bottom: 6px; right: 6px; z-index: 2;">
-                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Style="font-size: 0.62rem; font-weight: 700;">
+                                        @(string.IsNullOrWhiteSpace(item.DownloadedFilePath) ? "IN CATALOG" : "DOWNLOADED")
+                                    </MudChip>
                                 </div>
                             }
                         </div>
@@ -375,6 +398,161 @@
     </MudOverlay>
 }
 
+<!-- Catalogs & Saved Searches Manager Drawer / Overlay -->
+@if (_showCatalogManager) {
+    <MudOverlay Visible="true" DarkBackground="true" AutoClose="true" OnClosed="@(() => _showCatalogManager = false)" ZIndex="1000">
+        <MudCard Elevation="8" Class="pa-4" Style="width: 90vw; max-width: 820px; max-height: 85vh; background-color: #181825; border: 1px solid #89b4fa; border-radius: 8px; display: flex; flex-direction: column;">
+            <div class="d-flex align-center justify-space-between mb-3 pb-2" style="border-bottom: 1px solid #313244;">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderSpecial" Color="Color.Tertiary" />
+                    <div>
+                        <MudText Typo="Typo.h6" Style="font-weight: 700;">Harvest Catalogs &amp; Saved Searches</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Save search phrases as persistent catalogs, deduplicate automatically, and continuously harvest new additions without duplicates.</MudText>
+                    </div>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showCatalogManager = false)" />
+            </div>
+
+            <div class="flex-grow-1 overflow-auto pr-1" style="max-height: 55vh;">
+                @if (_catalogs.Count == 0) {
+                    <div class="pa-6 text-center">
+                        <MudIcon Icon="@Icons.Material.Filled.BookmarkBorder" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 700;">No Catalogs Saved Yet</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Type a search phrase, choose your destination folder, and click "Save as Catalog" to continuously grow image datasets with zero duplicates.</MudText>
+                    </div>
+                } else {
+                    @foreach (var cat in _catalogs) {
+                        int diskCount = GetCatalogDiskCount(cat);
+                        <MudCard Elevation="1" Class="pa-3 mb-2" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 6px;">
+                            <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                                <div>
+                                    <div class="d-flex align-center gap-2">
+                                        <MudText Typo="Typo.body1" Style="font-weight: 700; color: #cdd6f4;">@cat.Name</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Tertiary" Variant="Variant.Filled" Style="font-size: 0.68rem; font-weight: 700;">
+                                            @diskCount IMAGES
+                                        </MudChip>
+                                        @if (cat.AutoOmitExisting) {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Dark" Variant="Variant.Outlined" Style="font-size: 0.65rem;">
+                                                Deduplication On
+                                            </MudChip>
+                                        }
+                                    </div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Query: <span style="color: #a6adc8; font-family: monospace;">@cat.Query</span> • Path: <span style="color: #a6adc8;">@cat.DestinationFolder</span>
+                                    </MudText>
+                                    @if (cat.LastSyncedAt.HasValue) {
+                                        <div>
+                                            <MudText Typo="Typo.caption" Color="Color.Dark">Last synced: @cat.LastSyncedAt.Value.ToLocalTime().ToString("g")</MudText>
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="d-flex align-center gap-1 flex-wrap">
+                                    <MudButton Variant="Variant.Outlined"
+                                               Color="Color.Primary"
+                                               Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Search"
+                                               OnClick="@(() => LoadCatalogIntoSearch(cat))">
+                                        Load Search
+                                    </MudButton>
+
+                                    <MudButton Variant="Variant.Filled"
+                                               Color="Color.Tertiary"
+                                               Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Sync"
+                                               OnClick="@(() => SyncCatalogDirectAsync(cat))"
+                                               Disabled="@(HarvesterService.IsSearching || HarvesterService.IsDownloading)">
+                                        Sync New
+                                    </MudButton>
+
+                                    <MudButton Variant="Variant.Outlined"
+                                               Color="Color.Secondary"
+                                               Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Collections"
+                                               OnClick="@(() => SendCatalogFolderToCurate(cat))">
+                                        Curate
+                                    </MudButton>
+
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Color="Color.Error"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => DeleteCatalogAsync(cat))" />
+                                </div>
+                            </div>
+                        </MudCard>
+                    }
+                }
+            </div>
+
+            <div class="d-flex justify-space-between align-center mt-3 pt-2" style="border-top: 1px solid #313244;">
+                <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenSaveCatalogModal">
+                    Save Current Search as Catalog
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="@(() => _showCatalogManager = false)">
+                    Done
+                </MudButton>
+            </div>
+        </MudCard>
+    </MudOverlay>
+}
+
+<!-- Save Search as Catalog Modal -->
+@if (_showSaveCatalogModal) {
+    <MudOverlay Visible="true" DarkBackground="true" AutoClose="true" OnClosed="@(() => _showSaveCatalogModal = false)" ZIndex="1100">
+        <MudCard Elevation="8" Class="pa-4" Style="width: 90vw; max-width: 550px; background-color: #181825; border: 1px solid #cba6f7; border-radius: 8px;">
+            <div class="d-flex align-center justify-space-between mb-3 pb-2" style="border-bottom: 1px solid #313244;">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.BookmarkAdd" Color="Color.Tertiary" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Save Search as Catalog</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showSaveCatalogModal = false)" />
+            </div>
+
+            <div class="d-flex flex-column gap-3 mb-4">
+                <MudTextField @bind-Value="_newCatalogName"
+                              Label="Catalog Name"
+                              Placeholder="e.g. Cyberpunk Cars, Vintage Anime, Macro Leaves..."
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Immediate="true" />
+
+                <MudTextField @bind-Value="_query.Query"
+                              Label="Search Query"
+                              ReadOnly="true"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense" />
+
+                <div class="d-flex align-center gap-2">
+                    <MudTextField @bind-Value="_destinationFolder"
+                                  Label="Catalog Destination Folder"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Class="flex-grow-1" />
+                    <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary" OnClick="PickDestinationFolderAsync" />
+                </div>
+
+                <MudCheckBox @bind-Value="_newCatalogAutoOmit"
+                             Label="Automatically omit duplicate / already-harvested images"
+                             Color="Color.Tertiary"
+                             Dense="true" />
+            </div>
+
+            <div class="d-flex justify-end gap-2">
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="@(() => _showSaveCatalogModal = false)">
+                    Cancel
+                </MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Tertiary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="ConfirmSaveCatalogAsync"
+                           Disabled="@string.IsNullOrWhiteSpace(_newCatalogName)">
+                    Save Catalog
+                </MudButton>
+            </div>
+        </MudCard>
+    </MudOverlay>
+}
+
 <!-- Lightbox Modal for Full-Res Image Preview -->
 @if (_previewItem != null) {
     <MudOverlay Visible="true" DarkBackground="true" AutoClose="true" OnClosed="@(() => _previewItem = null)" ZIndex="1000">
@@ -426,10 +604,17 @@
     private HarvestProviderDefinition? _selectedProvider = null;
     private bool _showProviderManager = false;
     private HarvestProviderDefinition _newCustomProvider = new();
+    private List<HarvestCatalog> _catalogs = new();
+    private HarvestCatalog? _activeCatalog = null;
+    private bool _showCatalogManager = false;
+    private bool _showSaveCatalogModal = false;
+    private string _newCatalogName = string.Empty;
+    private bool _newCatalogAutoOmit = true;
 
     protected override void OnInitialized() {
         HarvesterService.OnStateChanged += HandleStateChanged;
         RefreshProviders();
+        _ = LoadCatalogsAsync();
 
         _selectedOllamaModel = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
             ? SettingsService.Current.OllamaDefaultModel
@@ -598,13 +783,14 @@
             ? $"all providers ({_providers.Count})"
             : $"{_selectedProviderIds.Count} selected provider{(_selectedProviderIds.Count > 1 ? "s" : "")}";
 
+        _query.CatalogDestinationFolder = _destinationFolder;
         Snackbar.Add($"Starting harvest across {target}...", Severity.Info);
         try {
             var results = await HarvesterService.SearchAsync(_query);
             if (results.Count > 0) {
                 Snackbar.Add($"Harvested {results.Count} candidate images.", Severity.Success);
             } else {
-                Snackbar.Add("No images found matching criteria.", Severity.Warning);
+                Snackbar.Add("No new images found matching criteria.", Severity.Warning);
             }
         } catch (Exception ex) {
             Snackbar.Add($"Harvest error: {ex.Message}", Severity.Error);
@@ -636,9 +822,10 @@
         try {
             var downloaded = await HarvesterService.DownloadSelectedAsync(
                 _destinationFolder,
-                "harvest",
+                _activeCatalog?.Name ?? "harvest",
                 progressHandler);
 
+            await LoadCatalogsAsync();
             Snackbar.Add($"Successfully downloaded {downloaded.Count} images to {_destinationFolder}!", Severity.Success);
         } catch (Exception ex) {
             Snackbar.Add($"Download failed: {ex.Message}", Severity.Error);
@@ -695,9 +882,173 @@
         if (item.AuditStatus == OllamaAuditStatus.Flagged) {
             return "border: 1px solid #f38ba8; opacity: 0.65;";
         }
+        if (item.IsAlreadyDownloaded) {
+            return "border: 1px solid #45475a; opacity: 0.7;";
+        }
         if (item.IsSelected) {
             return "border: 1px solid #89b4fa;";
         }
         return "border: 1px solid #313244;";
+    }
+
+    private async Task LoadCatalogsAsync() {
+        _catalogs = await HarvesterService.GetCatalogsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenCatalogManager() {
+        _showCatalogManager = true;
+    }
+
+    private void OpenSaveCatalogModal() {
+        if (string.IsNullOrWhiteSpace(_newCatalogName)) {
+            _newCatalogName = !string.IsNullOrWhiteSpace(_query.Query)
+                ? Thread.CurrentThread.CurrentCulture.TextInfo.ToTitleCase(_query.Query.Trim())
+                : "New Catalog";
+        }
+        string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string sanitized = Regex.Replace(_newCatalogName, @"[^a-zA-Z0-9_\-]", "_");
+        _destinationFolder = Path.Combine(userHome, ".loramancer", "catalogs", sanitized);
+        _showSaveCatalogModal = true;
+    }
+
+    private async Task ConfirmSaveCatalogAsync() {
+        if (string.IsNullOrWhiteSpace(_newCatalogName)) return;
+
+        string dest = !string.IsNullOrWhiteSpace(_destinationFolder)
+            ? _destinationFolder
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "catalogs", Regex.Replace(_newCatalogName, @"[^a-zA-Z0-9_\-]", "_"));
+
+        var cat = new HarvestCatalog {
+            Name = _newCatalogName.Trim(),
+            Query = _query.Query.Trim(),
+            SelectedProviderIds = _selectedProviderIds.ToList(),
+            DestinationFolder = dest,
+            AutoOmitExisting = _newCatalogAutoOmit,
+            MaxResultsPerSync = _query.MaxResults
+        };
+
+        await HarvesterService.SaveCatalogAsync(cat);
+        await LoadCatalogsAsync();
+        _activeCatalog = cat;
+        _destinationFolder = cat.DestinationFolder;
+        _showSaveCatalogModal = false;
+        Snackbar.Add($"Saved catalog '{cat.Name}' with automatic deduplication enabled!", Severity.Success);
+    }
+
+    private void LoadCatalogIntoSearch(HarvestCatalog cat) {
+        _activeCatalog = cat;
+        _query.Query = cat.Query;
+        _destinationFolder = cat.DestinationFolder;
+        _query.CatalogId = cat.Id;
+        _query.CatalogDestinationFolder = cat.DestinationFolder;
+        _query.OmitExistingInCatalog = cat.AutoOmitExisting;
+
+        if (cat.SelectedProviderIds != null && cat.SelectedProviderIds.Count > 0) {
+            _selectedProviderIds.Clear();
+            foreach (var id in cat.SelectedProviderIds) {
+                _selectedProviderIds.Add(id);
+            }
+        }
+
+        _showCatalogManager = false;
+        Snackbar.Add($"Loaded catalog '{cat.Name}'.", Severity.Info);
+        StateHasChanged();
+    }
+
+    private void ClearActiveCatalog() {
+        _activeCatalog = null;
+        _query.CatalogId = null;
+        _query.CatalogDestinationFolder = null;
+        StateHasChanged();
+    }
+
+    private int GetCatalogDiskCount(HarvestCatalog cat) {
+        if (string.IsNullOrWhiteSpace(cat.DestinationFolder) || !Directory.Exists(cat.DestinationFolder)) return 0;
+        try {
+            var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif" };
+            return Directory.EnumerateFiles(cat.DestinationFolder).Count(f => exts.Contains(Path.GetExtension(f)));
+        } catch {
+            return cat.TotalDownloadedCount;
+        }
+    }
+
+    private async Task SyncCatalogDirectAsync(HarvestCatalog cat) {
+        _showCatalogManager = false;
+        _progressStatusText = $"Syncing catalog '{cat.Name}' (harvesting new images)...";
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _progress = p;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try {
+            int newCount = await HarvesterService.SyncCatalogAsync(cat, progressHandler);
+            await LoadCatalogsAsync();
+            if (newCount > 0) {
+                Snackbar.Add($"Sync complete: +{newCount} new images added to '{cat.Name}' without duplicates!", Severity.Success);
+            } else {
+                Snackbar.Add($"Sync complete: No newly discovered images for '{cat.Name}'.", Severity.Info);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Catalog sync failed: {ex.Message}", Severity.Error);
+        } finally {
+            _progress = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task DeleteCatalogAsync(HarvestCatalog cat) {
+        await HarvesterService.DeleteCatalogAsync(cat.Id);
+        if (_activeCatalog?.Id == cat.Id) _activeCatalog = null;
+        await LoadCatalogsAsync();
+        Snackbar.Add($"Deleted catalog '{cat.Name}'.", Severity.Info);
+    }
+
+    private void SendCatalogFolderToCurate(HarvestCatalog cat) {
+        _destinationFolder = cat.DestinationFolder;
+        Navigation.NavigateTo("curate");
+    }
+
+    private async Task AuditCatalogWithOllamaAsync(HarvestCatalog cat) {
+        _showCatalogManager = false;
+
+        string prompt = _selectedOllamaPreset switch {
+            "watermarks" => "Analyze this image. Does it contain text, watermarks, subtitles, logos, or artificial UI overlays?",
+            "blurry" => "Analyze this image. Is it blurry, out-of-focus, highly pixelated, or severe low quality?",
+            "nonphoto" => "Analyze this image. Is it a cartoon, 2D anime, sketch, drawing, or 3D CGI rendering rather than a real photograph?",
+            "memes" => "Analyze this image. Does it contain meme captions, top/bottom text, or thick black letterbox borders?",
+            _ => "Does this image have severe visual artifacts, watermarks, or quality flaws?"
+        };
+
+        string ollamaUrl = !string.IsNullOrWhiteSpace(SettingsService.Current.OllamaEndpointUrl)
+            ? SettingsService.Current.OllamaEndpointUrl.Trim().TrimEnd('/')
+            : (Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434");
+
+        string modelName = !string.IsNullOrWhiteSpace(_selectedOllamaModel)
+            ? _selectedOllamaModel.Trim()
+            : (!string.IsNullOrWhiteSpace(SettingsService.Current.OllamaDefaultModel)
+                ? SettingsService.Current.OllamaDefaultModel.Trim()
+                : (Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision"));
+
+        _progressStatusText = $"Ollama Cleanse ({modelName}) on catalog '{cat.Name}'...";
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _progress = p;
+            InvokeAsync(StateHasChanged);
+        });
+
+        try {
+            int flaggedCount = await HarvesterService.AuditCatalogWithOllamaAsync(cat, ollamaUrl, modelName, prompt, progressHandler);
+            await LoadCatalogsAsync();
+            if (flaggedCount > 0) {
+                Snackbar.Add($"Ollama cleanse complete: Quarantined {flaggedCount} flagged images to '{cat.Name}/_flagged/'!", Severity.Warning);
+            } else {
+                Snackbar.Add($"Ollama cleanse complete: All images in '{cat.Name}' are clean!", Severity.Success);
+            }
+        } catch (Exception ex) {
+            Snackbar.Add($"Ollama cleanse failed: {ex.Message}", Severity.Error);
+        } finally {
+            _progress = null;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 }

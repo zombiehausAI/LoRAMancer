@@ -5,6 +5,7 @@ namespace LoRAMancer.App.Services;
 
 public enum StudioStage {
     Curate,
+    Recipe,
     Train,
     Lab,
     Test,
@@ -17,6 +18,8 @@ public sealed class StudioProjectState {
     public string TriggerWord { get; set; } = string.Empty;
     public string BaseModel { get; set; } = "Flux.1-Dev";
     public string ActiveLoraPath { get; set; } = string.Empty;
+    public string AuxiliaryLoraPath { get; set; } = string.Empty;
+    public double AuxiliaryLoraWeight { get; set; } = 1.0;
     public StudioStage ActiveStage { get; set; } = StudioStage.Vault;
     public DateTime LastModified { get; set; } = DateTime.UtcNow;
 }
@@ -35,6 +38,8 @@ public sealed class StudioSessionService {
     public string TriggerWord => _currentProject.TriggerWord;
     public string BaseModel => _currentProject.BaseModel;
     public string ActiveLoraPath => _currentProject.ActiveLoraPath;
+    public string AuxiliaryLoraPath => _currentProject.AuxiliaryLoraPath;
+    public double AuxiliaryLoraWeight => _currentProject.AuxiliaryLoraWeight;
     public StudioStage ActiveStage => _currentProject.ActiveStage;
 
     public StudioSessionService(string? customSessionPath = null) {
@@ -58,6 +63,8 @@ public sealed class StudioSessionService {
         string? triggerWord = null,
         string? baseModel = null,
         string? activeLoraPath = null,
+        string? auxiliaryLoraPath = null,
+        double? auxiliaryLoraWeight = null,
         StudioStage? stage = null
     ) {
         lock (_lock) {
@@ -66,6 +73,8 @@ public sealed class StudioSessionService {
             if (triggerWord != null) _currentProject.TriggerWord = triggerWord;
             if (baseModel != null) _currentProject.BaseModel = baseModel;
             if (activeLoraPath != null) _currentProject.ActiveLoraPath = activeLoraPath;
+            if (auxiliaryLoraPath != null) _currentProject.AuxiliaryLoraPath = auxiliaryLoraPath;
+            if (auxiliaryLoraWeight.HasValue) _currentProject.AuxiliaryLoraWeight = auxiliaryLoraWeight.Value;
             if (stage != null) _currentProject.ActiveStage = stage.Value;
 
             _currentProject.LastModified = DateTime.UtcNow;
@@ -97,6 +106,15 @@ public sealed class StudioSessionService {
             if (!string.IsNullOrWhiteSpace(baseModel)) {
                 _currentProject.BaseModel = baseModel;
             }
+            SaveSession();
+        }
+        OnSessionChanged?.Invoke();
+    }
+
+    public void SetAuxiliaryLora(string loraPath, double weight = 1.0) {
+        lock (_lock) {
+            _currentProject.AuxiliaryLoraPath = loraPath;
+            _currentProject.AuxiliaryLoraWeight = weight;
             SaveSession();
         }
         OnSessionChanged?.Invoke();

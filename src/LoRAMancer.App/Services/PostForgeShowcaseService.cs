@@ -62,21 +62,36 @@ public sealed class PostForgeShowcaseService {
     public async Task LoadCacheAsync(CancellationToken cancellationToken = default) {
         await _lock.WaitAsync(cancellationToken);
         try {
+            var configuredDirs = GetConfiguredDirectories();
             bool loadedFromDb = false;
             if (_databaseService != null) {
                 try {
                     var dbItems = await _databaseService.GetAllGalleryMediaAsync(cancellationToken);
                     if (dbItems.Count > 0) {
+                        var orphanedInDb = new List<string>();
                         lock (_items) {
                             _items.Clear();
                             foreach (var item in dbItems) {
-                                if (File.Exists(item.FilePath)) {
+                                bool belongs = configuredDirs.Any(d => item.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase));
+                                if (belongs && File.Exists(item.FilePath)) {
                                     _items[item.FilePath] = item;
+                                } else if (!belongs) {
+                                    orphanedInDb.Add(item.FilePath);
                                 }
                             }
                         }
                         UpdateSnapshot();
                         loadedFromDb = true;
+
+                        if (orphanedInDb.Count > 0) {
+                            _ = Task.Run(async () => {
+                                foreach (var orphan in orphanedInDb) {
+                                    try {
+                                        await _databaseService.RemoveGalleryMediaAsync(orphan, CancellationToken.None);
+                                    } catch { }
+                                }
+                            });
+                        }
                     }
                 } catch {
                     // Fallback to json cache if db query fails
@@ -93,7 +108,8 @@ public sealed class PostForgeShowcaseService {
                         lock (_items) {
                             _items.Clear();
                             foreach (var item in cached) {
-                                if (File.Exists(item.FilePath)) {
+                                bool belongs = configuredDirs.Any(d => item.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase));
+                                if (belongs && File.Exists(item.FilePath)) {
                                     _items[item.FilePath] = item;
                                 }
                             }
@@ -193,22 +209,70 @@ public sealed class PostForgeShowcaseService {
             await _settingsService.SaveSettingsAsync(settings);
         }
 
+        string cleanPath = directoryPath.TrimEnd('\\', '/');
+        List<string> removedKeys = new();
         lock (_items) {
-            var toRemove = _items.Keys.Where(k => k.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase)).ToList();
+            var toRemove = _items.Keys.Where(k =>
+                k.StartsWith(cleanPath + "\\", StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(cleanPath + "/", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(k, cleanPath, StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase)
+            ).ToList();
             foreach (var k in toRemove) {
                 _items.Remove(k);
+                removedKeys.Add(k);
             }
         }
 
         if (_databaseService != null) {
             try {
                 await _databaseService.RemoveGalleryMediaByFolderAsync(directoryPath, cancellationToken);
+                foreach (var k in removedKeys) {
+                    await _databaseService.RemoveGalleryMediaAsync(k, cancellationToken);
+                }
             } catch { }
         }
 
         UpdateSnapshot();
         await SaveCacheAsync(cancellationToken);
         OnShowcaseUpdated?.Invoke();
+    }
+
+    /// <summary>
+    /// Purges all cached and database records for directories that are no longer in configured ShowcaseDirectories.
+    /// </summary>
+    public async Task<int> PurgeOrphanedMediaAsync(CancellationToken cancellationToken = default) {
+        var dirs = GetConfiguredDirectories();
+        List<string> orphans;
+        lock (_items) {
+            orphans = _items.Keys
+                .Where(k => !dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            foreach (var o in orphans) {
+                _items.Remove(o);
+            }
+        }
+
+        if (_databaseService != null) {
+            try {
+                var allDb = await _databaseService.GetAllGalleryMediaAsync(cancellationToken);
+                var dbOrphans = allDb.Where(i => !dirs.Any(d => i.FilePath.StartsWith(d, StringComparison.OrdinalIgnoreCase))).ToList();
+                foreach (var item in dbOrphans) {
+                    await _databaseService.RemoveGalleryMediaAsync(item.FilePath, cancellationToken);
+                    if (!orphans.Contains(item.FilePath, StringComparer.OrdinalIgnoreCase)) {
+                        orphans.Add(item.FilePath);
+                    }
+                }
+            } catch { }
+        }
+
+        if (orphans.Count > 0) {
+            UpdateSnapshot();
+            await SaveCacheAsync(cancellationToken);
+            OnShowcaseUpdated?.Invoke();
+        }
+
+        return orphans.Count;
     }
 
     /// <summary>
@@ -257,6 +321,52 @@ public sealed class PostForgeShowcaseService {
         } catch { }
     }
 
+    private static readonly HashSet<string> ExcludedFolderNames = new(StringComparer.OrdinalIgnoreCase) {
+        ".git", ".github", ".vs", "bin", "obj", "node_modules", ".venv", "venv", "__pycache__", ".cache"
+    };
+
+    private static IEnumerable<string> EnumerateMediaFilesSafely(string rootDir) {
+        EnumerationOptions options = new() {
+            IgnoreInaccessible = true,
+            RecurseSubdirectories = false,
+            ReturnSpecialDirectories = false
+        };
+
+        Queue<string> dirsToVisit = new();
+        dirsToVisit.Enqueue(rootDir);
+
+        while (dirsToVisit.Count > 0) {
+            string currentDir = dirsToVisit.Dequeue();
+
+            IEnumerable<string> files;
+            try {
+                files = Directory.EnumerateFiles(currentDir, "*.*", options);
+            } catch {
+                continue;
+            }
+
+            foreach (string file in files) {
+                if (MediaMetadataExtractor.IsSupportedMedia(Path.GetExtension(file))) {
+                    yield return file;
+                }
+            }
+
+            IEnumerable<string> subDirs;
+            try {
+                subDirs = Directory.EnumerateDirectories(currentDir, "*", options);
+            } catch {
+                continue;
+            }
+
+            foreach (string subDir in subDirs) {
+                string name = Path.GetFileName(subDir);
+                if (!ExcludedFolderNames.Contains(name) && !name.StartsWith('.')) {
+                    dirsToVisit.Enqueue(subDir);
+                }
+            }
+        }
+    }
+
     public async Task ScanAllAsync(Action<string, int, int>? onProgress = null, CancellationToken cancellationToken = default) {
         if (_items.Count == 0 && _databaseService != null) {
             try {
@@ -266,85 +376,110 @@ public sealed class PostForgeShowcaseService {
 
         var dirs = GetConfiguredDirectories();
         List<string> candidateFiles = new();
+        HashSet<string> candidateFilesSet = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (var dir in dirs) {
+            if (!Directory.Exists(dir)) {
+                continue;
+            }
+
             try {
-                var files = Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories)
-                    .Where(f => MediaMetadataExtractor.IsSupportedMedia(Path.GetExtension(f)));
-                candidateFiles.AddRange(files);
+                foreach (string file in EnumerateMediaFilesSafely(dir)) {
+                    if (candidateFilesSet.Add(file)) {
+                        candidateFiles.Add(file);
+                    }
+                }
             } catch {
                 // Ignore inaccessible directories
             }
         }
 
         int total = candidateFiles.Count;
-        int current = 0;
         ScanTotalCount = total;
-        DateTime lastProgressReport = DateTime.MinValue;
-        List<ShowcaseMediaItem> incrementalBatch = new();
+        ScanCurrentIndex = 0;
 
-        foreach (var file in candidateFiles) {
-            cancellationToken.ThrowIfCancellationRequested();
-            current++;
-            ScanCurrentIndex = current;
-            ScanCurrentFile = Path.GetFileName(file);
-
-            // Throttle progress updates to at most once per 250ms to keep Blazor UI thread completely smooth
-            bool shouldReport = current == 1 || current == total || (DateTime.UtcNow - lastProgressReport).TotalMilliseconds >= 250;
-            if (shouldReport) {
-                lastProgressReport = DateTime.UtcNow;
-                onProgress?.Invoke(ScanCurrentFile, current, total);
-                OnScanProgress?.Invoke(ScanCurrentFile, current, total);
-            }
-
-            bool needsExtraction = false;
-            ShowcaseMediaItem? existing;
-            lock (_items) {
-                if (!_items.TryGetValue(file, out existing)) {
-                    needsExtraction = true;
+        // Identify files that are not yet cached
+        List<string> filesNeedingExtraction = new();
+        lock (_items) {
+            foreach (var file in candidateFiles) {
+                if (!_items.ContainsKey(file)) {
+                    filesNeedingExtraction.Add(file);
                 }
-            }
-
-            if (needsExtraction) {
-                var extracted = await MediaMetadataExtractor.ExtractAsync(file, cancellationToken);
-                lock (_items) {
-                    _items[file] = extracted;
-                }
-                incrementalBatch.Add(extracted);
-
-                // Incremental database save: persist every 25 newly discovered items
-                if (incrementalBatch.Count >= 25) {
-                    if (_databaseService != null) {
-                        try {
-                            await _databaseService.UpsertGalleryMediaBatchAsync(incrementalBatch, cancellationToken);
-                        } catch { }
-                    }
-                    incrementalBatch.Clear();
-                    UpdateSnapshot();
-                    OnShowcaseUpdated?.Invoke();
-                }
-            }
-
-            // Periodically yield thread time to avoid starving CPU or UI thread
-            if (current % 40 == 0) {
-                await Task.Delay(1, cancellationToken);
             }
         }
 
-        // Flush remaining newly extracted items to the database
-        if (incrementalBatch.Count > 0) {
-            if (_databaseService != null) {
+        int current = total - filesNeedingExtraction.Count;
+        ScanCurrentIndex = current;
+        DateTime lastProgressReport = DateTime.MinValue;
+
+        // Perform parallel metadata extraction for newly discovered media files
+        if (filesNeedingExtraction.Count > 0) {
+            int maxConcurrency = Math.Clamp(Environment.ProcessorCount, 4, 16);
+            using SemaphoreSlim throttler = new(maxConcurrency, maxConcurrency);
+            List<ShowcaseMediaItem> incrementalBatch = new();
+            object batchLock = new();
+
+            var tasks = filesNeedingExtraction.Select(async file => {
+                await throttler.WaitAsync(cancellationToken);
+                try {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var extracted = await MediaMetadataExtractor.ExtractAsync(file, cancellationToken);
+
+                    lock (_items) {
+                        _items[file] = extracted;
+                    }
+
+                    int cur = Interlocked.Increment(ref current);
+                    ScanCurrentIndex = cur;
+                    ScanCurrentFile = Path.GetFileName(file);
+
+                    bool shouldReport = cur == 1 || cur == total || (DateTime.UtcNow - lastProgressReport).TotalMilliseconds >= 250;
+                    if (shouldReport) {
+                        lastProgressReport = DateTime.UtcNow;
+                        onProgress?.Invoke(ScanCurrentFile, cur, total);
+                        OnScanProgress?.Invoke(ScanCurrentFile, cur, total);
+                    }
+
+                    bool shouldFlush = false;
+                    List<ShowcaseMediaItem>? flushBatch = null;
+                    lock (batchLock) {
+                        incrementalBatch.Add(extracted);
+                        if (incrementalBatch.Count >= 25) {
+                            flushBatch = incrementalBatch.ToList();
+                            incrementalBatch.Clear();
+                            shouldFlush = true;
+                        }
+                    }
+
+                    if (shouldFlush && flushBatch != null && _databaseService != null) {
+                        try {
+                            await _databaseService.UpsertGalleryMediaBatchAsync(flushBatch, cancellationToken);
+                        } catch { }
+                        UpdateSnapshot();
+                        OnShowcaseUpdated?.Invoke();
+                    }
+                } finally {
+                    throttler.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            // Flush remaining items
+            if (incrementalBatch.Count > 0 && _databaseService != null) {
                 try {
                     await _databaseService.UpsertGalleryMediaBatchAsync(incrementalBatch, cancellationToken);
                 } catch { }
+                incrementalBatch.Clear();
             }
-            incrementalBatch.Clear();
         }
 
-        // Clean up items for files that were deleted from disk
+        // Clean up items for files deleted from disk OR files belonging to removed directories
         lock (_items) {
-            var dead = _items.Keys.Where(k => !File.Exists(k)).ToList();
-            foreach (var d in dead) {
+            var toRemove = _items.Keys
+                .Where(k => !dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)) || !candidateFilesSet.Contains(k))
+                .ToList();
+            foreach (var d in toRemove) {
                 _items.Remove(d);
                 if (_databaseService != null) {
                     _ = _databaseService.RemoveGalleryMediaAsync(d, CancellationToken.None);

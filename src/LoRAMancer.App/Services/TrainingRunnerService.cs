@@ -22,6 +22,8 @@ public sealed class TrainingRunnerService {
     private readonly object _queueLock = new();
     private bool _isProcessingQueue;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _completionSources = new();
+    private volatile bool _completionDetected;
+    private TaskCompletionSource<bool>? _completionSignal;
 
     public TrainingProgress CurrentProgress { get; } = new();
     public TrainingJob? CurrentJob { get; private set; }
@@ -291,16 +293,30 @@ public sealed class TrainingRunnerService {
             pythonExe = "python.exe";
         }
 
+        int configuredSteps = 0;
+        if (!string.IsNullOrWhiteSpace(configYamlPath) && File.Exists(configYamlPath)) {
+            try {
+                string yamlText = File.ReadAllText(configYamlPath);
+                Match stepsMatch = Regex.Match(yamlText, @"(?:steps|max_train_steps)\s*:\s*(\d+)", RegexOptions.IgnoreCase);
+                if (stepsMatch.Success && int.TryParse(stepsMatch.Groups[1].Value, out int s)) {
+                    configuredSteps = s;
+                }
+            } catch {
+                // Non-fatal if config file cannot be read
+            }
+        }
+
         DateTime startedAt = DateTime.UtcNow;
         job.StartedAt = startedAt;
         _trainingCts?.Dispose();
         _trainingCts = new CancellationTokenSource();
         CurrentProgress.Status = TrainingStatus.Initializing;
         CurrentProgress.CurrentStep = 0;
-        CurrentProgress.TotalSteps = 1000;
+        CurrentProgress.TotalSteps = configuredSteps > 0 ? configuredSteps : 1000;
         CurrentProgress.CurrentLoss = 0.0;
         CurrentProgress.Elapsed = TimeSpan.Zero;
         job.Status = TrainingStatus.Initializing;
+        job.TotalSteps = CurrentProgress.TotalSteps;
         OnProgressUpdated?.Invoke(CurrentProgress);
 
         _stopwatch.Restart();
@@ -346,6 +362,11 @@ public sealed class TrainingRunnerService {
             }
         }
 
+        _completionDetected = false;
+        _completionSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        EnsureRunPyPatched(effectiveScriptPath, msg => OnLogReceived?.Invoke(msg));
+
         _currentProcess = new Process { StartInfo = startInfo };
 
         _currentProcess.OutputDataReceived += (_, e) => {
@@ -377,14 +398,29 @@ public sealed class TrainingRunnerService {
             _currentProcess.BeginOutputReadLine();
             _currentProcess.BeginErrorReadLine();
 
-            await _currentProcess.WaitForExitAsync(_trainingCts.Token);
+            var processExitTask = _currentProcess.WaitForExitAsync(_trainingCts.Token);
+            var signalTask = _completionSignal?.Task ?? Task.CompletedTask;
+            var firstCompleted = await Task.WhenAny(processExitTask, signalTask);
+
+            if (firstCompleted == signalTask && _completionDetected) {
+                OnLogReceived?.Invoke("[HOST] Training complete! Checkpoints and samples finalized. Reaping idle worker processes...");
+                try {
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    await processExitTask.WaitAsync(timeoutCts.Token);
+                } catch (OperationCanceledException) {
+                    KillCurrentProcess();
+                }
+            } else {
+                await processExitTask;
+            }
 
             if (_trainingCts.Token.IsCancellationRequested) {
                 CurrentProgress.Status = TrainingStatus.Cancelled;
                 job.Status = TrainingStatus.Cancelled;
-            } else if (_currentProcess.ExitCode == 0) {
+            } else if (_completionDetected || _currentProcess.ExitCode == 0) {
                 CurrentProgress.Status = TrainingStatus.Completed;
                 job.Status = TrainingStatus.Completed;
+                OnLogReceived?.Invoke($"[HOST] Job '{job.Name}' marked as COMPLETED successfully.");
             } else {
                 CurrentProgress.Status = TrainingStatus.Failed;
                 job.Status = TrainingStatus.Failed;
@@ -466,11 +502,20 @@ public sealed class TrainingRunnerService {
 
         OnLogReceived?.Invoke(line);
 
-        Match stepMatch = Regex.Match(line, @"(?:step|Step|\b)(\d+)\s*/\s*(\d+)", RegexOptions.IgnoreCase);
+        // Training progress step extraction (avoiding sub-progress like diffusers 20/20 sampling steps)
+        Match stepMatch = Regex.Match(line, @"(?:(?:\bstep\b|\bsteps\b)\s*[:=]?\s*(\d+)\s*/\s*(\d+)|\|\s*(\d+)\s*/\s*(\d+)\s*\[)", RegexOptions.IgnoreCase);
         if (stepMatch.Success) {
-            if (int.TryParse(stepMatch.Groups[1].Value, out int current) && int.TryParse(stepMatch.Groups[2].Value, out int total)) {
-                CurrentProgress.CurrentStep = current;
-                CurrentProgress.TotalSteps = total;
+            string curStr = !string.IsNullOrEmpty(stepMatch.Groups[1].Value) ? stepMatch.Groups[1].Value : stepMatch.Groups[3].Value;
+            string totStr = !string.IsNullOrEmpty(stepMatch.Groups[2].Value) ? stepMatch.Groups[2].Value : stepMatch.Groups[4].Value;
+
+            if (int.TryParse(curStr, out int current) && int.TryParse(totStr, out int total)) {
+                // Ensure sub-progress bars (e.g. 20/20 sampling iterations) do not overwrite macro training steps
+                if (total >= CurrentProgress.TotalSteps || CurrentProgress.TotalSteps <= 1) {
+                    CurrentProgress.TotalSteps = total;
+                    CurrentProgress.CurrentStep = current;
+                } else if (total == CurrentProgress.TotalSteps) {
+                    CurrentProgress.CurrentStep = current;
+                }
             }
         }
 
@@ -501,6 +546,44 @@ public sealed class TrainingRunnerService {
             CurrentJob.Status = CurrentProgress.Status;
         }
 
+        if (line.Contains("completed job", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("All training jobs finished", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Job completed", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Training complete", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Training finished", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Done training", StringComparison.OrdinalIgnoreCase)) {
+            _completionDetected = true;
+            _completionSignal?.TrySetResult(true);
+        }
+
         OnProgressUpdated?.Invoke(CurrentProgress);
+    }
+
+    private static void EnsureRunPyPatched(string scriptPath, Action<string>? onLog) {
+        try {
+            if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath)) {
+                return;
+            }
+
+            string content = File.ReadAllText(scriptPath);
+            if (content.Contains("# [loramancer] run-py-clean-exit")) {
+                return;
+            }
+
+            string normalized = content.Replace("\r\n", "\n");
+            string target = "                sys.exit(0)\n\n\nif __name__ == '__main__':";
+            if (!normalized.Contains(target)) {
+                target = "                sys.exit(0)\n\nif __name__ == '__main__':";
+            }
+
+            if (normalized.Contains(target)) {
+                string exitPatch = "                sys.exit(0)\n\n    # [loramancer] run-py-clean-exit\n    print_end_message(jobs_completed, jobs_failed)\n    print_acc(\"[AI-Toolkit] All training jobs finished successfully.\")\n    sys.stdout.flush()\n    sys.stderr.flush()\n    import os\n    os._exit(0 if jobs_failed == 0 else 1)\n\nif __name__ == '__main__':";
+                normalized = normalized.Replace(target, exitPatch);
+                File.WriteAllText(scriptPath, normalized);
+                onLog?.Invoke("[HOST] Auto-patched AI-Toolkit run.py with clean process exit guard.");
+            }
+        } catch {
+            // Non-fatal if script is read-only
+        }
     }
 }

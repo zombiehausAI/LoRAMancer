@@ -1,0 +1,1591 @@
+@page "/recipe"
+@page "/prep"
+@using LoRAMancer.App.Models
+@using LoRAMancer.App.Services
+@using LoRAMancer.App.Engines
+@using System.IO
+@using System.Collections
+@using System.Globalization
+@using YamlDotNet.Serialization
+@inject NativeFileDialogService FileDialogService
+@inject AiToolkitConfigBuilder ConfigBuilder
+@inject ModelArchitectureRegistry ArchitectureRegistry
+@inject TrainingEstimationService EstimationService
+@inject DatasetInspectorService DatasetInspector
+@inject IDialogService DialogService
+@inject NavigationManager NavManager
+@inject ISnackbar Snackbar
+@inject ThemeService ThemeManager
+@inject TrainingRecipeService RecipeService
+@inject ModusFlowPromptService PromptService
+@inject StudioSessionService StudioSession
+@inject TrainingRunnerService TrainingRunner
+@inject LoraLibraryService LibraryService
+@inject LoraChopShopService ChopShopService
+@implements IDisposable
+
+<div class="d-flex align-center justify-space-between flex-wrap gap-3 mb-4" style="position: relative; z-index: 10;">
+    <div class="d-flex align-center gap-3">
+        <div style="@($"width: 48px; height: 48px; border-radius: 14px; background: linear-gradient(135deg, {ThemeManager.EffectivePrimaryColor}33, {ThemeManager.EffectivePrimaryColor}11); border: 1px solid {ThemeManager.EffectivePrimaryColor}55; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px {ThemeManager.EffectivePrimaryColor}33;")">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Style="@($"color: {ThemeManager.EffectivePrimaryColor}; font-size: 1.8rem;")" />
+        </div>
+        <div>
+            <div class="d-flex align-center gap-2">
+                <MudText Typo="Typo.h5" Style="font-weight: 800; color: var(--text-primary); letter-spacing: -0.3px;">
+                    Stage 2: Recipe Studio &amp; Configuration Forge
+                </MudText>
+                <MudChip T="string" Color="Color.Primary" Size="Size.Small" Variant="Variant.Outlined">
+                    AI-Toolkit Engine
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Assemble high-precision LoRA recipes, incorporate auxiliary conditioning LoRAs, and dispatch directly to the training forge
+            </MudText>
+        </div>
+    </div>
+    
+    <div class="d-flex align-center flex-wrap gap-2" style="position: relative; z-index: 10;">
+        <div class="d-flex align-center gap-2 pa-1 px-3" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark); border-radius: 20px;">
+            <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Style="@($"color: {(_isProMode ? ThemeManager.EffectivePrimaryColor : "var(--text-secondary)")};")" />
+            <MudSwitch @bind-Value="_isProMode" Color="Color.Primary" Label="Pro Mode" />
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.MenuBook" OnClick="OpenDocumentation">
+            Docs
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.Code" OnClick="ToggleYamlPreview">
+            @(_showYamlPreview ? "Hide YAML" : "Preview YAML")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveAsPresetAsync">
+            Save Preset
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="SendToForgeAndLaunchAsync" Disabled="@_isBusy">
+            Send to Forge &amp; Launch
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Queue" OnClick="SendToForgeQueueOnlyAsync" Disabled="@_isBusy">
+            Queue Only
+        </MudButton>
+    </div>
+</div>
+
+<!-- Drag & Drop YAML Configuration Zone -->
+<div class="mb-4 pa-3 drop-zone d-flex align-center justify-space-between flex-wrap gap-2"
+     style="position: relative; overflow: hidden; background: linear-gradient(135deg, rgba(137, 180, 250, 0.07) 0%, rgba(203, 166, 247, 0.07) 100%); border: 2px dashed rgba(137, 180, 250, 0.45); border-radius: 14px; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);">
+    <InputFile OnChange="OnYamlFileDropped" accept=".yaml,.yml"
+               style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 2;"
+               title="Drag &amp; Drop AI-Toolkit YAML configuration file here or click to browse" />
+    <div class="d-flex align-center gap-3" style="position: relative; z-index: 1; pointer-events: none;">
+        <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(137, 180, 250, 0.16); border: 1px solid rgba(137, 180, 250, 0.3); display: flex; align-items: center; justify-content: center;">
+            <MudIcon Icon="@Icons.Material.Filled.FileUpload" Style="color: #89b4fa; font-size: 1.6rem;" />
+        </div>
+        <div>
+            <div class="d-flex align-center gap-2">
+                <span style="font-weight: 700; font-size: 0.95rem; color: #cdd6f4;">
+                    Drag &amp; Drop AI-Toolkit YAML Config
+                </span>
+                <MudChip T="string" Color="Color.Info" Size="Size.Small" Variant="Variant.Filled" Style="font-size: 0.7rem; height: 20px; font-weight: 600;">
+                    .YAML / .YML
+                </MudChip>
+            </div>
+            <div style="font-size: 0.78rem; color: #a6adc8; margin-top: 2px;">
+                Drop any AI-Toolkit config onto this area to auto-load dataset paths, base models, hyperparameters, and prompts into Recipe &amp; Prep. Or click to browse.
+            </div>
+        </div>
+    </div>
+    <div class="d-flex align-center gap-2" style="position: relative; z-index: 1; pointer-events: none;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.FileOpen">
+            Browse YAML
+        </MudButton>
+    </div>
+</div>
+
+<!-- Favorite & Custom Training Recipes Preset Bar -->
+<div class="pa-3 mb-4" 
+     style="background: linear-gradient(135deg, rgba(203, 166, 247, 0.08) 0%, var(--bg-dark-surface) 100%); border: 1px solid rgba(203, 166, 247, 0.25); border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+    <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+        <div class="d-flex align-center gap-3 flex-grow-1" style="min-width: 280px;">
+            <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(203, 166, 247, 0.15); border: 1px solid rgba(203, 166, 247, 0.4); display: flex; align-items: center; justify-content: center;">
+                <MudIcon Icon="@Icons.Material.Filled.Bookmarks" Style="color: #cba6f7; font-size: 1.25rem;" />
+            </div>
+            <div class="flex-grow-1">
+                <MudSelect T="string" 
+                           Value="_selectedRecipeId" 
+                           ValueChanged="OnRecipeSelected" 
+                           Label="Load Favorite &amp; Saved Training Recipes" 
+                           Variant="Variant.Outlined" 
+                           Margin="Margin.Dense"
+                           ShrinkLabel="true"
+                           AnchorOrigin="Origin.BottomCenter">
+                    <MudSelectItem T="string" Value="@("")">-- Default Configuration --</MudSelectItem>
+                    @foreach (var recipe in _savedRecipes) {
+                        <MudSelectItem T="string" Value="@recipe.Id">
+                            @(recipe.IsFavorite ? "⭐ " : "")@(recipe.Name) (@(recipe.TargetBaseModel) &bull; r:@(recipe.NetworkDim) &bull; @(recipe.SubjectType))
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+        </div>
+        <div class="d-flex align-center gap-2">
+            @if (_donorLora != null) {
+                <MudChip T="string" Color="Color.Info" Variant="Variant.Filled" Size="Size.Small" Icon="@Icons.Material.Filled.ContentCopy" OnClose="ClearDonorLora">
+                    Cloned: @_donorLora.FileName
+                </MudChip>
+            }
+        </div>
+    </div>
+</div>
+
+@if (_showYamlPreview) {
+    <div class="pa-4 mb-4 rounded-lg" style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Terminal" Color="Color.Tertiary" />
+                <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: var(--text-primary);">Live AI-Toolkit YAML Preview</MudText>
+            </div>
+            <div class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyYamlToClipboard">
+                    Copy YAML
+                </MudButton>
+                <MudButton Variant="Variant.Text" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download" OnClick="ExportYamlAsync">
+                    Save to File...
+                </MudButton>
+            </div>
+        </div>
+        <pre style="margin: 0; padding: 12px; max-height: 250px; overflow-y: auto; background-color: #0b0c10; border-radius: 8px; font-family: 'Consolas', 'Fira Code', monospace; font-size: 0.8rem; color: #a6e3a1; border: 1px solid #1e1e2e;">@GetLiveYamlPreview()</pre>
+    </div>
+}
+
+<MudGrid Spacing="3">
+    <!-- COLUMN 1: Model Architecture & Auxiliary Conditioning LoRA -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2" Style="border: 1px solid var(--border-dark); border-radius: 12px; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Primary" Variant="Variant.Filled">
+                        <MudIcon Icon="@Icons.Material.Filled.Layers" />
+                    </MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Base Architecture &amp; Auxiliary LoRA</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Target diffusion model and prior adapter conditioning</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent Class="pt-0">
+                <div class="d-flex flex-column gap-3">
+                    <MudSelect T="string" 
+                               Label="Target Base Model" 
+                               @bind-Value="_targetBaseModel" 
+                               Variant="Variant.Outlined" 
+                               Margin="Margin.Dense"
+                               AnchorOrigin="Origin.BottomCenter"
+                               SelectedValuesChanged="OnTargetBaseModelChanged">
+                        @foreach (var arch in ArchitectureRegistry.GetAll()) {
+                            <MudSelectItem Value="@arch.DisplayName">
+                                @arch.DisplayName (@arch.Family &bull; @arch.DefaultResolution x @arch.DefaultResolution)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    @if (_isProMode) {
+                        <div class="d-flex align-center gap-2">
+                            <MudTextField @bind-Value="_customBaseModelPath" 
+                                          Label="Custom Model File/Repo (Optional Override)" 
+                                          Variant="Variant.Outlined" 
+                                          Margin="Margin.Dense" 
+                                          Class="flex-grow-1" />
+                            <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" 
+                                           Variant="Variant.Outlined" 
+                                           Color="Color.Default" 
+                                           OnClick="BrowseCustomModelFileAsync" />
+                        </div>
+                    }
+
+                    <MudDivider Class="my-2" />
+
+                    <!-- Auxiliary LoRA (Conditioning LoRA) Section -->
+                    <div class="pa-3 rounded-lg" style="background: rgba(203, 166, 247, 0.05); border: 1px solid rgba(203, 166, 247, 0.2);">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Extension" Color="Color.Tertiary" />
+                                <div>
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700; color: #cba6f7;">
+                                        Incorporate Auxiliary LoRA
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Condition training on an existing frozen LoRA (residual delta training)
+                                    </MudText>
+                                </div>
+                            </div>
+                            <MudSwitch @bind-Value="_enableAuxiliaryLora" Color="Color.Tertiary" />
+                        </div>
+
+                        @if (_enableAuxiliaryLora) {
+                            @if (!string.IsNullOrWhiteSpace(_auxiliaryLoraPath) && File.Exists(_auxiliaryLoraPath)) {
+                                <div class="pa-3 rounded-lg mt-2" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                                    <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                                        <div class="d-flex align-center gap-2" style="min-width: 0;">
+                                            <MudIcon Icon="@Icons.Material.Filled.Memory" Color="Color.Primary" />
+                                            <div style="min-width: 0;">
+                                                <MudText Typo="Typo.body2" Style="font-weight: 700;" Class="text-truncate">
+                                                    @Path.GetFileName(_auxiliaryLoraPath)
+                                                </MudText>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="text-truncate">
+                                                    @_auxiliaryLoraPath
+                                                </MudText>
+                                            </div>
+                                        </div>
+                                        <div class="d-flex align-center gap-1">
+                                            @if (IsAuxiliaryCompatible()) {
+                                                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Outlined">
+                                                    ✓ Compatible Architecture
+                                                </MudChip>
+                                            } else {
+                                                <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Outlined">
+                                                    ⚠ Check Architecture Parity
+                                                </MudChip>
+                                            }
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="ClearAuxiliaryLora" />
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-3">
+                                        <div class="d-flex align-center justify-space-between mb-1">
+                                            <MudText Typo="Typo.caption" Style="color: var(--text-secondary); font-weight: 600;">
+                                                Auxiliary LoRA Multiplier / Conditioning Strength:
+                                            </MudText>
+                                            <MudText Typo="Typo.caption" Style="font-weight: 700; color: #cba6f7;">
+                                                @_auxiliaryLoraWeight.ToString("0.00")x
+                                            </MudText>
+                                        </div>
+                                        <MudSlider @bind-Value="_auxiliaryLoraWeight" Min="0.1" Max="2.0" Step="0.05" Color="Color.Tertiary" ValueLabel="true" />
+                                    </div>
+
+                                    <!-- Surgical Chop-Shop Layer Filter -->
+                                    <div class="mt-3 pa-2 rounded-lg" style="background-color: rgba(203, 166, 247, 0.08); border: 1px solid rgba(203, 166, 247, 0.25);">
+                                        <div class="d-flex align-center justify-space-between mb-2">
+                                            <div class="d-flex align-center gap-2">
+                                                <MudIcon Icon="@Icons.Material.Filled.ContentCut" Size="Size.Small" Style="color: #cba6f7;" />
+                                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: #cba6f7;">
+                                                    Surgical Layer Filter (Chop-Shop)
+                                                </MudText>
+                                            </div>
+                                            <MudButton Variant="Variant.Text" 
+                                                       Size="Size.Small" 
+                                                       Color="Color.Tertiary" 
+                                                       StartIcon="@(_showChopShopMatrix ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.Tune)"
+                                                       OnClick="@(() => _showChopShopMatrix = !_showChopShopMatrix)">
+                                                @(_showChopShopMatrix ? "Hide Matrix" : "Configure Matrix")
+                                            </MudButton>
+                                        </div>
+
+                                        <MudSelect T="string" 
+                                                   Value="_auxiliaryPartPreset" 
+                                                   ValueChanged="OnAuxiliaryPartPresetChanged" 
+                                                   Label="Conditioning Parts Preset" 
+                                                   Variant="Variant.Outlined" 
+                                                   Margin="Margin.Dense" 
+                                                   Dense="true" 
+                                                   Class="mb-2">
+                                            <MudSelectItem Value="@("All")">🌟 All Components (100% Full Model)</MudSelectItem>
+                                            <MudSelectItem Value="@("VisualOnly")">🎨 Visual DiT / UNet Only (Exclude Text Encoders - Prevents Prompt Bleed)</MudSelectItem>
+                                            <MudSelectItem Value="@("TextEncoderOnly")">🔤 Prompt Triggers &amp; Steering Only (Text Encoders Only)</MudSelectItem>
+                                            <MudSelectItem Value="@("IdentityOnly")">👤 Identity &amp; Bone Structure Only (Mid-blocks)</MudSelectItem>
+                                            <MudSelectItem Value="@("LightingOnly")">💡 Lighting, Palette &amp; Mood Only (Early input blocks)</MudSelectItem>
+                                            <MudSelectItem Value="@("DetailOnly")">🔍 Detail, Texture &amp; Skin Pores Only (Output blocks)</MudSelectItem>
+                                            <MudSelectItem Value="@("Custom")">✂️ Custom Chop-Shop Matrix</MudSelectItem>
+                                        </MudSelect>
+
+                                        <!-- Active parts chips badges -->
+                                        <div class="d-flex flex-wrap gap-1 align-center mb-1">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem;">Active Parts (@GetActivePartCount()/7):</MudText>
+                                            @foreach (var cat in Enum.GetValues<ChopPartCategory>()) {
+                                                bool active = IsPartActive(cat);
+                                                double w = GetPartWeight(cat);
+                                                <MudChip T="string" 
+                                                         Size="Size.Small" 
+                                                         Variant="@(active ? Variant.Filled : Variant.Outlined)" 
+                                                         Color="@(active ? Color.Tertiary : Color.Default)"
+                                                         Style="@(active ? "font-size: 0.68rem; height: 20px;" : "font-size: 0.68rem; height: 20px; opacity: 0.5;")"
+                                                         OnClick="@(() => TogglePart(cat))">
+                                                    @GetCategoryDisplayBadge(cat) @(active && Math.Abs(w - 1.0) > 0.05 ? $"({w:0.0}x)" : "")
+                                                </MudChip>
+                                            }
+                                        </div>
+
+                                        @if (_showChopShopMatrix) {
+                                            <div class="pa-2 rounded mt-2" style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark);">
+                                                <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-primary);" Class="mb-2 d-block">
+                                                    Fine-Tune Component Weights &amp; Layer Inclusion:
+                                                </MudText>
+                                                <div class="d-flex flex-column gap-2">
+                                                    @foreach (var cat in Enum.GetValues<ChopPartCategory>()) {
+                                                        bool active = IsPartActive(cat);
+                                                        double w = GetPartWeight(cat);
+                                                        <div class="d-flex align-center justify-space-between pa-1 px-2 rounded" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                                                            <div class="d-flex align-center gap-2" style="min-width: 140px;">
+                                                                <MudCheckBox T="bool" 
+                                                                             Value="active" 
+                                                                             ValueChanged="@(_ => TogglePart(cat))" 
+                                                                             Color="Color.Tertiary" 
+                                                                             Dense="true" 
+                                                                             Size="Size.Small" />
+                                                                <div>
+                                                                    <MudText Typo="Typo.caption" Style="font-weight: 600; color: var(--text-primary);">
+                                                                        @GetCategoryDisplayName(cat)
+                                                                    </MudText>
+                                                                    <MudText Typo="Typo.caption" Style="font-size: 0.65rem; color: var(--text-secondary); display: block;">
+                                                                        @GetCategoryDescription(cat)
+                                                                    </MudText>
+                                                                </div>
+                                                            </div>
+                                                            <div class="d-flex align-center gap-2" style="width: 130px;">
+                                                                <MudSlider T="double" 
+                                                                           Value="w" 
+                                                                           ValueChanged="@(val => SetPartWeight(cat, val))" 
+                                                                           Min="0.1" Max="1.5" Step="0.1" 
+                                                                           Color="Color.Tertiary" 
+                                                                           Disabled="@(!active)" 
+                                                                           Size="Size.Small" />
+                                                                <MudText Typo="Typo.caption" Style="font-weight: 700; width: 35px; text-align: right; color: #cba6f7;">
+                                                                    @(active ? $"{w:0.0}x" : "OFF")
+                                                                </MudText>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            } else {
+                                <div class="pa-4 rounded-lg mt-2 text-center" style="border: 1px dashed var(--border-dark); background-color: rgba(255,255,255,0.02);">
+                                    <MudIcon Icon="@Icons.Material.Filled.ExtensionOff" Color="Color.Default" Size="Size.Large" Class="mb-1" />
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">No Auxiliary LoRA attached to recipe</MudText>
+                                    <div class="d-flex justify-center gap-2 mt-2">
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.CollectionsBookmark" OnClick="ToggleLibraryPicker">
+                                            Select from Library
+                                        </MudButton>
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseAuxiliaryLoraFileAsync">
+                                            Browse File...
+                                        </MudButton>
+                                    </div>
+                                </div>
+                            }
+
+                            @if (_showLibraryPicker) {
+                                <div class="pa-3 rounded-lg mt-3" style="background-color: var(--bg-dark-base); border: 1px solid var(--border-dark); max-height: 260px; overflow-y: auto;">
+                                    <div class="d-flex align-center justify-space-between mb-2">
+                                        <MudText Typo="Typo.caption" Style="font-weight: 700; color: var(--text-primary);">Choose Model from SQLite Library</MudText>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _showLibraryPicker = false)" />
+                                    </div>
+                                    <MudTextField @bind-Value="_librarySearchQuery" Placeholder="Filter models by name..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Immediate="true" />
+                                    <div class="d-flex flex-column gap-1">
+                                        @foreach (var item in FilteredLibraryItems) {
+                                            <div class="d-flex align-center justify-space-between pa-2 rounded" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                                                <div class="d-flex flex-column" style="min-width: 0;">
+                                                    <MudText Typo="Typo.body2" Style="font-weight: 700;" Class="text-truncate">@item.FileName</MudText>
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@(item.EffectiveBaseModel ?? "Unknown") &bull; @(item.NetworkDim.HasValue ? $"r:{item.NetworkDim}" : "")</MudText>
+                                                </div>
+                                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Tertiary" OnClick="@(() => SelectAuxiliaryFromLibrary(item))">
+                                                    Attach
+                                                </MudButton>
+                                            </div>
+                                        }
+                                        @if (!FilteredLibraryItems.Any()) {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="text-center pa-2">No matching models found in library.</MudText>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- COLUMN 2: Dataset & Concept Specification -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2" Style="border: 1px solid var(--border-dark); border-radius: 12px; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Tertiary" Variant="Variant.Filled">
+                        <MudIcon Icon="@Icons.Material.Filled.Collections" />
+                    </MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Dataset &amp; Concept</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Training image source, triggers, and sample validation prompts</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent Class="pt-0">
+                <div class="d-flex flex-column gap-3">
+                    <MudTextField @bind-Value="_runName" 
+                                  Label="Run Name / Output Prefix" 
+                                  Variant="Variant.Outlined" 
+                                  Margin="Margin.Dense" 
+                                  Required="true" 
+                                  HelperText="Will name the resulting .safetensors LoRA" />
+
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_datasetDirectory" 
+                                      Label="Dataset Directory" 
+                                      Variant="Variant.Outlined" 
+                                      Margin="Margin.Dense" 
+                                      Required="true" 
+                                      Class="flex-grow-1" 
+                                      TextChanged="OnDatasetDirectoryChanged" />
+                        <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" 
+                                       Variant="Variant.Outlined" 
+                                       Color="Color.Default" 
+                                       OnClick="BrowseDatasetDirectoryAsync" />
+                        <MudTooltip Text="Open in Stage 1: Curate & Caption">
+                            <MudIconButton Icon="@Icons.Material.Filled.EditNote" 
+                                           Variant="Variant.Outlined" 
+                                           Color="Color.Tertiary" 
+                                           OnClick="OpenCurateStudio" />
+                        </MudTooltip>
+                    </div>
+
+                    <!-- Dataset Inspector Card -->
+                    @if (!string.IsNullOrWhiteSpace(_datasetDirectory)) {
+                        <div class="pa-2 px-3 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                            <div class="d-flex align-center justify-space-between flex-wrap gap-2">
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                    <MudText Typo="Typo.caption" Style="font-weight: 700;">
+                                        @_datasetImageCount Images Detected
+                                    </MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">&bull;</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @_datasetCaptionCount Captions (.txt)
+                                    </MudText>
+                                </div>
+                                <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh" OnClick="InspectDatasetAsync">
+                                    Refresh Audit
+                                </MudButton>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField @bind-Value="_outputDirectory" 
+                                      Label="Output Directory (Optional)" 
+                                      Variant="Variant.Outlined" 
+                                      Margin="Margin.Dense" 
+                                      Class="flex-grow-1" />
+                        <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" 
+                                       Variant="Variant.Outlined" 
+                                       Color="Color.Default" 
+                                       OnClick="BrowseOutputDirectoryAsync" />
+                    </div>
+
+                    <MudTextField @bind-Value="_triggerWord" 
+                                  Label="Trigger Keyword / Concept Identifier" 
+                                  Placeholder="e.g. ohwx, zmb_style, cyber_armor" 
+                                  Variant="Variant.Outlined" 
+                                  Margin="Margin.Dense" 
+                                  HelperText="Optional unique token prepended during inference" />
+
+                    <!-- ModusFlow Prompt Preset Integration -->
+                    <MudSelect T="string" 
+                               Label="@($"Load ModusFlow Preset into Active Sample ({_activePromptTab + 1})")" 
+                               Variant="Variant.Outlined" 
+                               Margin="Margin.Dense" 
+                               ShrinkLabel="true"
+                               AnchorOrigin="Origin.BottomCenter"
+                               ValueChanged="OnSamplePresetSelected">
+                        <MudSelectItem T="string" Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
+                        @foreach (var prompt in _savedModusPrompts) {
+                            <MudSelectItem T="string" Value="@prompt.Name">
+                                @prompt.Name (@prompt.Category)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    <!-- Milestone Validation Sample Prompts (Up to 3 Slots) -->
+                    <div class="pa-2 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                        <MudTabs @bind-ActivePanelIndex="_activePromptTab" Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-2">
+                            <MudTabPanel Text="Sample 1 (Primary)" Icon="@Icons.Material.Filled.LooksOne">
+                                <MudTextField @bind-Value="_samplePrompt1" 
+                                              Label="Sample Prompt 1 (Primary)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. A photo of {trigger}, cinematic lighting, highly detailed" />
+                            </MudTabPanel>
+                            <MudTabPanel Text="Sample 2" Icon="@Icons.Material.Filled.LooksTwo">
+                                <MudTextField @bind-Value="_samplePrompt2" 
+                                              Label="Sample Prompt 2 (Optional - Alternate Angle)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. Close-up portrait of {trigger}, studio lighting" />
+                            </MudTabPanel>
+                            <MudTabPanel Text="Sample 3" Icon="@Icons.Material.Filled.Looks3">
+                                <MudTextField @bind-Value="_samplePrompt3" 
+                                              Label="Sample Prompt 3 (Optional - Dynamic Action)" 
+                                              Variant="Variant.Outlined" 
+                                              Margin="Margin.Dense" 
+                                              Lines="2" 
+                                              Placeholder="e.g. Full-body shot of {trigger}, dynamic pose, outdoor natural sunlight" />
+                            </MudTabPanel>
+                        </MudTabs>
+
+                        <div class="d-flex align-center gap-2 mt-2">
+                            <MudTextField @bind-Value="_negativePrompt" 
+                                          Label="Validation Negative Prompt (Shared across samples)" 
+                                          Variant="Variant.Outlined" 
+                                          Margin="Margin.Dense" 
+                                          Lines="2" 
+                                          Class="flex-grow-1"
+                                          Placeholder="e.g. blurry, low quality, distorted, bad anatomy" 
+                                          HelperText="Negative visual qualities penalized across all milestone validation renders" />
+                            <MudTooltip Text="Reset to Architecture Default Negative Prompt">
+                                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" 
+                                               Variant="Variant.Outlined" 
+                                               Color="Color.Default" 
+                                               OnClick="ResetNegativePromptToDefault" />
+                            </MudTooltip>
+                        </div>
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- COLUMN 3: Hyperparameters & Training Dynamics -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2" Style="border: 1px solid var(--border-dark); border-radius: 12px; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Info" Variant="Variant.Filled">
+                        <MudIcon Icon="@Icons.Material.Filled.Tune" />
+                    </MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Hyperparameters &amp; Dynamics</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Rank, alpha, learning rates, optimizer, and epochs</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent Class="pt-0">
+                <div class="d-flex flex-column gap-3">
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_networkDim" Label="Network Dim (Rank)" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="256" Class="flex-grow-1" />
+                        <MudNumericField @bind-Value="_networkAlpha" Label="Network Alpha" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0.1" Max="256.0" Class="flex-grow-1" />
+                    </div>
+
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_learningRate" Label="Base Learning Rate" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.00005" Format="0.#####e+00" Class="flex-grow-1" />
+                        <MudSelect T="string" Label="Optimizer" @bind-Value="_optimizer" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" AnchorOrigin="Origin.BottomCenter">
+                            <MudSelectItem Value="@("adamw")">AdamW</MudSelectItem>
+                            <MudSelectItem Value="@("adamw8bit")">AdamW 8-bit</MudSelectItem>
+                            <MudSelectItem Value="@("prodigy")">Prodigy (Adaptive)</MudSelectItem>
+                            <MudSelectItem Value="@("lion")">Lion</MudSelectItem>
+                            <MudSelectItem Value="@("adafactor")">Adafactor</MudSelectItem>
+                        </MudSelect>
+                    </div>
+
+                    @if (_isProMode) {
+                        <div class="d-flex align-center gap-3">
+                            <MudNumericField @bind-Value="_unetLearningRate" Label="UNet LR (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.00005" Format="0.#####e+00" Class="flex-grow-1" />
+                            <MudNumericField @bind-Value="_textEncoderLearningRate" Label="Text Encoder LR (Optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.00005" Format="0.#####e+00" Class="flex-grow-1" />
+                        </div>
+
+                        <div class="d-flex align-center gap-3">
+                            <MudSelect T="string" Label="LR Scheduler" @bind-Value="_lrScheduler" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" AnchorOrigin="Origin.BottomCenter">
+                                <MudSelectItem Value="@("cosine")">Cosine</MudSelectItem>
+                                <MudSelectItem Value="@("cosine_with_restarts")">Cosine with Restarts</MudSelectItem>
+                                <MudSelectItem Value="@("constant")">Constant</MudSelectItem>
+                                <MudSelectItem Value="@("linear")">Linear</MudSelectItem>
+                            </MudSelect>
+                            <MudSelect T="string" Label="Precision" @bind-Value="_precision" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" AnchorOrigin="Origin.BottomCenter">
+                                <MudSelectItem Value="@("bf16")">bfloat16 (Recommended)</MudSelectItem>
+                                <MudSelectItem Value="@("fp16")">float16</MudSelectItem>
+                                <MudSelectItem Value="@("fp8")">fp8 (VRAM Saver)</MudSelectItem>
+                            </MudSelect>
+                        </div>
+                    }
+
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_epochs" Label="Max Train Epochs" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="1000" Class="flex-grow-1" />
+                        <MudNumericField @bind-Value="_repeats" Label="Dataset Repeats" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100" Class="flex-grow-1" />
+                        <MudNumericField @bind-Value="_batchSize" Label="Batch Size" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="32" Class="flex-grow-1" />
+                    </div>
+
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_totalSteps" Label="Manual Total Steps (Override)" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100000" Clearable="true" HelperText="Leave empty to auto-calculate from epochs, repeats & dataset" Class="flex-grow-1" />
+                    </div>
+
+                    <div class="d-flex align-center flex-wrap gap-4 pt-1">
+                        <MudCheckBox @bind-Value="_cacheLatentsToDisk" Label="Cache Latents to Disk" Color="Color.Primary" Dense="true" />
+                        <MudCheckBox @bind-Value="_shuffleTokens" Label="Shuffle Caption Tokens" Color="Color.Primary" Dense="true" />
+                        <MudCheckBox @bind-Value="_flipAug" Label="Horizontal Flip Augmentation (flip_x)" Color="Color.Primary" Dense="true" />
+                    </div>
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- COLUMN 4: Live Hardware Estimators & Pre-Flight Check -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2" Style="border: 1px solid var(--border-dark); border-radius: 12px; height: 100%;">
+            <MudCardHeader>
+                <CardHeaderAvatar>
+                    <MudAvatar Color="Color.Warning" Variant="Variant.Filled">
+                        <MudIcon Icon="@Icons.Material.Filled.Speed" />
+                    </MudAvatar>
+                </CardHeaderAvatar>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6" Style="font-weight: 700;">Live Estimators &amp; Safety</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Pre-flight hardware validation and compute benchmarks</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent Class="pt-0">
+                <div class="d-flex flex-column gap-3">
+                    <div class="pa-3 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                        <div class="d-flex align-center justify-space-between mb-2">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Estimated Peak VRAM</MudText>
+                            <MudChip T="string" Color="@(GetEstimatedVram() > 16.0 ? Color.Warning : Color.Success)" Size="Size.Small" Variant="Variant.Filled">
+                                ~@GetEstimatedVram().ToString("0.0") GB VRAM
+                            </MudChip>
+                        </div>
+                        <MudProgressLinear Color="@(GetEstimatedVram() > 16.0 ? Color.Warning : Color.Success)" Value="@(Math.Min(100, (int)(GetEstimatedVram() / 24.0 * 100)))" Rounded="true" Size="Size.Medium" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1 d-block">
+                            Calculated for @(_targetBaseModel) with rank @(_networkDim) and batch size @(_batchSize).
+                        </MudText>
+                    </div>
+
+                    <div class="pa-3 rounded-lg" style="background-color: var(--bg-dark-surface); border: 1px solid var(--border-dark);">
+                        <div class="d-flex align-center justify-space-between">
+                            <div>
+                                <div class="d-flex align-center gap-2">
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 700;">Total Training Steps</MudText>
+                                    @if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">Manual Override</MudChip>
+                                    }
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+                                        <span>Manual override: @_totalSteps.Value.ToString("N0") steps (Auto formula: @GetCalculatedAutomaticSteps().ToString("N0") steps)</span>
+                                    } else {
+                                        <span>@_datasetImageCount images &times; @_repeats repeats &times; @_epochs epochs / batch @_batchSize</span>
+                                    }
+                                </MudText>
+                            </div>
+                            <MudText Typo="Typo.h6" Style="font-weight: 800; color: #89b4fa;">
+                                @GetCalculatedTotalSteps().ToString("N0") Steps
+                            </MudText>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-center gap-3">
+                        <MudNumericField @bind-Value="_saveEveryNEpochs" Label="Save Checkpoint Every N Epochs" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="100" Class="flex-grow-1" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_preFlightWarning)) {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
+                            @_preFlightWarning
+                        </MudAlert>
+                    }
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+@code {
+    [SupplyParameterFromQuery(Name = "auxLora")]
+    public string? AuxLoraQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "donorLora")]
+    public string? DonorLoraQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dataset")]
+    public string? DatasetQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "recipeId")]
+    public string? RecipeIdQuery { get; set; }
+
+    private bool _isProMode = false;
+    private bool _isBusy = false;
+    private bool _showYamlPreview = false;
+    private bool _showLibraryPicker = false;
+    private string _librarySearchQuery = string.Empty;
+
+    private string _runName = "lora_run_01";
+    private string _targetBaseModel = "FLUX.1-dev";
+    private string _customBaseModelPath = string.Empty;
+    private string _datasetDirectory = string.Empty;
+    private string _outputDirectory = string.Empty;
+    private string _triggerWord = string.Empty;
+    private int _activePromptTab = 0;
+    private string _samplePrompt1 = string.Empty;
+    private string _samplePrompt2 = string.Empty;
+    private string _samplePrompt3 = string.Empty;
+    private string _negativePrompt = string.Empty;
+
+    // Auxiliary LoRA State
+    private bool _enableAuxiliaryLora = false;
+    private string _auxiliaryLoraPath = string.Empty;
+    private double _auxiliaryLoraWeight = 1.0;
+    private string _auxiliaryPartPreset = "All";
+    private bool _showChopShopMatrix = false;
+    private readonly Dictionary<ChopPartCategory, double> _auxiliaryPartWeights = new() {
+        [ChopPartCategory.LightingAndAmbiance] = 1.0,
+        [ChopPartCategory.FaceAndAnatomy] = 1.0,
+        [ChopPartCategory.ClothingAndOutfit] = 1.0,
+        [ChopPartCategory.HairAndHairstyle] = 1.0,
+        [ChopPartCategory.EyesAndIris] = 1.0,
+        [ChopPartCategory.SkinAndMicroDetails] = 1.0,
+        [ChopPartCategory.PromptTriggers] = 1.0
+    };
+
+    // Hyperparameters
+    private int _networkDim = 16;
+    private double _networkAlpha = 16.0;
+    private double _learningRate = 0.0001;
+    private double? _unetLearningRate;
+    private double? _textEncoderLearningRate;
+    private string _optimizer = "adamw";
+    private string _lrScheduler = "cosine_with_restarts";
+    private string _precision = "bf16";
+    private int _epochs = 10;
+    private int _repeats = 10;
+    private int _batchSize = 1;
+    private int? _totalSteps;
+    private int _saveEveryNEpochs = 1;
+    private bool _cacheLatentsToDisk = true;
+    private bool _shuffleTokens = true;
+    private bool _flipAug = false;
+
+    // Presets & Inspection
+    private string _selectedRecipeId = string.Empty;
+    private List<TrainingRecipe> _savedRecipes = new();
+    private List<ModusFlowPrompt> _savedModusPrompts = new();
+    private LoraMetadata? _donorLora;
+    private int _datasetImageCount = 0;
+    private int _datasetCaptionCount = 0;
+    private string? _preFlightWarning;
+
+    private IEnumerable<LoraMetadata> FilteredLibraryItems {
+        get {
+            if (string.IsNullOrWhiteSpace(_librarySearchQuery)) {
+                return LibraryService.Items.Take(20);
+            }
+            return LibraryService.Items
+                .Where(x => (x.FileName != null && x.FileName.Contains(_librarySearchQuery, StringComparison.OrdinalIgnoreCase)) ||
+                            (x.EffectiveBaseModel != null && x.EffectiveBaseModel.Contains(_librarySearchQuery, StringComparison.OrdinalIgnoreCase)))
+                .Take(20);
+        }
+    }
+
+    protected override async Task OnInitializedAsync() {
+        StudioSession.SetStage(StudioStage.Recipe);
+
+        _savedRecipes = await RecipeService.GetAllRecipesAsync();
+        _savedModusPrompts = (await PromptService.GetAllPromptsAsync()).ToList();
+
+        // Restore from session state if available
+        if (!string.IsNullOrWhiteSpace(StudioSession.DatasetFolder) && string.IsNullOrWhiteSpace(_datasetDirectory)) {
+            _datasetDirectory = StudioSession.DatasetFolder;
+        }
+        if (!string.IsNullOrWhiteSpace(StudioSession.TriggerWord) && string.IsNullOrWhiteSpace(_triggerWord)) {
+            _triggerWord = StudioSession.TriggerWord;
+        }
+        if (!string.IsNullOrWhiteSpace(StudioSession.AuxiliaryLoraPath)) {
+            _auxiliaryLoraPath = StudioSession.AuxiliaryLoraPath;
+            _auxiliaryLoraWeight = StudioSession.AuxiliaryLoraWeight;
+            _enableAuxiliaryLora = true;
+        }
+
+        var defaultArch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
+        if (defaultArch != null) {
+            if (string.IsNullOrWhiteSpace(_samplePrompt1)) {
+                _samplePrompt1 = defaultArch.RecommendedSamplePrompt;
+            }
+            if (string.IsNullOrWhiteSpace(_samplePrompt2) && !string.IsNullOrWhiteSpace(defaultArch.RecommendedSamplePrompt2)) {
+                _samplePrompt2 = defaultArch.RecommendedSamplePrompt2;
+            }
+            if (string.IsNullOrWhiteSpace(_negativePrompt)) {
+                _negativePrompt = defaultArch.RecommendedNegativePrompt ?? string.Empty;
+            }
+        }
+
+        await InspectDatasetAsync();
+    }
+
+    protected override async Task OnParametersSetAsync() {
+        if (!string.IsNullOrWhiteSpace(AuxLoraQuery) && File.Exists(AuxLoraQuery)) {
+            _auxiliaryLoraPath = AuxLoraQuery;
+            _enableAuxiliaryLora = true;
+            StudioSession.SetAuxiliaryLora(_auxiliaryLoraPath, _auxiliaryLoraWeight);
+        }
+
+        if (!string.IsNullOrWhiteSpace(DatasetQuery) && Directory.Exists(DatasetQuery)) {
+            _datasetDirectory = DatasetQuery;
+            await InspectDatasetAsync();
+        }
+
+        if (!string.IsNullOrWhiteSpace(DonorLoraQuery)) {
+            var match = LibraryService.Items.FirstOrDefault(x => string.Equals(x.FilePath, DonorLoraQuery, StringComparison.OrdinalIgnoreCase));
+            if (match != null) {
+                ApplyDonorLora(match);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(RecipeIdQuery)) {
+            OnRecipeSelected(RecipeIdQuery);
+        }
+    }
+
+    private void ApplyDonorLora(LoraMetadata donor) {
+        _donorLora = donor;
+        var cloned = ConfigBuilder.CloneFromDonor(donor, _runName, _datasetDirectory, _outputDirectory);
+        _networkDim = cloned.NetworkDim;
+        _networkAlpha = cloned.NetworkAlpha;
+        _learningRate = cloned.LearningRate;
+        _unetLearningRate = cloned.UnetLearningRate;
+        _textEncoderLearningRate = cloned.TextEncoderLearningRate;
+        _optimizer = cloned.Optimizer;
+        _lrScheduler = cloned.LrScheduler;
+        _precision = cloned.Precision;
+        _targetBaseModel = cloned.TargetBaseModel;
+        _epochs = cloned.MaxTrainEpochs;
+        _totalSteps = cloned.TotalSteps;
+        _flipAug = cloned.FlipAug;
+        _shuffleTokens = cloned.ShuffleTokens;
+        if (donor.CivitaiInfo?.SamplePrompts != null && donor.CivitaiInfo.SamplePrompts.Count > 0) {
+            _samplePrompt1 = donor.CivitaiInfo.SamplePrompts[0];
+            if (donor.CivitaiInfo.SamplePrompts.Count > 1) _samplePrompt2 = donor.CivitaiInfo.SamplePrompts[1];
+            if (donor.CivitaiInfo.SamplePrompts.Count > 2) _samplePrompt3 = donor.CivitaiInfo.SamplePrompts[2];
+        } else if (cloned.SamplePrompts.Count > 0) {
+            _samplePrompt1 = cloned.SamplePrompts[0];
+            if (cloned.SamplePrompts.Count > 1) _samplePrompt2 = cloned.SamplePrompts[1];
+            if (cloned.SamplePrompts.Count > 2) _samplePrompt3 = cloned.SamplePrompts[2];
+        }
+        if (!string.IsNullOrWhiteSpace(cloned.NegativePrompt)) {
+            _negativePrompt = cloned.NegativePrompt;
+        }
+    }
+
+    private void ClearDonorLora() {
+        _donorLora = null;
+    }
+
+    private void ToggleLibraryPicker() {
+        _showLibraryPicker = !_showLibraryPicker;
+    }
+
+    private void SelectAuxiliaryFromLibrary(LoraMetadata item) {
+        _auxiliaryLoraPath = item.FilePath;
+        _showLibraryPicker = false;
+        StudioSession.SetAuxiliaryLora(_auxiliaryLoraPath, _auxiliaryLoraWeight);
+        Snackbar.Add($"Attached '{item.FileName}' as Auxiliary LoRA.", Severity.Success);
+    }
+
+    private async Task BrowseAuxiliaryLoraFileAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrEmpty(file)) {
+            _auxiliaryLoraPath = file;
+            StudioSession.SetAuxiliaryLora(_auxiliaryLoraPath, _auxiliaryLoraWeight);
+        }
+    }
+
+    private void ClearAuxiliaryLora() {
+        _auxiliaryLoraPath = string.Empty;
+        StudioSession.SetAuxiliaryLora(string.Empty, 1.0);
+    }
+
+    private void OnAuxiliaryPartPresetChanged(string preset) {
+        _auxiliaryPartPreset = preset;
+        switch (preset) {
+            case "All":
+                SetAllAuxiliaryWeights(1.0);
+                break;
+            case "VisualOnly":
+                SetAllAuxiliaryWeights(1.0);
+                _auxiliaryPartWeights[ChopPartCategory.PromptTriggers] = 0.0;
+                break;
+            case "TextEncoderOnly":
+                SetAllAuxiliaryWeights(0.0);
+                _auxiliaryPartWeights[ChopPartCategory.PromptTriggers] = 1.0;
+                break;
+            case "IdentityOnly":
+                SetAllAuxiliaryWeights(0.0);
+                _auxiliaryPartWeights[ChopPartCategory.FaceAndAnatomy] = 1.0;
+                _auxiliaryPartWeights[ChopPartCategory.EyesAndIris] = 1.0;
+                _auxiliaryPartWeights[ChopPartCategory.HairAndHairstyle] = 1.0;
+                break;
+            case "LightingOnly":
+                SetAllAuxiliaryWeights(0.0);
+                _auxiliaryPartWeights[ChopPartCategory.LightingAndAmbiance] = 1.0;
+                break;
+            case "DetailOnly":
+                SetAllAuxiliaryWeights(0.0);
+                _auxiliaryPartWeights[ChopPartCategory.SkinAndMicroDetails] = 1.0;
+                _auxiliaryPartWeights[ChopPartCategory.EyesAndIris] = 1.0;
+                break;
+            case "Custom":
+                _showChopShopMatrix = true;
+                break;
+        }
+    }
+
+    private void SetAllAuxiliaryWeights(double weight) {
+        foreach (var cat in Enum.GetValues<ChopPartCategory>()) {
+            _auxiliaryPartWeights[cat] = weight;
+        }
+    }
+
+    private bool IsPartActive(ChopPartCategory cat) => _auxiliaryPartWeights.TryGetValue(cat, out double w) && w > 0.001;
+
+    private void TogglePart(ChopPartCategory cat) {
+        if (IsPartActive(cat)) {
+            _auxiliaryPartWeights[cat] = 0.0;
+        } else {
+            _auxiliaryPartWeights[cat] = 1.0;
+        }
+        _auxiliaryPartPreset = "Custom";
+    }
+
+    private double GetPartWeight(ChopPartCategory cat) => _auxiliaryPartWeights.GetValueOrDefault(cat, 1.0);
+
+    private void SetPartWeight(ChopPartCategory cat, double weight) {
+        _auxiliaryPartWeights[cat] = weight;
+        _auxiliaryPartPreset = "Custom";
+    }
+
+    private int GetActivePartCount() => _auxiliaryPartWeights.Values.Count(w => w > 0.001);
+
+    private static string GetCategoryDisplayName(ChopPartCategory cat) => cat switch {
+        ChopPartCategory.LightingAndAmbiance => "Lighting & Mood",
+        ChopPartCategory.FaceAndAnatomy => "Face & Anatomy",
+        ChopPartCategory.ClothingAndOutfit => "Outfits & Clothing",
+        ChopPartCategory.HairAndHairstyle => "Hair & Strands",
+        ChopPartCategory.EyesAndIris => "Eyes & Iris",
+        ChopPartCategory.SkinAndMicroDetails => "Skin & Details",
+        ChopPartCategory.PromptTriggers => "Prompt Triggers (TE)",
+        _ => cat.ToString()
+    };
+
+    private static string GetCategoryDisplayBadge(ChopPartCategory cat) => cat switch {
+        ChopPartCategory.LightingAndAmbiance => "💡 Light",
+        ChopPartCategory.FaceAndAnatomy => "👤 Face",
+        ChopPartCategory.ClothingAndOutfit => "🧵 Outfit",
+        ChopPartCategory.HairAndHairstyle => "💇 Hair",
+        ChopPartCategory.EyesAndIris => "👁️ Eyes",
+        ChopPartCategory.SkinAndMicroDetails => "🔍 Skin",
+        ChopPartCategory.PromptTriggers => "🔤 Prompt/TE",
+        _ => cat.ToString()
+    };
+
+    private static string GetCategoryDescription(ChopPartCategory cat) => cat switch {
+        ChopPartCategory.LightingAndAmbiance => "Early blocks (IN00-03 / double 0-5)",
+        ChopPartCategory.FaceAndAnatomy => "Mid blocks (MID / double 6-12)",
+        ChopPartCategory.ClothingAndOutfit => "Mid-late blocks (OUT03-06 / double 13-18)",
+        ChopPartCategory.HairAndHairstyle => "Single blocks 25-31 / OUT06-08",
+        ChopPartCategory.EyesAndIris => "Single blocks 30-37 / OUT09-11",
+        ChopPartCategory.SkinAndMicroDetails => "Single blocks 32+ & residual tails",
+        ChopPartCategory.PromptTriggers => "CLIP & T5 text encoder layers",
+        _ => string.Empty
+    };
+
+    private bool IsAuxiliaryCompatible() {
+        if (string.IsNullOrWhiteSpace(_auxiliaryLoraPath)) return true;
+        var match = LibraryService.Items.FirstOrDefault(x => string.Equals(x.FilePath, _auxiliaryLoraPath, StringComparison.OrdinalIgnoreCase));
+        if (match == null || string.IsNullOrWhiteSpace(match.EffectiveBaseModel)) return true;
+
+        string target = _targetBaseModel.ToLowerInvariant();
+        string aux = match.EffectiveBaseModel.ToLowerInvariant();
+
+        if (target.Contains("flux") && aux.Contains("flux")) return true;
+        if (target.Contains("sdxl") && (aux.Contains("sdxl") || aux.Contains("pony"))) return true;
+        if (target.Contains("pony") && (aux.Contains("pony") || aux.Contains("sdxl"))) return true;
+        if (target.Contains("1.5") && aux.Contains("1.5")) return true;
+
+        return target == aux;
+    }
+
+    private void OnTargetBaseModelChanged() {
+        var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
+        if (arch != null) {
+            if (string.IsNullOrWhiteSpace(_samplePrompt1)) {
+                _samplePrompt1 = arch.RecommendedSamplePrompt;
+            }
+            if (string.IsNullOrWhiteSpace(_samplePrompt2) && !string.IsNullOrWhiteSpace(arch.RecommendedSamplePrompt2)) {
+                _samplePrompt2 = arch.RecommendedSamplePrompt2;
+            }
+            if (string.IsNullOrWhiteSpace(_negativePrompt) && !string.IsNullOrWhiteSpace(arch.RecommendedNegativePrompt)) {
+                _negativePrompt = arch.RecommendedNegativePrompt;
+            }
+        }
+    }
+
+    private void ResetNegativePromptToDefault() {
+        var arch = ArchitectureRegistry.GetAll().FirstOrDefault(a => a.DisplayName == _targetBaseModel);
+        if (arch != null) {
+            _negativePrompt = arch.RecommendedNegativePrompt ?? string.Empty;
+            Snackbar.Add("Reset negative prompt to architecture defaults.", Severity.Info);
+        }
+    }
+
+    private async Task BrowseDatasetDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Training Dataset Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _datasetDirectory = folder;
+            StudioSession.SetDatasetFolder(folder);
+            await InspectDatasetAsync();
+        }
+    }
+
+    private async Task OnDatasetDirectoryChanged(string value) {
+        _datasetDirectory = value;
+        await InspectDatasetAsync();
+    }
+
+    private async Task InspectDatasetAsync() {
+        if (!string.IsNullOrWhiteSpace(_datasetDirectory) && Directory.Exists(_datasetDirectory)) {
+            try {
+                var audit = await DatasetInspector.InspectDatasetAsync(_datasetDirectory);
+                _datasetImageCount = audit.TotalImages;
+                _datasetCaptionCount = audit.TotalCaptions;
+            } catch {
+                _datasetImageCount = 0;
+                _datasetCaptionCount = 0;
+            }
+        } else {
+            _datasetImageCount = 0;
+            _datasetCaptionCount = 0;
+        }
+    }
+
+    private async Task BrowseOutputDirectoryAsync() {
+        string? folder = await FileDialogService.PickFolderAsync("Select Output Directory");
+        if (!string.IsNullOrEmpty(folder)) {
+            _outputDirectory = folder;
+        }
+    }
+
+    private async Task BrowseCustomModelFileAsync() {
+        string? file = await FileDialogService.PickSafeTensorsFileAsync();
+        if (!string.IsNullOrEmpty(file)) {
+            _customBaseModelPath = file;
+        }
+    }
+
+    private void OpenCurateStudio() {
+        NavManager.NavigateTo("/curate");
+    }
+
+    private void OpenDocumentation() {
+        NavManager.NavigateTo("https://github.com/dworden42/LoRAMancer/blob/main/docs/HYPERPARAMETER_GUIDE.md");
+    }
+
+    private void OnRecipeSelected(string recipeId) {
+        _selectedRecipeId = recipeId;
+        var recipe = _savedRecipes.FirstOrDefault(r => r.Id == recipeId);
+        if (recipe == null) return;
+
+        _targetBaseModel = recipe.TargetBaseModel;
+        _networkDim = recipe.NetworkDim;
+        _networkAlpha = recipe.NetworkAlpha;
+        _learningRate = recipe.LearningRate;
+        _unetLearningRate = recipe.UnetLearningRate;
+        _textEncoderLearningRate = recipe.TextEncoderLearningRate;
+        _optimizer = recipe.Optimizer;
+        _lrScheduler = recipe.LrScheduler;
+        _precision = recipe.Precision;
+        _epochs = recipe.Epochs;
+        _repeats = recipe.Repeats;
+        _batchSize = recipe.BatchSize;
+        _totalSteps = recipe.TotalSteps;
+        _saveEveryNEpochs = recipe.SaveEveryNEpochs;
+        _flipAug = recipe.FlipAug;
+        _shuffleTokens = recipe.ShuffleTokens;
+
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt1)) {
+            _samplePrompt1 = recipe.SamplePrompt1;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt2)) {
+            _samplePrompt2 = recipe.SamplePrompt2;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.SamplePrompt3)) {
+            _samplePrompt3 = recipe.SamplePrompt3;
+        }
+        if (!string.IsNullOrWhiteSpace(recipe.NegativePrompt)) {
+            _negativePrompt = recipe.NegativePrompt;
+        }
+
+        if (!string.IsNullOrWhiteSpace(recipe.AuxiliaryLoraPath)) {
+            _auxiliaryLoraPath = recipe.AuxiliaryLoraPath;
+            _auxiliaryLoraWeight = recipe.AuxiliaryLoraWeight;
+            _enableAuxiliaryLora = true;
+        }
+
+        Snackbar.Add($"Loaded recipe preset '{recipe.Name}'", Severity.Info);
+    }
+
+    private void OnSamplePresetSelected(string name) {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var p = _savedModusPrompts.FirstOrDefault(x => x.Name == name);
+        if (p != null) {
+            if (_activePromptTab == 1) {
+                _samplePrompt2 = p.Positive;
+            } else if (_activePromptTab == 2) {
+                _samplePrompt3 = p.Positive;
+            } else {
+                _samplePrompt1 = p.Positive;
+            }
+
+            if (!string.IsNullOrWhiteSpace(p.Negative)) {
+                _negativePrompt = p.Negative;
+            }
+        }
+    }
+
+    private double GetEstimatedVram() {
+        var estimates = EstimationService.CalculateEstimates(_targetBaseModel, Math.Max(1, _datasetImageCount), _repeats, _epochs, _batchSize, _networkDim);
+        var pre = EstimationService.RunPreFlightCheck(_targetBaseModel, _outputDirectory, _batchSize);
+        _preFlightWarning = pre.Warnings.Count > 0 ? string.Join("; ", pre.Warnings) : null;
+        return estimates.EstimatedVramGb;
+    }
+
+    private int GetCalculatedAutomaticSteps() {
+        int images = Math.Max(1, _datasetImageCount);
+        return (images * Math.Max(1, _repeats) * Math.Max(1, _epochs)) / Math.Max(1, _batchSize);
+    }
+
+    private int GetCalculatedTotalSteps() {
+        if (_totalSteps.HasValue && _totalSteps.Value > 0) {
+            return _totalSteps.Value;
+        }
+        return GetCalculatedAutomaticSteps();
+    }
+
+    private TrainingConfig BuildConfig(string? auxiliaryPathOverride = null) {
+        var samplePrompts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_samplePrompt1)) samplePrompts.Add(_samplePrompt1.Trim());
+        if (!string.IsNullOrWhiteSpace(_samplePrompt2)) samplePrompts.Add(_samplePrompt2.Trim());
+        if (!string.IsNullOrWhiteSpace(_samplePrompt3)) samplePrompts.Add(_samplePrompt3.Trim());
+
+        return new TrainingConfig {
+            RunName = _runName.Trim(),
+            TargetBaseModel = !string.IsNullOrWhiteSpace(_customBaseModelPath) ? _customBaseModelPath : _targetBaseModel,
+            DatasetDirectory = _datasetDirectory.Trim(),
+            OutputDirectory = !string.IsNullOrWhiteSpace(_outputDirectory) ? _outputDirectory.Trim() : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "outputs"),
+            TriggerWord = _triggerWord.Trim(),
+            AuxiliaryLoraPath = _enableAuxiliaryLora ? (auxiliaryPathOverride ?? _auxiliaryLoraPath) : string.Empty,
+            AuxiliaryLoraWeight = _auxiliaryLoraWeight,
+            NetworkDim = _networkDim,
+            NetworkAlpha = _networkAlpha,
+            LearningRate = _learningRate,
+            UnetLearningRate = _unetLearningRate,
+            TextEncoderLearningRate = _textEncoderLearningRate,
+            Optimizer = _optimizer,
+            LrScheduler = _lrScheduler,
+            Precision = _precision,
+            MaxTrainEpochs = _epochs,
+            TotalSteps = _totalSteps,
+            Repeats = _repeats,
+            BatchSize = _batchSize,
+            SaveEveryNEpochs = _saveEveryNEpochs,
+            CacheLatentsToDisk = _cacheLatentsToDisk,
+            ShuffleTokens = _shuffleTokens,
+            FlipAug = _flipAug,
+            SamplePrompts = samplePrompts,
+            NegativePrompt = _negativePrompt.Trim()
+        };
+    }
+
+    private string GetLiveYamlPreview() {
+        try {
+            var config = BuildConfig();
+            return ConfigBuilder.BuildAiToolkitYaml(config);
+        } catch (Exception ex) {
+            return $"# Error generating YAML preview: {ex.Message}";
+        }
+    }
+
+    private void ToggleYamlPreview() {
+        _showYamlPreview = !_showYamlPreview;
+    }
+
+    private async Task CopyYamlToClipboard() {
+        string yaml = GetLiveYamlPreview();
+        await DialogService.ShowMessageBox("AI-Toolkit YAML Configuration", yaml);
+        Snackbar.Add("YAML displayed in dialog.", Severity.Info);
+    }
+
+    private async Task ExportYamlAsync() {
+        try {
+            string? effectiveAuxPath = null;
+            if (_enableAuxiliaryLora && !string.IsNullOrWhiteSpace(_auxiliaryLoraPath) && File.Exists(_auxiliaryLoraPath)) {
+                bool requiresSlicing = _auxiliaryPartPreset != "All" || _auxiliaryPartWeights.Values.Any(w => Math.Abs(w - 1.0) > 0.001);
+                if (requiresSlicing) {
+                    effectiveAuxPath = await ChopShopService.PrepareAuxiliarySliceAsync(
+                        _auxiliaryLoraPath,
+                        _auxiliaryPartWeights
+                    );
+                }
+            }
+
+            var config = BuildConfig(effectiveAuxPath);
+            string yaml = ConfigBuilder.BuildAiToolkitYaml(config);
+            string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "recipes");
+            Directory.CreateDirectory(outDir);
+            string filePath = Path.Combine(outDir, $"{_runName}_aitoolkit.yaml");
+            await File.WriteAllTextAsync(filePath, yaml);
+            Snackbar.Add($"Exported YAML to: {filePath}", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to export YAML: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveAsPresetAsync() {
+        try {
+            var recipe = new TrainingRecipe {
+                Name = $"{_runName} Preset",
+                TargetBaseModel = _targetBaseModel,
+                CustomBaseModelPath = _customBaseModelPath,
+                AuxiliaryLoraPath = _enableAuxiliaryLora ? _auxiliaryLoraPath : string.Empty,
+                AuxiliaryLoraWeight = _auxiliaryLoraWeight,
+                NetworkDim = _networkDim,
+                NetworkAlpha = _networkAlpha,
+                LearningRate = _learningRate,
+                UnetLearningRate = _unetLearningRate,
+                TextEncoderLearningRate = _textEncoderLearningRate,
+                Optimizer = _optimizer,
+                LrScheduler = _lrScheduler,
+                Precision = _precision,
+                Epochs = _epochs,
+                Repeats = _repeats,
+                BatchSize = _batchSize,
+                TotalSteps = _totalSteps,
+                SaveEveryNEpochs = _saveEveryNEpochs,
+                FlipAug = _flipAug,
+                ShuffleTokens = _shuffleTokens,
+                SamplePrompt1 = _samplePrompt1,
+                SamplePrompt2 = _samplePrompt2,
+                SamplePrompt3 = _samplePrompt3,
+                NegativePrompt = _negativePrompt.Trim()
+            };
+
+            await RecipeService.SaveRecipeAsync(recipe);
+            _savedRecipes = await RecipeService.GetAllRecipesAsync();
+            Snackbar.Add($"Saved recipe '{recipe.Name}' to favorites ⭐!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to save preset: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task<string?> GenerateYamlFileAsync() {
+        if (string.IsNullOrWhiteSpace(_runName)) {
+            Snackbar.Add("Please enter a valid Run Name.", Severity.Warning);
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(_datasetDirectory) || !Directory.Exists(_datasetDirectory)) {
+            Snackbar.Add("Please select a valid dataset directory.", Severity.Warning);
+            return null;
+        }
+
+        string? effectiveAuxPath = null;
+        if (_enableAuxiliaryLora && !string.IsNullOrWhiteSpace(_auxiliaryLoraPath) && File.Exists(_auxiliaryLoraPath)) {
+            bool requiresSlicing = _auxiliaryPartPreset != "All" || _auxiliaryPartWeights.Values.Any(w => Math.Abs(w - 1.0) > 0.001);
+            if (requiresSlicing) {
+                Snackbar.Add("Slicing Auxiliary LoRA with Chop-Shop parts filter...", Severity.Info);
+                effectiveAuxPath = await ChopShopService.PrepareAuxiliarySliceAsync(
+                    _auxiliaryLoraPath,
+                    _auxiliaryPartWeights
+                );
+            }
+        }
+
+        var config = BuildConfig(effectiveAuxPath);
+        string yaml = ConfigBuilder.BuildAiToolkitYaml(config);
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".loramancer", "runs");
+        Directory.CreateDirectory(dir);
+        string configPath = Path.Combine(dir, $"{config.RunName}_aitoolkit.yaml");
+        await File.WriteAllTextAsync(configPath, yaml);
+        return configPath;
+    }
+
+    private async Task SendToForgeAndLaunchAsync() {
+        _isBusy = true;
+        try {
+            string? yamlPath = await GenerateYamlFileAsync();
+            if (yamlPath != null) {
+                Snackbar.Add("Recipe generated! Transferring to Forge and launching training...", Severity.Success);
+                NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(yamlPath)}&autostart=true");
+            }
+        } finally {
+            _isBusy = false;
+        }
+    }
+
+    private async Task SendToForgeQueueOnlyAsync() {
+        _isBusy = true;
+        try {
+            string? yamlPath = await GenerateYamlFileAsync();
+            if (yamlPath != null) {
+                Snackbar.Add("Recipe queued in Forge!", Severity.Info);
+                NavManager.NavigateTo($"/training?config={Uri.EscapeDataString(yamlPath)}");
+            }
+        } finally {
+            _isBusy = false;
+        }
+    }
+
+    private async Task OnYamlFileDropped(InputFileChangeEventArgs e) {
+        try {
+            var file = e.File;
+            if (file == null) return;
+
+            var ext = Path.GetExtension(file.Name);
+            if (!string.Equals(ext, ".yaml", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(ext, ".yml", StringComparison.OrdinalIgnoreCase)) {
+                Snackbar.Add("Please drop a valid .yaml or .yml configuration file.", Severity.Warning);
+                return;
+            }
+
+            const long maxFileSize = 5 * 1024 * 1024;
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var reader = new StreamReader(stream);
+            string yamlContent = await reader.ReadToEndAsync();
+
+            await LoadRecipeFromYamlAsync(yamlContent, file.Name);
+        } catch (Exception ex) {
+            Snackbar.Add($"Error reading YAML file: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadRecipeFromYamlAsync(string yamlContent, string? fileName) {
+        try {
+            var deserializer = new DeserializerBuilder()
+                .IgnoreUnmatchedProperties()
+                .Build();
+
+            var rawObj = deserializer.Deserialize<object>(yamlContent);
+            if (rawObj is not IDictionary rootDict) {
+                Snackbar.Add("The YAML file does not contain a valid dictionary structure.", Severity.Warning);
+                return;
+            }
+
+            var configDict = GetDictCaseInsensitive(rootDict, "config") ?? rootDict;
+
+            string? name = GetString(GetValueCaseInsensitive(configDict, "name"))
+                        ?? GetString(GetValueCaseInsensitive(rootDict, "name"));
+            if (!string.IsNullOrWhiteSpace(name)) {
+                _runName = name.Trim();
+            } else if (!string.IsNullOrWhiteSpace(fileName)) {
+                _runName = Path.GetFileNameWithoutExtension(fileName).Replace("_aitoolkit", "");
+            }
+
+            IDictionary? processDict = null;
+            var processList = GetListCaseInsensitive(configDict, "process")
+                           ?? GetListCaseInsensitive(rootDict, "process");
+            if (processList != null && processList.Count > 0) {
+                processDict = processList[0] as IDictionary;
+            } else {
+                processDict = GetDictCaseInsensitive(configDict, "process")
+                           ?? GetDictCaseInsensitive(rootDict, "process")
+                           ?? configDict;
+            }
+
+            string? outDir = GetString(GetValueCaseInsensitive(processDict, "training_folder", "output_folder", "output_dir", "outputDirectory"));
+            if (!string.IsNullOrWhiteSpace(outDir)) {
+                _outputDirectory = outDir.Trim();
+            }
+
+            var networkDict = GetDictCaseInsensitive(processDict, "network");
+            if (networkDict != null) {
+                int? dim = GetInt(GetValueCaseInsensitive(networkDict, "linear", "dim", "rank", "r"));
+                if (dim.HasValue && dim.Value > 0) {
+                    _networkDim = dim.Value;
+                }
+                double? alpha = GetDouble(GetValueCaseInsensitive(networkDict, "linear_alpha", "alpha", "a"));
+                if (alpha.HasValue && alpha.Value > 0) {
+                    _networkAlpha = alpha.Value;
+                }
+            }
+
+            var modelDict = GetDictCaseInsensitive(processDict, "model");
+            if (modelDict != null) {
+                string? nameOrPath = GetString(GetValueCaseInsensitive(modelDict, "name_or_path", "model_path", "base_model"));
+                if (!string.IsNullOrWhiteSpace(nameOrPath)) {
+                    var match = ArchitectureRegistry.GetAll().FirstOrDefault(a =>
+                        string.Equals(a.DisplayName, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.Id, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.PretrainedModelPath, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(a.Family) && nameOrPath.Contains(a.Family, StringComparison.OrdinalIgnoreCase)) ||
+                        a.DetectionKeywords.Any(k => nameOrPath.Contains(k, StringComparison.OrdinalIgnoreCase)));
+
+                    if (match != null) {
+                        _targetBaseModel = match.DisplayName;
+                        _customBaseModelPath = string.Empty;
+                    } else if (File.Exists(nameOrPath) || Directory.Exists(nameOrPath)) {
+                        _customBaseModelPath = nameOrPath;
+                    } else {
+                        if (nameOrPath.Contains("flux", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "FLUX.1-dev";
+                        } else if (nameOrPath.Contains("sdxl", StringComparison.OrdinalIgnoreCase) || nameOrPath.Contains("sd_xl", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SDXL 1.0";
+                        } else if (nameOrPath.Contains("pony", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "Pony Diffusion V6 XL";
+                        } else if (nameOrPath.Contains("v1-5", StringComparison.OrdinalIgnoreCase) || nameOrPath.Contains("sd15", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SD 1.5";
+                        } else if (nameOrPath.Contains("sd3", StringComparison.OrdinalIgnoreCase)) {
+                            _targetBaseModel = "SD3.5 Large";
+                        }
+                    }
+                }
+
+                string? auxPath = GetString(GetValueCaseInsensitive(modelDict, "lora_path", "assistant_lora_path"));
+                double auxScale = 1.0;
+                var extraLoras = GetListCaseInsensitive(modelDict, "extra_loras");
+                if (extraLoras != null && extraLoras.Count > 0 && extraLoras[0] is IDictionary extraLoraDict) {
+                    string? p = GetString(GetValueCaseInsensitive(extraLoraDict, "path", "lora_path"));
+                    if (!string.IsNullOrWhiteSpace(p)) {
+                        auxPath = p;
+                    }
+                    double? s = GetDouble(GetValueCaseInsensitive(extraLoraDict, "scale", "weight"));
+                    if (s.HasValue) {
+                        auxScale = s.Value;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(auxPath)) {
+                    _auxiliaryLoraPath = auxPath;
+                    _auxiliaryLoraWeight = auxScale;
+                    _enableAuxiliaryLora = true;
+                    StudioSession.SetAuxiliaryLora(_auxiliaryLoraPath, _auxiliaryLoraWeight);
+                }
+            }
+
+            var trainDict = GetDictCaseInsensitive(processDict, "train");
+            if (trainDict != null) {
+                int? batchSize = GetInt(GetValueCaseInsensitive(trainDict, "batch_size", "batchSize"));
+                if (batchSize.HasValue && batchSize.Value > 0) _batchSize = batchSize.Value;
+
+                int? epochs = GetInt(GetValueCaseInsensitive(trainDict, "epochs", "max_train_epochs"));
+                if (epochs.HasValue && epochs.Value > 0) _epochs = epochs.Value;
+
+                int? steps = GetInt(GetValueCaseInsensitive(trainDict, "steps", "max_train_steps", "total_steps"));
+                if (steps.HasValue && steps.Value > 0) _totalSteps = steps.Value;
+
+                double? lr = GetDouble(GetValueCaseInsensitive(trainDict, "lr", "learning_rate", "learningRate"));
+                if (lr.HasValue && lr.Value > 0) _learningRate = lr.Value;
+
+                double? unetLr = GetDouble(GetValueCaseInsensitive(trainDict, "unet_lr", "unetLearningRate"));
+                if (unetLr.HasValue && unetLr.Value > 0) _unetLearningRate = unetLr.Value;
+
+                double? teLr = GetDouble(GetValueCaseInsensitive(trainDict, "text_encoder_lr", "textEncoderLearningRate"));
+                if (teLr.HasValue) _textEncoderLearningRate = teLr.Value;
+
+                string? opt = GetString(GetValueCaseInsensitive(trainDict, "optimizer"));
+                if (!string.IsNullOrWhiteSpace(opt)) _optimizer = opt.Trim().ToLowerInvariant();
+
+                string? sched = GetString(GetValueCaseInsensitive(trainDict, "lr_scheduler", "scheduler"));
+                if (!string.IsNullOrWhiteSpace(sched)) _lrScheduler = sched.Trim().ToLowerInvariant();
+
+                string? dtype = GetString(GetValueCaseInsensitive(trainDict, "dtype", "precision"));
+                if (!string.IsNullOrWhiteSpace(dtype)) _precision = dtype.Trim().ToLowerInvariant();
+            }
+
+            var saveDict = GetDictCaseInsensitive(processDict, "save");
+            if (saveDict != null) {
+                string? dtype = GetString(GetValueCaseInsensitive(saveDict, "dtype", "precision"));
+                if (!string.IsNullOrWhiteSpace(dtype) && string.IsNullOrWhiteSpace(_precision)) _precision = dtype.Trim().ToLowerInvariant();
+            }
+
+            var datasetsList = GetListCaseInsensitive(processDict, "datasets");
+            if (datasetsList != null && datasetsList.Count > 0 && datasetsList[0] is IDictionary datasetDict) {
+                string? folder = GetString(GetValueCaseInsensitive(datasetDict, "folder_path", "folder", "dataset_directory", "path"));
+                if (!string.IsNullOrWhiteSpace(folder)) {
+                    _datasetDirectory = folder.Trim();
+                    StudioSession.SetDatasetFolder(_datasetDirectory);
+                    await InspectDatasetAsync();
+                }
+
+                bool? shuffle = GetBool(GetValueCaseInsensitive(datasetDict, "shuffle_tokens"));
+                if (shuffle.HasValue) _shuffleTokens = shuffle.Value;
+
+                bool? flip = GetBool(GetValueCaseInsensitive(datasetDict, "flip_aug", "flip_x"));
+                if (flip.HasValue) _flipAug = flip.Value;
+
+                bool? cacheLatents = GetBool(GetValueCaseInsensitive(datasetDict, "cache_latents_to_disk"));
+                if (cacheLatents.HasValue) _cacheLatentsToDisk = cacheLatents.Value;
+            }
+
+            var sampleDict = GetDictCaseInsensitive(processDict, "sample");
+            if (sampleDict != null) {
+                string? neg = GetString(GetValueCaseInsensitive(sampleDict, "neg", "negative_prompt", "negative"));
+                if (neg != null) _negativePrompt = neg;
+
+                var promptsList = GetListCaseInsensitive(sampleDict, "prompts");
+                if (promptsList != null) {
+                    if (promptsList.Count > 0 && promptsList[0] != null) _samplePrompt1 = promptsList[0]!.ToString() ?? "";
+                    if (promptsList.Count > 1 && promptsList[1] != null) _samplePrompt2 = promptsList[1]!.ToString() ?? "";
+                    if (promptsList.Count > 2 && promptsList[2] != null) _samplePrompt3 = promptsList[2]!.ToString() ?? "";
+                }
+            }
+
+            StateHasChanged();
+            Snackbar.Add($"Loaded configuration from '{fileName ?? "YAML"}' into Recipe & Prep!", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to parse YAML config: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static object? GetValueCaseInsensitive(object? dictObj, params string[] keys) {
+        if (dictObj is not IDictionary dict) return null;
+        foreach (var key in keys) {
+            foreach (DictionaryEntry entry in dict) {
+                if (string.Equals(entry.Key?.ToString(), key, StringComparison.OrdinalIgnoreCase)) {
+                    return entry.Value;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static IDictionary? GetDictCaseInsensitive(object? dictObj, params string[] keys) {
+        var val = GetValueCaseInsensitive(dictObj, keys);
+        return val as IDictionary;
+    }
+
+    private static IList? GetListCaseInsensitive(object? dictObj, params string[] keys) {
+        var val = GetValueCaseInsensitive(dictObj, keys);
+        return val as IList;
+    }
+
+    private static string? GetString(object? val) => val?.ToString();
+
+    private static int? GetInt(object? val) {
+        if (val == null) return null;
+        if (val is int i) return i;
+        if (val is long l) return (int)l;
+        if (int.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out int parsed)) return parsed;
+        return null;
+    }
+
+    private static double? GetDouble(object? val) {
+        if (val == null) return null;
+        if (val is double d) return d;
+        if (val is float f) return f;
+        if (val is decimal dec) return (double)dec;
+        if (double.TryParse(val.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed)) return parsed;
+        return null;
+    }
+
+    private static bool? GetBool(object? val) {
+        if (val == null) return null;
+        if (val is bool b) return b;
+        if (bool.TryParse(val.ToString(), out bool parsed)) return parsed;
+        return null;
+    }
+
+    public void Dispose() {
+        // Cleanup if needed
+    }
+}

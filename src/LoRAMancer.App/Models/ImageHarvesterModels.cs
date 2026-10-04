@@ -51,6 +51,8 @@ public sealed class HarvestedCandidateItem {
     public string AuditReason { get; set; } = string.Empty;
     public string? LocalPreviewDataUri { get; set; }
     public string? DownloadedFilePath { get; set; }
+    public bool IsAlreadyDownloaded { get; set; } = false;
+    public string? ExistingLocalPath { get; set; }
 }
 
 public sealed class HarvestSearchQuery {
@@ -66,6 +68,29 @@ public sealed class HarvestSearchQuery {
     public string DirectUrlsText { get; set; } = string.Empty;
     public int MinWidth { get; set; } = 512;
     public int MinHeight { get; set; } = 512;
+    public string? CatalogId { get; set; }
+    public string? CatalogDestinationFolder { get; set; }
+    public bool OmitExistingInCatalog { get; set; } = true;
+}
+
+public sealed class HarvestCatalog {
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public string Query { get; set; } = string.Empty;
+    public List<string> SelectedProviderIds { get; set; } = new();
+    public string DestinationFolder { get; set; } = string.Empty;
+    public DateTime? LastSyncedAt { get; set; }
+    public int TotalDownloadedCount { get; set; }
+    public bool AutoOmitExisting { get; set; } = true;
+    public int MaxResultsPerSync { get; set; } = 100;
+}
+
+public sealed class CatalogDownloadHistory {
+    public string CatalogId { get; set; } = string.Empty;
+    public string CatalogName { get; set; } = string.Empty;
+    public string Query { get; set; } = string.Empty;
+    public List<string> DownloadedUrls { get; set; } = new();
+    public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class HarvestDownloadProgress {
