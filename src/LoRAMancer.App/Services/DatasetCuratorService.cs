@@ -468,6 +468,8 @@ public sealed class DatasetCuratorService {
                         }
                     }
                 }
+            } catch (OperationCanceledException) {
+                throw;
             } catch (Exception ex) {
                 item.AuditStatus = OllamaAuditStatus.NotAudited;
                 item.AuditReason = ex.Message;

@@ -1609,11 +1609,6 @@
 
     protected override async Task OnInitializedAsync() {
         _settings = Settings.Current;
-        if (ToolkitSetup.IsInstalled()) {
-            _toolkitCommit = await ToolkitSetup.GetCurrentCommitAsync();
-            _currentGitBranch = await ToolkitSetup.GetCurrentBranchAsync();
-            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
-        }
 
         SyncRgbFromHex(ThemeManager.EffectivePrimaryColor);
         ThemeManager.OnThemeChanged += OnThemeChangedHandler;
@@ -1628,6 +1623,25 @@
         }
 
         CheckLegacyDatabaseStatus();
+
+        if (ToolkitSetup.IsInstalled()) {
+            _toolkitUpdateResult = ToolkitSetup.LatestUpdateCheckResult;
+            // Load git repository commit and branch in the background with a 3-second timeout
+            // so opening Settings renders instantly and never blocks or freezes the UI thread
+            _ = Task.Run(async () => {
+                try {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    var commitTask = ToolkitSetup.GetCurrentCommitAsync(cts.Token);
+                    var branchTask = ToolkitSetup.GetCurrentBranchAsync(cts.Token);
+                    await Task.WhenAll(commitTask, branchTask);
+                    _toolkitCommit = await commitTask;
+                    _currentGitBranch = await branchTask;
+                    await InvokeAsync(StateHasChanged);
+                } catch {
+                    _toolkitCommit = "Git repository detected";
+                }
+            });
+        }
     }
 
     public void Dispose() {
