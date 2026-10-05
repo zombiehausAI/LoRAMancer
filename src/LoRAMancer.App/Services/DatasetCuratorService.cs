@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using LoRAMancer.App.Models;
 
 namespace LoRAMancer.App.Services;
 
@@ -18,6 +20,8 @@ public sealed class DatasetCuratorItem {
     public long FileSizeBytes { get; set; }
     public bool IsCorrupt { get; set; }
     public string? ErrorMessage { get; set; }
+    public OllamaAuditStatus AuditStatus { get; set; } = OllamaAuditStatus.NotAudited;
+    public string? AuditReason { get; set; }
 
     public string FormattedDimensions => Width > 0 && Height > 0 ? $"{Width} x {Height}" : "Unknown";
 
@@ -41,12 +45,20 @@ public sealed class DatasetCuratorReport {
     public int TotalCaptions => Items.Count(i => !string.IsNullOrWhiteSpace(i.CaptionText));
     public int MissingCaptions => Items.Count(i => string.IsNullOrWhiteSpace(i.CaptionText));
     public int CorruptCount => Items.Count(i => i.IsCorrupt);
+    public int FlaggedCount => Items.Count(i => i.AuditStatus == OllamaAuditStatus.Flagged);
 }
 
 public sealed class DatasetCuratorService {
+    private readonly HttpClient _httpClient;
     private static readonly HashSet<string> ValidImageExtensions = new(StringComparer.OrdinalIgnoreCase) {
         ".png", ".jpg", ".jpeg", ".webp", ".bmp"
     };
+
+    public DatasetCuratorService(HttpClient? httpClient = null) {
+        _httpClient = httpClient ?? new HttpClient {
+            Timeout = TimeSpan.FromSeconds(60)
+        };
+    }
 
     public async Task<DatasetCuratorReport> ScanDatasetAsync(string datasetDir, CancellationToken cancellationToken = default) {
         var report = new DatasetCuratorReport { DirectoryPath = datasetDir };
@@ -55,7 +67,10 @@ public sealed class DatasetCuratorService {
         }
 
         string[] files = Directory.GetFiles(datasetDir, "*.*", SearchOption.AllDirectories);
-        var imageFiles = files.Where(f => ValidImageExtensions.Contains(Path.GetExtension(f))).OrderBy(f => f).ToList();
+        var imageFiles = files
+            .Where(f => ValidImageExtensions.Contains(Path.GetExtension(f)) && !f.Contains("_quarantine"))
+            .OrderBy(f => f)
+            .ToList();
 
         var items = new List<DatasetCuratorItem>();
         foreach (var imgPath in imageFiles) {
@@ -403,6 +418,92 @@ public sealed class DatasetCuratorService {
         }
 
         return backupDir;
+    }
+
+    public async Task AuditDatasetWithOllamaAsync(
+        IEnumerable<DatasetCuratorItem> items,
+        string ollamaUrl,
+        string modelName,
+        string auditPrompt,
+        IProgress<HarvestDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default) {
+
+        var itemList = items.Where(i => !i.IsCorrupt && File.Exists(i.ImagePath)).ToList();
+        int total = itemList.Count;
+        int current = 0;
+
+        foreach (var item in itemList) {
+            cancellationToken.ThrowIfCancellationRequested();
+            current++;
+
+            try {
+                byte[] imageBytes = await File.ReadAllBytesAsync(item.ImagePath, cancellationToken);
+                if (imageBytes.Length > 0) {
+                    string base64 = Convert.ToBase64String(imageBytes);
+
+                    var payload = new {
+                        model = modelName,
+                        prompt = $"{auditPrompt}\nRespond ONLY in JSON format: {{\"flagged\": true/false, \"reason\": \"brief explanation\"}}",
+                        images = new[] { base64 },
+                        stream = false,
+                        format = "json"
+                    };
+
+                    string jsonPayload = JsonSerializer.Serialize(payload);
+                    using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                    string endpoint = $"{ollamaUrl.TrimEnd('/')}/api/generate";
+                    using var ollamaResp = await _httpClient.PostAsync(endpoint, content, cancellationToken);
+
+                    if (ollamaResp.IsSuccessStatusCode) {
+                        string resultJson = await ollamaResp.Content.ReadAsStringAsync(cancellationToken);
+                        using var doc = JsonDocument.Parse(resultJson);
+                        if (doc.RootElement.TryGetProperty("response", out var respText)) {
+                            string raw = respText.GetString() ?? "";
+                            using var parsedDoc = JsonDocument.Parse(raw);
+                            bool flagged = parsedDoc.RootElement.TryGetProperty("flagged", out var flg) && flg.GetBoolean();
+                            string reason = parsedDoc.RootElement.TryGetProperty("reason", out var rsn) ? rsn.GetString() ?? "" : "";
+
+                            item.AuditStatus = flagged ? OllamaAuditStatus.Flagged : OllamaAuditStatus.Clean;
+                            item.AuditReason = reason;
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                item.AuditStatus = OllamaAuditStatus.NotAudited;
+                item.AuditReason = ex.Message;
+            }
+
+            progress?.Report(new HarvestDownloadProgress {
+                CurrentIndex = current,
+                TotalCount = total,
+                CurrentFile = Path.GetFileName(item.ImagePath),
+                IsComplete = current >= total
+            });
+        }
+    }
+
+    public Task<int> QuarantineFlaggedItemsAsync(string datasetDir, IEnumerable<DatasetCuratorItem> flaggedItems) {
+        string quarantineDir = Path.Combine(datasetDir, "_quarantine");
+        Directory.CreateDirectory(quarantineDir);
+        int moved = 0;
+
+        foreach (var item in flaggedItems) {
+            try {
+                if (File.Exists(item.ImagePath)) {
+                    string destImg = Path.Combine(quarantineDir, Path.GetFileName(item.ImagePath));
+                    File.Move(item.ImagePath, destImg, overwrite: true);
+                    item.ImagePath = destImg;
+                    moved++;
+                }
+                if (!string.IsNullOrWhiteSpace(item.CaptionPath) && File.Exists(item.CaptionPath)) {
+                    string destCap = Path.Combine(quarantineDir, Path.GetFileName(item.CaptionPath));
+                    File.Move(item.CaptionPath, destCap, overwrite: true);
+                    item.CaptionPath = destCap;
+                }
+            } catch { }
+        }
+
+        return Task.FromResult(moved);
     }
 
     public static List<string> ParseTags(string caption) {

@@ -98,6 +98,13 @@
                         </MudChip>
                     </MudTooltip>
                 }
+                @if (_report.FlaggedCount > 0) {
+                    <MudTooltip Text="Flagged by Ollama Cleanser. Click to view flagged images.">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled" OnClick="@(() => GalleryFilter = "flagged")" Style="cursor: pointer; font-weight: 700;">
+                            🚩 @_report.FlaggedCount Flagged by Ollama
+                        </MudChip>
+                    </MudTooltip>
+                }
             }
         </div>
     </div>
@@ -135,13 +142,13 @@
                 </MudText>
             </MudCard>
         </MudItem>
-        <MudItem xs="6" sm="3">
+        <MudItem xs="6" sm="@(_report.FlaggedCount > 0 ? 2 : 3)">
             <MudCard Elevation="0" Class="pa-3 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
                 <MudText Typo="Typo.caption" Color="Color.Secondary">Unique Tag Lexicon</MudText>
                 <MudText Typo="Typo.h5" Style="font-weight: 700; color: #cba6f7;">@_report.TagFrequencies.Count</MudText>
             </MudCard>
         </MudItem>
-        <MudItem xs="6" sm="3">
+        <MudItem xs="6" sm="@(_report.FlaggedCount > 0 ? 2 : 3)">
             <MudCard Elevation="0" Class="pa-3 text-center" Style="background-color: #181825; border: 1px solid #313244; border-radius: 8px;">
                 <MudText Typo="Typo.caption" Color="Color.Secondary">Corrupt / Unreadable</MudText>
                 <MudText Typo="Typo.h5" Style="@($"font-weight: 700; color: {(_report.CorruptCount > 0 ? "#f38ba8" : "#a6adc8")};")">
@@ -149,6 +156,14 @@
                 </MudText>
             </MudCard>
         </MudItem>
+        @if (_report.FlaggedCount > 0) {
+            <MudItem xs="6" sm="2">
+                <MudCard Elevation="0" Class="pa-3 text-center cursor-pointer" Style="background-color: #181825; border: 1px solid #f38ba8; border-radius: 8px;" @onclick="@(() => GalleryFilter = "flagged")">
+                    <MudText Typo="Typo.caption" Color="Color.Error">🚩 Flagged Images</MudText>
+                    <MudText Typo="Typo.h5" Style="font-weight: 700; color: #f38ba8;">@_report.FlaggedCount</MudText>
+                </MudCard>
+            </MudItem>
+        }
     </MudGrid>
 
     <!-- Main Workspace Tabs -->
@@ -161,7 +176,47 @@
                         <MudSelectItem Value="@("all")">All Images (@_report.TotalImages)</MudSelectItem>
                         <MudSelectItem Value="@("missing")">Missing Captions (@_report.MissingCaptions)</MudSelectItem>
                         <MudSelectItem Value="@("corrupt")">Corrupt / Errors (@_report.CorruptCount)</MudSelectItem>
+                        @if (_report.FlaggedCount > 0) {
+                            <MudSelectItem Value="@("flagged")">🚩 Flagged by Ollama (@_report.FlaggedCount)</MudSelectItem>
+                        }
                     </MudSelect>
+
+                    <!-- Ollama Vision Cleanser Strip -->
+                    <div class="d-flex align-center gap-2 px-2 py-1" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                        <MudTooltip Text="Audit dataset images using local Ollama vision model to detect watermarks, blur, CGI/non-photo, or memes">
+                            <div class="d-flex align-center gap-1">
+                                <MudIcon Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Style="color: #89b4fa;" />
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-size: 0.72rem; font-weight: 600;">Cleanser:</MudText>
+                            </div>
+                        </MudTooltip>
+                        <MudSelect T="string" @bind-Value="_selectedOllamaCleanseModel" Dense="true" Margin="Margin.None" Style="width: 135px; font-size: 0.78rem;" Disabled="_isOllamaAuditing">
+                            @foreach (var m in GetOllamaCleanseModelOptions()) {
+                                <MudSelectItem Value="@m">@m</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="string" @bind-Value="_selectedOllamaCleansePreset" Dense="true" Margin="Margin.None" Style="width: 175px; font-size: 0.78rem;" Disabled="_isOllamaAuditing">
+                            <MudSelectItem Value="@("watermarks")">🔤 Watermarks &amp; Overlays</MudSelectItem>
+                            <MudSelectItem Value="@("blurry")">🌫️ Blurry / Low Quality</MudSelectItem>
+                            <MudSelectItem Value="@("nonphoto")">🎨 Non-Photographic / CGI</MudSelectItem>
+                            <MudSelectItem Value="@("memes")">🖼️ Memes &amp; Letterbox</MudSelectItem>
+                        </MudSelect>
+                        @if (_isOllamaAuditing) {
+                            <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.Cancel" OnClick="CancelOllamaAudit" Style="font-size: 0.72rem;">
+                                Stop
+                            </MudButton>
+                        } else {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Tertiary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoFixHigh" OnClick="CleanseDatasetWithOllamaAsync" Disabled="_isLoading || _isOllamaAuditing" Style="font-size: 0.72rem;">
+                                Cleanse
+                            </MudButton>
+                        }
+                        @if (_report.FlaggedCount > 0) {
+                            <MudTooltip Text="Move all flagged images and captions to '_quarantine/' subfolder">
+                                <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Filled.FolderDelete" OnClick="QuarantineFlaggedImagesAsync" Disabled="_isOllamaAuditing" Style="font-size: 0.72rem;">
+                                    Quarantine (@_report.FlaggedCount)
+                                </MudButton>
+                            </MudTooltip>
+                        }
+                    </div>
 
                     <div class="d-flex align-center gap-2 px-2 py-1" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
                         <MudTooltip Text="Dataset-wide default subject focus for Ollama vision tagging">
@@ -172,6 +227,7 @@
                         </MudTooltip>
                         <MudSelect T="string" @bind-Value="_datasetFocus" Dense="true" Margin="Margin.None" Style="width: 110px; font-size: 0.78rem;">
                             <MudSelectItem Value="@("person")">👤 Person</MudSelectItem>
+                            <MudSelectItem Value="@("clothing")">👗 Clothing</MudSelectItem>
                             <MudSelectItem Value="@("object")">📦 Object</MudSelectItem>
                             <MudSelectItem Value="@("scenery")">🏞 Scenery</MudSelectItem>
                             <MudSelectItem Value="@("style")">🎨 Style</MudSelectItem>
@@ -215,6 +271,19 @@
                 </div>
             </div>
 
+            @if (_isOllamaAuditing && _auditProgress != null) {
+                <div class="d-flex align-center gap-3 mb-3 pa-2" style="background: rgba(203, 166, 247, 0.08); border: 1px solid rgba(203, 166, 247, 0.25); border-radius: 8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoFixHigh" Color="Color.Tertiary" Size="Size.Small" />
+                    <MudText Typo="Typo.caption" Style="color: #cba6f7; font-weight: 600;">
+                        Ollama Cleanse (@_selectedOllamaCleansePreset) @_auditProgress.CurrentIndex / @_auditProgress.TotalCount: @_auditProgress.CurrentFile
+                    </MudText>
+                    <MudProgressLinear Color="Color.Tertiary" Value="@(_auditProgress.TotalCount > 0 ? (double)_auditProgress.CurrentIndex / _auditProgress.TotalCount * 100 : 0)" Rounded="true" Style="flex-grow: 1;" />
+                    <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" OnClick="CancelOllamaAudit">
+                        Cancel
+                    </MudButton>
+                </div>
+            }
+
             @if (_isGridView) {
                 <!-- Dynamically Resizing CSS Grid of Cards -->
                 <div style="@($"display: grid; grid-template-columns: repeat(auto-fill, minmax({_cardMinWidth}px, 1fr)); gap: 14px; max-height: 640px; overflow-y: auto; padding-right: 6px;")">
@@ -225,7 +294,7 @@
                             <!-- Thumbnail & Overlay Badges -->
                             <div class="cursor-pointer mb-2 position-relative" 
                                  @onclick="@(() => OpenCaptionEditor(item))"
-                                 style="width: 100%; height: 180px; border-radius: 8px; overflow: hidden; background-color: #181825; border: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: center;">
+                                 style="@($"width: 100%; height: 180px; border-radius: 8px; overflow: hidden; background-color: #181825; border: {(item.AuditStatus == OllamaAuditStatus.Flagged ? "2px solid #f38ba8" : "1px solid rgba(255,255,255,0.06)")}; display: flex; align-items: center; justify-content: center;")">
                                 @if (item.IsCorrupt) {
                                     <div class="text-center pa-3">
                                         <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Error" Size="Size.Large" />
@@ -236,8 +305,24 @@
                                          alt="@Path.GetFileName(item.ImagePath)" 
                                          loading="lazy"
                                          decoding="async"
-                                         style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.25s ease;" 
+                                         style="@($"width: 100%; height: 100%; object-fit: cover; transition: transform 0.25s ease; {(item.AuditStatus == OllamaAuditStatus.Flagged ? "opacity: 0.85;" : "")}")" 
                                          class="dataset-card-thumb" />
+                                }
+
+                                @if (item.AuditStatus == OllamaAuditStatus.Flagged) {
+                                    <div class="position-absolute" style="top: 6px; left: 6px; z-index: 2;">
+                                        <MudTooltip Text="@(!string.IsNullOrWhiteSpace(item.AuditReason) ? item.AuditReason : "Flagged by Ollama Cleanse")">
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Error" Style="font-size: 0.65rem; font-weight: 700; height: 20px;">
+                                                FLAGGED
+                                            </MudChip>
+                                        </MudTooltip>
+                                    </div>
+                                } else if (item.AuditStatus == OllamaAuditStatus.Clean) {
+                                    <div class="position-absolute" style="top: 6px; left: 6px; z-index: 2;">
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Style="font-size: 0.65rem; font-weight: 700; height: 20px;">
+                                            CLEAN
+                                        </MudChip>
+                                    </div>
                                 }
 
                                 <div class="card-hover-overlay position-absolute d-flex align-center justify-center gap-1"
@@ -347,7 +432,20 @@
 
                                 <div class="d-flex flex-column flex-grow-1">
                                     <div class="d-flex align-center justify-space-between mb-2 flex-wrap gap-1">
-                                        <span style="font-weight: 700; font-size: 0.9rem; color: #cdd6f4;">@Path.GetFileName(item.ImagePath)</span>
+                                        <div class="d-flex align-center gap-2">
+                                            <span style="font-weight: 700; font-size: 0.9rem; color: #cdd6f4;">@Path.GetFileName(item.ImagePath)</span>
+                                            @if (item.AuditStatus == OllamaAuditStatus.Flagged) {
+                                                <MudTooltip Text="@(!string.IsNullOrWhiteSpace(item.AuditReason) ? item.AuditReason : "Flagged by Ollama Cleanse")">
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Error" Style="font-size: 0.65rem; font-weight: 700; height: 18px;">
+                                                        FLAGGED
+                                                    </MudChip>
+                                                </MudTooltip>
+                                            } else if (item.AuditStatus == OllamaAuditStatus.Clean) {
+                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Style="font-size: 0.65rem; font-weight: 700; height: 18px;">
+                                                    CLEAN
+                                                </MudChip>
+                                            }
+                                        </div>
                                         <div class="d-flex gap-1 align-center">
                                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@item.FormattedDimensions</MudChip>
                                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">@item.BucketName</MudChip>
@@ -810,6 +908,16 @@
                             @_editingItem.FormattedSize
                         </MudChip>
                     </div>
+
+                    @if (_editingItem.AuditStatus == OllamaAuditStatus.Flagged) {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" Style="width: 100%; font-size: 0.75rem;">
+                            <b>Ollama Flagged:</b> @(!string.IsNullOrWhiteSpace(_editingItem.AuditReason) ? _editingItem.AuditReason : "Flagged as problematic")
+                        </MudAlert>
+                    } else if (_editingItem.AuditStatus == OllamaAuditStatus.Clean) {
+                        <MudAlert Severity="Severity.Success" Dense="true" Class="mt-2" Style="width: 100%; font-size: 0.75rem;">
+                            <b>Ollama Cleanser:</b> Clean (passed quality audit)
+                        </MudAlert>
+                    }
                 </div>
 
                 <!-- Right: Scrollable Caption Editor Studio -->
@@ -828,6 +936,7 @@
                             <div class="d-flex align-center gap-1 pa-1" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
                                 <MudSelect T="string" @bind-Value="_modalFocus" Dense="true" Margin="Margin.None" Style="width: 105px; font-size: 0.72rem;">
                                     <MudSelectItem Value="@("person")">👤 Person</MudSelectItem>
+                                    <MudSelectItem Value="@("clothing")">👗 Clothing</MudSelectItem>
                                     <MudSelectItem Value="@("object")">📦 Object</MudSelectItem>
                                     <MudSelectItem Value="@("scenery")">🏞 Scenery</MudSelectItem>
                                     <MudSelectItem Value="@("style")">🎨 Style</MudSelectItem>
@@ -965,6 +1074,13 @@
     private bool _isLoading;
     private bool _isBatchMutating;
     private DatasetCuratorReport? _report;
+
+    // Ollama Vision Cleanser State
+    private string _selectedOllamaCleanseModel = "llama3.2-vision";
+    private string _selectedOllamaCleansePreset = "watermarks";
+    private bool _isOllamaAuditing;
+    private HarvestDownloadProgress? _auditProgress;
+    private CancellationTokenSource? _auditCts;
 
     private string _tagFilter = "";
     private string _batchTagInput = "";
@@ -1152,6 +1268,11 @@
     protected override async Task OnInitializedAsync() {
         StudioSession.SetStage(StudioStage.Curate);
         _datasetFolder = StudioSession.DatasetFolder;
+
+        if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel)) {
+            _selectedOllamaCleanseModel = Settings.Current.OllamaDefaultModel.Trim();
+        }
+
         if (!string.IsNullOrWhiteSpace(_datasetFolder) && Directory.Exists(_datasetFolder)) {
             await ScanFolderAsync();
         } else if (_isZipWorkingCopy) {
@@ -1305,6 +1426,7 @@
             return _galleryFilter switch {
                 "missing" => _report.Items.Where(i => string.IsNullOrWhiteSpace(i.CaptionText)).ToList(),
                 "corrupt" => _report.Items.Where(i => i.IsCorrupt).ToList(),
+                "flagged" => _report.Items.Where(i => i.AuditStatus == OllamaAuditStatus.Flagged).ToList(),
                 _ => _report.Items
             };
         }
@@ -1797,15 +1919,18 @@
             "person" => isNatural
                 ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing heavily on the person. Thoroughly describe their facial expression, eye direction, hairstyle, hair color, clothing and attire details, posture, lighting, and background setting. Do not say 'This is an image of'. Be descriptive and direct."
                 : "Analyze the person in this image in detail for machine learning training. Describe the subject, hairstyle and hair color, facial expression, eye direction, attire, body pose, framing, lighting, and background setting. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+            "clothing" => isNatural
+                ? "Describe this image in 1-2 detailed sentences for training a clothing LoRA. Apply negative decoupling: thoroughly describe the surrounding background, room, furniture, flooring, body pose, footwear/shoes, and other garments (e.g. top, skirt, jacket). DO NOT name or describe the primary focal legwear or target garment so that it binds exclusively to the trigger word. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze this image for clothing LoRA training using negative decoupling. Provide comma-separated tags describing: body pose, posture, surrounding room, background setting, furniture, flooring, footwear, shoes, and non-target clothing items. DO NOT tag the primary focal garment itself. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
             "object" => isNatural
                 ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, focusing on the main object, vehicle, or product. Describe its design, materials, primary and secondary colors, surface textures, wear/condition, viewing angle, and background context. Do not say 'This is an image of'. Be descriptive and direct."
                 : "Analyze the primary object or product in this image in detail for machine learning training. Describe the object type, shape, colors, materials, surface textures, condition, viewing angle, and background context. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
             "scenery" => isNatural
-                ? "Describe this scene in 1-2 detailed sentences for training a text-to-image AI model, focusing on the environment and architecture. Describe the setting, architectural style, structures, environmental elements, atmosphere, time of day, weather, and lighting conditions. Do not say 'This is an image of'. Be descriptive and direct."
-                : "Analyze the environment and scene in this image in detail for machine learning training. Describe architectural structures, landscape elements, foliage, weather, time of day, lighting conditions, atmosphere, and perspective. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+                ? "Describe this environment in 1-2 detailed sentences for training a scene LoRA. Explicitly classify the specific architectural space or archetype (e.g. cockpit, bridge, station corridor, hangar bay, planetary outpost, interior, exterior), along with structural elements, materials, atmosphere, lighting conditions, and viewpoint. Do not say 'This is an image of'. Be descriptive and direct."
+                : "Analyze the environment and scene in this image in detail for machine learning training. Explicitly classify the architectural archetype (cockpit, hangar, station corridor, outpost, interior, exterior), structures, materials, atmosphere, lighting conditions, perspective, and props. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
             "style" => isNatural
-                ? "Describe this image in 1-2 detailed sentences for training a text-to-image AI model, highlighting the artistic style and medium. Describe the composition, artistic medium (e.g. digital painting, oil, anime, photograph), color palette, rendering quality, texture, and aesthetic technique. Do not say 'This is an image of'. Be descriptive and direct."
-                : "Analyze the artistic style and visual medium of this image for machine learning training. Describe the art medium, rendering technique, linework, brushwork, texture, color palette, lighting atmosphere, and visual composition. Do not include conversational filler or markdown. Output ONLY comma-separated tags.",
+                ? "Describe the tangible subjects and scene in 1-2 detailed sentences for training a style LoRA. Describe the characters, clothing, physical objects, poses, background environment, and lighting setup in detail. STRICTLY DO NOT mention or describe the artistic style, painting medium, brushwork, rendering technique, or color palette words, so the aesthetic binds exclusively to the trigger word. Do not say 'This is an image of'."
+                : "Analyze the tangible subjects and contents of this image for style LoRA training. Provide comma-separated tags describing ONLY the concrete subjects, characters, clothing, objects, pose, and background environment. STRICTLY DO NOT include words describing the art style, painting medium, brushwork, or rendering technique. Do not include conversational filler. Output ONLY comma-separated tags.",
             _ => isNatural
                 ? "Describe this image thoroughly in 1-2 detailed sentences for training a text-to-image AI model. Focus on subject appearance, posture, clothing, colors, setting, and lighting. Do not say 'This is an image of' or 'The picture shows'. Be descriptive and direct."
                 : "Analyze this image in detail for machine learning training. Provide a concise, comma-separated list of visual tags describing: the subject, attire, hair, expression, pose, background, lighting, and artistic style. Do not include conversational filler, introductory words, or markdown. Output ONLY comma-separated tags."
@@ -1829,8 +1954,121 @@
         return Color.Error;
     }
 
+    private IEnumerable<string> GetOllamaCleanseModelOptions() {
+        var list = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_selectedOllamaCleanseModel)) {
+            list.Add(_selectedOllamaCleanseModel.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel)) {
+            string def = Settings.Current.OllamaDefaultModel.Trim();
+            if (!list.Contains(def, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(def);
+            }
+        }
+        string[] presets = { "llama3.2-vision", "llama3.2-vision:11b", "llava", "qwen2-vl", "minicpm-v" };
+        foreach (var p in presets) {
+            if (!list.Contains(p, StringComparer.OrdinalIgnoreCase)) {
+                list.Add(p);
+            }
+        }
+        return list;
+    }
+
+    private async Task CleanseDatasetWithOllamaAsync() {
+        if (_report == null || string.IsNullOrWhiteSpace(_datasetFolder) || _isOllamaAuditing) return;
+
+        string prompt = _selectedOllamaCleansePreset switch {
+            "watermarks" => "Analyze this image. Does it contain text, watermarks, subtitles, logos, or artificial UI overlays?",
+            "blurry" => "Analyze this image. Is it blurry, out-of-focus, highly pixelated, or severe low quality?",
+            "nonphoto" => "Analyze this image. Is it a cartoon, 2D anime, sketch, drawing, or 3D CGI rendering rather than a real photograph?",
+            "memes" => "Analyze this image. Does it contain meme captions, top/bottom text, or thick black letterbox borders?",
+            _ => "Does this image have severe visual artifacts, watermarks, or quality flaws?"
+        };
+
+        string ollamaUrl = !string.IsNullOrWhiteSpace(Settings.Current.OllamaEndpointUrl)
+            ? Settings.Current.OllamaEndpointUrl.Trim().TrimEnd('/')
+            : (Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://localhost:11434");
+
+        string modelName = !string.IsNullOrWhiteSpace(_selectedOllamaCleanseModel)
+            ? _selectedOllamaCleanseModel.Trim()
+            : (!string.IsNullOrWhiteSpace(Settings.Current.OllamaDefaultModel)
+                ? Settings.Current.OllamaDefaultModel.Trim()
+                : (Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2-vision"));
+
+        _auditCts?.Cancel();
+        _auditCts?.Dispose();
+        _auditCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+
+        _isOllamaAuditing = true;
+        _auditProgress = null;
+        StateHasChanged();
+
+        var progressHandler = new Progress<HarvestDownloadProgress>(p => {
+            _auditProgress = p;
+            _ = SafeInvokeAsync(StateHasChanged);
+        });
+
+        try {
+            await CuratorService.AuditDatasetWithOllamaAsync(
+                _report.Items,
+                ollamaUrl,
+                modelName,
+                prompt,
+                progressHandler,
+                _auditCts.Token);
+
+            if (_report.FlaggedCount > 0) {
+                Snackbar.Add($"Ollama Cleanse complete: Flagged {_report.FlaggedCount} images! Switched filter to view flagged items.", Severity.Warning);
+                GalleryFilter = "flagged";
+            } else {
+                Snackbar.Add($"Ollama Cleanse complete: All {_report.TotalImages} images passed!", Severity.Success);
+            }
+        } catch (OperationCanceledException) {
+            Snackbar.Add("Ollama Cleanse was stopped.", Severity.Info);
+        } catch (Exception ex) {
+            Snackbar.Add($"Ollama Cleanse failed: {ex.Message}", Severity.Error);
+        } finally {
+            _isOllamaAuditing = false;
+            _auditProgress = null;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelOllamaAudit() {
+        if (_isOllamaAuditing) {
+            _auditCts?.Cancel();
+        }
+    }
+
+    private async Task QuarantineFlaggedImagesAsync() {
+        if (_report == null || string.IsNullOrWhiteSpace(_datasetFolder)) return;
+        var flagged = _report.Items.Where(i => i.AuditStatus == OllamaAuditStatus.Flagged).ToList();
+        if (flagged.Count == 0) {
+            Snackbar.Add("No flagged images to quarantine.", Severity.Info);
+            return;
+        }
+
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Quarantine Flagged Images",
+            $"Are you sure you want to move {flagged.Count} flagged image(s) (and their caption files) to the '_quarantine' subfolder? They will be excluded from this dataset without deleting your original files.",
+            yesText: "Quarantine Images",
+            cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        try {
+            int quarantined = await CuratorService.QuarantineFlaggedItemsAsync(_datasetFolder, flagged);
+            Snackbar.Add($"Quarantined {quarantined} image(s) to '_quarantine/' folder.", Severity.Success);
+            await ScanFolderAsync();
+        } catch (Exception ex) {
+            Snackbar.Add($"Quarantine failed: {ex.Message}", Severity.Error);
+        }
+    }
+
     public void Dispose() {
         _disposed = true;
+        _auditCts?.Cancel();
+        _auditCts?.Dispose();
         _scanCts?.Cancel();
         _scanCts?.Dispose();
         _cts?.Cancel();
