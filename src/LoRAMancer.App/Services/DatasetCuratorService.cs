@@ -319,14 +319,86 @@ public sealed class DatasetCuratorService {
         item.CaptionText = newCaption.Trim();
     }
 
+    public Task<bool> DeleteItemCaptionAsync(DatasetCuratorItem item) {
+        bool deleted = false;
+        if (!string.IsNullOrWhiteSpace(item.CaptionPath) && File.Exists(item.CaptionPath)) {
+            try {
+                File.Delete(item.CaptionPath);
+                deleted = true;
+            } catch { }
+        }
+
+        string dir = Path.GetDirectoryName(item.ImagePath) ?? "";
+        string baseName = Path.GetFileNameWithoutExtension(item.ImagePath);
+        string companionTxt = Path.Combine(dir, baseName + ".txt");
+        string companionCap = Path.Combine(dir, baseName + ".caption");
+
+        if (File.Exists(companionTxt)) {
+            try {
+                File.Delete(companionTxt);
+                deleted = true;
+            } catch { }
+        }
+        if (File.Exists(companionCap)) {
+            try {
+                File.Delete(companionCap);
+                deleted = true;
+            } catch { }
+        }
+
+        item.CaptionPath = null;
+        item.CaptionText = string.Empty;
+        return Task.FromResult(deleted);
+    }
+
+    public async Task<int> BatchDeleteAllCaptionsAsync(string datasetDir, CancellationToken cancellationToken = default) {
+        if (string.IsNullOrWhiteSpace(datasetDir) || !Directory.Exists(datasetDir)) {
+            return 0;
+        }
+
+        await CreateCaptionBackupAsync(datasetDir, cancellationToken);
+
+        int count = 0;
+        var files = Directory.GetFiles(datasetDir, "*.*", SearchOption.AllDirectories)
+            .Where(f => {
+                string ext = Path.GetExtension(f);
+                return (string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ext, ".caption", StringComparison.OrdinalIgnoreCase)) &&
+                       !f.Contains(".captions_backup_");
+            });
+
+        foreach (var file in files) {
+            cancellationToken.ThrowIfCancellationRequested();
+            try {
+                File.Delete(file);
+                count++;
+            } catch { }
+        }
+
+        return count;
+    }
+
     public async Task<string> CreateCaptionBackupAsync(string datasetDir, CancellationToken cancellationToken = default) {
         string backupDir = Path.Combine(datasetDir, $".captions_backup_{DateTime.Now:yyyyMMdd_HHmmss}");
         Directory.CreateDirectory(backupDir);
 
-        string[] txtFiles = Directory.GetFiles(datasetDir, "*.txt", SearchOption.TopDirectoryOnly);
-        foreach (var file in txtFiles) {
+        string[] captionFiles = Directory.GetFiles(datasetDir, "*.*", SearchOption.AllDirectories)
+            .Where(f => {
+                string ext = Path.GetExtension(f);
+                return (string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ext, ".caption", StringComparison.OrdinalIgnoreCase)) &&
+                       !f.Contains(".captions_backup_");
+            })
+            .ToArray();
+
+        foreach (var file in captionFiles) {
             cancellationToken.ThrowIfCancellationRequested();
-            string dest = Path.Combine(backupDir, Path.GetFileName(file));
+            string rel = Path.GetRelativePath(datasetDir, file);
+            string dest = Path.Combine(backupDir, rel);
+            string? destDir = Path.GetDirectoryName(dest);
+            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir)) {
+                Directory.CreateDirectory(destDir);
+            }
             File.Copy(file, dest, overwrite: true);
         }
 

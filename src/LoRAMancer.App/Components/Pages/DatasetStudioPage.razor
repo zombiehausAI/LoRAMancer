@@ -306,14 +306,25 @@
                                            Style="font-size: 0.72rem; text-transform: none; color: #89b4fa; padding: 2px 6px;">
                                     Inspect &amp; Edit
                                 </MudButton>
-                                <MudButton Variant="Variant.Filled" 
-                                           Size="Size.Small" 
-                                           Color="Color.Primary" 
-                                           StartIcon="@Icons.Material.Filled.Save" 
-                                           OnClick="@(() => SaveSingleCaptionAsync(item))"
-                                           Style="font-size: 0.72rem; padding: 2px 10px; border-radius: 6px;">
-                                    Save
-                                </MudButton>
+                                <div class="d-flex align-center gap-1">
+                                    @if (!string.IsNullOrWhiteSpace(item.CaptionText)) {
+                                        <MudTooltip Text="Delete text tags for this image">
+                                            <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" 
+                                                           Size="Size.Small" 
+                                                           Color="Color.Error" 
+                                                           OnClick="@(() => DeleteSingleCaptionAsync(item))" 
+                                                           Style="padding: 2px;" />
+                                        </MudTooltip>
+                                    }
+                                    <MudButton Variant="Variant.Filled" 
+                                               Size="Size.Small" 
+                                               Color="Color.Primary" 
+                                               StartIcon="@Icons.Material.Filled.Save" 
+                                               OnClick="@(() => SaveSingleCaptionAsync(item))"
+                                               Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                        Save
+                                    </MudButton>
+                                </div>
                             </div>
                         </div>
                     }
@@ -371,6 +382,16 @@
                                                        Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
                                                 Save
                                             </MudButton>
+                                            @if (!string.IsNullOrWhiteSpace(item.CaptionText)) {
+                                                <MudButton Variant="Variant.Text" 
+                                                           Color="Color.Error" 
+                                                           Size="Size.Small" 
+                                                           StartIcon="@Icons.Material.Filled.DeleteForever" 
+                                                           OnClick="@(() => DeleteSingleCaptionAsync(item))" 
+                                                           Style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                                                    Delete
+                                                </MudButton>
+                                            }
                                         </div>
                                     </div>
                                 </div>
@@ -445,7 +466,7 @@
         <!-- Tab 3: Batch Operations -->
         <MudTabPanel Text="Batch Operations" Icon="@Icons.Material.Filled.EditNote">
             <MudGrid Spacing="3" Class="mt-1">
-                <MudItem xs="12" md="4">
+                <MudItem xs="12" md="6" lg="3">
                     <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                         <div class="d-flex align-center gap-2 mb-2">
                             <MudIcon Icon="@Icons.Material.Filled.AddCircle" Color="Color.Success" Size="Size.Small" />
@@ -466,7 +487,7 @@
                     </MudCard>
                 </MudItem>
 
-                <MudItem xs="12" md="4">
+                <MudItem xs="12" md="6" lg="3">
                     <MudCard Elevation="0" Class="pa-4 h-100" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                         <div class="d-flex align-center gap-2 mb-2">
                             <MudIcon Icon="@Icons.Material.Filled.FindReplace" Color="Color.Primary" Size="Size.Small" />
@@ -489,7 +510,35 @@
                     </MudCard>
                 </MudItem>
 
-                <MudItem xs="12" md="4">
+                <MudItem xs="12" md="6" lg="3">
+                    <MudCard Elevation="0" Class="pa-4 h-100 d-flex flex-column justify-space-between" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
+                        <div>
+                            <div class="d-flex align-center gap-2 mb-2">
+                                <MudIcon Icon="@Icons.Material.Filled.DeleteSweep" Color="Color.Error" Size="Size.Small" />
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600; color: #f38ba8;">Wipe All Tag Files</MudText>
+                            </div>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">
+                                Delete all caption and tag files (.txt and .caption) to start fresh or re-tag with AI. A safety backup folder is automatically created before wiping.
+                            </MudText>
+                            <div class="pa-2 mb-3" style="background: rgba(243,139,168,0.06); border: 1px solid rgba(243,139,168,0.15); border-radius: 6px;">
+                                <div style="font-size: 0.72rem; color: #a6adc8;">Total Tagged Images:</div>
+                                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #f38ba8; font-weight: 600;">
+                                    @(_report?.Items.Count(i => !string.IsNullOrWhiteSpace(i.CaptionText)) ?? 0) tagged images
+                                </div>
+                            </div>
+                        </div>
+                        <MudButton Variant="Variant.Filled" 
+                                   Color="Color.Error" 
+                                   Size="Size.Small" 
+                                   OnClick="BatchDeleteAllCaptionsAsync" 
+                                   Disabled="@(_report == null || !_report.Items.Any(i => !string.IsNullOrWhiteSpace(i.CaptionText)) || _isBatchMutating)" 
+                                   StartIcon="@Icons.Material.Filled.DeleteForever">
+                            Wipe All Captions...
+                        </MudButton>
+                    </MudCard>
+                </MudItem>
+
+                <MudItem xs="12" md="6" lg="3">
                     <MudCard Elevation="0" Class="pa-4 h-100 d-flex flex-column justify-space-between" Style="background-color: #11111b; border: 1px solid #313244; border-radius: 8px;">
                         <div>
                             <div class="d-flex align-center gap-2 mb-2">
@@ -842,14 +891,26 @@
 
                     <!-- Footer Action Buttons -->
                     <div class="d-flex align-center justify-space-between gap-2 mt-auto pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
-                        <MudButton Variant="Variant.Outlined" 
-                                   Color="Color.Default" 
-                                   Size="Size.Small" 
-                                   StartIcon="@Icons.Material.Filled.Undo" 
-                                   OnClick="RevertCaptionDraft"
-                                   Style="border-radius: 8px;">
-                            Revert
-                        </MudButton>
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" 
+                                       Color="Color.Default" 
+                                       Size="Size.Small" 
+                                       StartIcon="@Icons.Material.Filled.Undo" 
+                                       OnClick="RevertCaptionDraft"
+                                       Style="border-radius: 8px;">
+                                Revert
+                            </MudButton>
+                            @if (_editingItem != null && (!string.IsNullOrWhiteSpace(_editingItem.CaptionText) || !string.IsNullOrWhiteSpace(_editingCaptionDraft))) {
+                                <MudButton Variant="Variant.Outlined" 
+                                           Color="Color.Error" 
+                                           Size="Size.Small" 
+                                           StartIcon="@Icons.Material.Filled.DeleteForever" 
+                                           OnClick="DeleteEditingCaptionAsync"
+                                           Style="border-radius: 8px;">
+                                    Delete Tag File
+                                </MudButton>
+                            }
+                        </div>
                         
                         <div class="d-flex align-center gap-2">
                             <MudButton Variant="Variant.Outlined" 
@@ -1358,6 +1419,67 @@
             }
         } catch (Exception ex) {
             Snackbar.Add($"Failed to save caption: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteSingleCaptionAsync(DatasetCuratorItem item) {
+        try {
+            bool deleted = await CuratorService.DeleteItemCaptionAsync(item);
+            if (deleted) {
+                Snackbar.Add($"Deleted caption tag file for {Path.GetFileName(item.ImagePath)}", Severity.Info);
+            } else {
+                Snackbar.Add($"Cleared tags for {Path.GetFileName(item.ImagePath)}", Severity.Info);
+            }
+            if (_report != null) {
+                _report.TagFrequencies = CuratorService.ComputeTagFrequencies(_report.Items);
+            }
+            StateHasChanged();
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to delete caption: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteEditingCaptionAsync() {
+        if (_editingItem == null) return;
+        await DeleteSingleCaptionAsync(_editingItem);
+        _editingCaptionDraft = string.Empty;
+    }
+
+    private async Task BatchDeleteAllCaptionsAsync() {
+        if (string.IsNullOrWhiteSpace(_datasetFolder) || _report == null) return;
+
+        int taggedCount = _report.Items.Count(i => !string.IsNullOrWhiteSpace(i.CaptionText));
+        if (taggedCount == 0) {
+            Snackbar.Add("No caption files found in this dataset.", Severity.Info);
+            return;
+        }
+
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Wipe All Caption Files",
+            $"Are you sure you want to delete all caption files (.txt / .caption) across {taggedCount} image(s) in this dataset? A timestamped backup folder (.captions_backup_*) will be created automatically before deletion so you can restore if needed.",
+            yesText: "Wipe All Captions",
+            cancelText: "Cancel"
+        );
+
+        if (confirmed != true) return;
+
+        _isBatchMutating = true;
+        try {
+            int deletedCount = await CuratorService.BatchDeleteAllCaptionsAsync(_datasetFolder);
+            foreach (var item in _report.Items) {
+                item.CaptionPath = null;
+                item.CaptionText = string.Empty;
+            }
+            _report.TagFrequencies = CuratorService.ComputeTagFrequencies(_report.Items);
+            if (_editingItem != null) {
+                _editingCaptionDraft = string.Empty;
+            }
+            Snackbar.Add($"Wiped {deletedCount} caption file(s). Auto-backup saved in dataset directory.", Severity.Success);
+        } catch (Exception ex) {
+            Snackbar.Add($"Failed to wipe captions: {ex.Message}", Severity.Error);
+        } finally {
+            _isBatchMutating = false;
+            StateHasChanged();
         }
     }
 

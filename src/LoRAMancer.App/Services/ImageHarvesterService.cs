@@ -238,7 +238,15 @@ public sealed class ImageHarvesterService {
                 MinWidth = query.MinWidth,
                 MinHeight = query.MinHeight
             };
-            return await ExecuteProviderSearchAsync(p, sub, cancellationToken);
+            using var singleCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            singleCts.CancelAfter(TimeSpan.FromSeconds(20));
+            return await Task.Run(async () => {
+                try {
+                    return await ExecuteProviderSearchAsync(p, sub, singleCts.Token);
+                } catch {
+                    return new List<HarvestedCandidateItem>();
+                }
+            }, cancellationToken);
         }
 
         int perProviderLimit = Math.Max(10, query.MaxResults / Math.Max(1, matching.Count));
@@ -387,24 +395,37 @@ public sealed class ImageHarvesterService {
 
         // Interleave results from Bing and DuckDuckGo for rich diversity and high volume
         while ((bIdx < bingList.Count || dIdx < ddgList.Count) && results.Count < query.MaxResults) {
+            bool advanced = false;
             if (bIdx < bingList.Count && bIdx < maxPerEngine) {
                 var item = bingList[bIdx++];
-                if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+                if (seenUrls.Add(item.SourceUrl)) {
+                    results.Add(item);
+                }
+                advanced = true;
             }
             if (dIdx < ddgList.Count && dIdx < maxPerEngine && results.Count < query.MaxResults) {
                 var item = ddgList[dIdx++];
-                if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+                if (seenUrls.Add(item.SourceUrl)) {
+                    results.Add(item);
+                }
+                advanced = true;
             }
-            if (bIdx >= maxPerEngine && dIdx >= maxPerEngine) break;
+            if (!advanced) {
+                break;
+            }
         }
 
         while (bIdx < bingList.Count && results.Count < query.MaxResults) {
             var item = bingList[bIdx++];
-            if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+            if (seenUrls.Add(item.SourceUrl)) {
+                results.Add(item);
+            }
         }
         while (dIdx < ddgList.Count && results.Count < query.MaxResults) {
             var item = ddgList[dIdx++];
-            if (seenUrls.Add(item.SourceUrl)) results.Add(item);
+            if (seenUrls.Add(item.SourceUrl)) {
+                results.Add(item);
+            }
         }
 
         return results;
@@ -430,9 +451,16 @@ public sealed class ImageHarvesterService {
             }
 
             if (string.IsNullOrWhiteSpace(vqd)) {
-                var vqdAlt = Regex.Match(initHtml, @"vqd=([0-9-]+)");
+                var vqdAlt = Regex.Match(initHtml, @"[?&""]vqd=([a-zA-Z0-9_-]+)");
                 if (vqdAlt.Success) {
                     vqd = vqdAlt.Groups[1].Value;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(vqd)) {
+                var vqdJson = Regex.Match(initHtml, @"""vqd"":\s*""([^""]+)""");
+                if (vqdJson.Success) {
+                    vqd = vqdJson.Groups[1].Value;
                 }
             }
 

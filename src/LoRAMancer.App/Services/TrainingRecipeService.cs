@@ -29,8 +29,25 @@ public sealed class TrainingRecipeService {
         var recipes = new List<TrainingRecipe>();
 
         string[] files = Directory.GetFiles(dir, "*.json");
-        if (files.Length == 0) {
-            await SeedDefaultRecipesAsync(cancellationToken);
+        var defaults = GetDefaultRecipes();
+        bool anyMissing = false;
+        foreach (var def in defaults) {
+            string defPath = Path.Combine(dir, $"{def.Id}.json");
+            if (!File.Exists(defPath)) {
+                await SaveRecipeAsync(def, cancellationToken);
+                anyMissing = true;
+            } else if (def.IsBuiltIn) {
+                try {
+                    string existingJson = await File.ReadAllTextAsync(defPath, cancellationToken);
+                    var existing = JsonSerializer.Deserialize<TrainingRecipe>(existingJson, _jsonOptions);
+                    if (existing != null && existing.IsBuiltIn) {
+                        def.IsFavorite = existing.IsFavorite;
+                        await SaveRecipeAsync(def, cancellationToken);
+                    }
+                } catch { }
+            }
+        }
+        if (anyMissing || files.Length == 0) {
             files = Directory.GetFiles(dir, "*.json");
         }
 
@@ -226,6 +243,34 @@ public sealed class TrainingRecipeService {
                 Tags = new() { "FLUX", "Character", "Recommended" }
             },
             new() {
+                Id = "flux_character_likeness",
+                Name = "FLUX.1 Dev - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 setup with 2e-4 LR, 1,200 steps, and frozen text encoders for flawless facial likeness and complete prompt/scene steerability.",
+                TargetBaseModel = "FLUX.1 Dev",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "photo of {trigger}, looking at the camera, natural daylight, highly detailed, sharp focus",
+                SamplePrompt2 = "cinematic close-up portrait of {trigger}, dynamic pose, 8k resolution",
+                NegativePrompt = "",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "FLUX", "Character", "Likeness", "Recommended" }
+            },
+            new() {
                 Id = "sdxl_artistic_style",
                 Name = "SDXL 1.0 - Artistic Style & Texture (Rank 32)",
                 Description = "Expanded rank 32 capacity tailored for capturing artistic brush strokes, palettes, and compositions.",
@@ -298,6 +343,176 @@ public sealed class TrainingRecipeService {
                 IsFavorite = false,
                 IsBuiltIn = true,
                 Tags = new() { "Chroma", "Concept", "Photorealism" }
+            },
+            new() {
+                Id = "chroma_character_likeness",
+                Name = "Chroma - Character & Likeness Preserving (Rank 2)",
+                Description = "Ultra-low Rank 2 / Alpha 16 setup with 5e-4 LR and cosine restarts for maximum face likeness and high pose/scene manipulability without background bleed.",
+                TargetBaseModel = "Chroma",
+                SubjectType = "Character",
+                NetworkDim = 2,
+                NetworkAlpha = 16.0,
+                LearningRate = 5e-4,
+                UnetLearningRate = 5e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "photo of {trigger}, looking at viewer, studio lighting, highly detailed",
+                SamplePrompt2 = "cinematic portrait of {trigger}, dynamic pose, sharp focus, 8k",
+                NegativePrompt = "blurry, out of focus, low quality, deformed, disfigured",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "Chroma", "Character", "Likeness", "Recommended" }
+            },
+            new() {
+                Id = "pony_character_likeness",
+                Name = "Pony Diffusion V6 - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 setup with frozen text encoders and 1,200 steps for flawless likeness and prompt manipulability without pose/style stiffness.",
+                TargetBaseModel = "Pony Diffusion V6 XL",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                ClipSkip = 2,
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "score_9, score_8_up, score_7_up, source_pony, 1girl, {trigger}, solo, expressive eyes, dynamic pose, looking at viewer",
+                SamplePrompt2 = "score_9, score_8_up, score_7_up, source_pony, portrait of {trigger}, cinematic lighting, masterpiece",
+                NegativePrompt = "score_4, score_5, score_6, source_pony, simple background, ugly, bad hands, mutated fingers, blurry",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "Pony", "Character", "Likeness", "Recommended" }
+            },
+            new() {
+                Id = "illustrious_character_likeness",
+                Name = "Illustrious-XL - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 setup with frozen text encoders and 1,200 steps for crisp anime/illustrative likeness without style locking.",
+                TargetBaseModel = "Illustrious-XL",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                ClipSkip = 2,
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "masterpiece, newest, 1girl, {trigger}, solo, expressive eyes, dynamic pose, looking at viewer",
+                SamplePrompt2 = "masterpiece, 1girl, portrait of {trigger}, dynamic lighting, masterpiece, sharp eyes",
+                NegativePrompt = "worst quality, low quality, bad anatomy, bad hands, blurry, distorted",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "Illustrious", "Character", "Likeness", "Anime", "Recommended" }
+            },
+            new() {
+                Id = "sdxl_character_likeness",
+                Name = "SDXL 1.0 - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 setup with frozen dual text encoders and 1,200 steps for realistic likeness and full prompt/scene flexibility.",
+                TargetBaseModel = "SDXL 1.0",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "a photo of {trigger}, looking at the camera, natural daylight, highly detailed, 8k resolution",
+                SamplePrompt2 = "cinematic close-up portrait of {trigger}, dynamic pose, sharp focus, dramatic lighting",
+                NegativePrompt = "blurry, low quality, distorted, deformed, bad anatomy, worst quality",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "SDXL", "Character", "Likeness", "Photorealism", "Recommended" }
+            },
+            new() {
+                Id = "sd15_character_likeness",
+                Name = "Stable Diffusion 1.5 - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 setup with frozen text encoder and 1,200 steps for clean facial likeness and maximum pose steerability.",
+                TargetBaseModel = "SD 1.5",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "a photo of {trigger}, looking at viewer, studio lighting, highly detailed, sharp focus",
+                SamplePrompt2 = "close up portrait of {trigger}, cinematic lighting, 4k, masterpiece",
+                NegativePrompt = "blurry, low quality, distorted, deformed, bad anatomy, worst quality",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "SD1.5", "Character", "Likeness", "Recommended" }
+            },
+            new() {
+                Id = "sd35_character_likeness",
+                Name = "Stable Diffusion 3.5 - Likeness & Manipulability (Rank 4)",
+                Description = "Ultra-lean Rank 4 / Alpha 16 MMDiT setup with frozen triple text encoders (T5/CLIP) and 1,200 steps for pristine character likeness and prompt compliance.",
+                TargetBaseModel = "SD 3.5",
+                SubjectType = "Character",
+                NetworkDim = 4,
+                NetworkAlpha = 16.0,
+                LearningRate = 2e-4,
+                UnetLearningRate = 2e-4,
+                TextEncoderLearningRate = 0.0,
+                Optimizer = "adamw",
+                LrScheduler = "cosine_with_restarts",
+                Precision = "bf16",
+                Epochs = 10,
+                Repeats = 10,
+                BatchSize = 1,
+                TotalSteps = 1200,
+                FlipAug = true,
+                ShuffleTokens = false,
+                KeepTokens = 1,
+                SamplePrompt1 = "a photo of {trigger}, looking at the camera, natural lighting, highly detailed, sharp focus",
+                SamplePrompt2 = "cinematic close-up portrait of {trigger}, dynamic pose, 8k resolution, professional photography",
+                NegativePrompt = "",
+                IsFavorite = true,
+                IsBuiltIn = true,
+                Tags = new() { "SD3.5", "Character", "Likeness", "MMDiT", "Recommended" }
             }
         };
     }
