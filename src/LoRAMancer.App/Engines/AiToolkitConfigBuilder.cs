@@ -71,7 +71,6 @@ public sealed class AiToolkitConfigBuilder {
 
         int totalSteps = CalculateTotalSteps(sanitized);
         int saveEverySteps = CalculateSaveEverySteps(sanitized);
-        int sampleEvery = Math.Max(20, Math.Min(200, totalSteps / 5));
 
                         var validPrompts = sanitized.SamplePrompts
                             .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -82,7 +81,8 @@ public sealed class AiToolkitConfigBuilder {
 
                         var sampleDict = new Dictionary<string, object> {
                             ["sampler"] = "euler",
-                            ["sample_every"] = 200,
+                            ["sample_every"] = saveEverySteps,
+                            ["skip_first_sample"] = false,
                             ["width"] = archInfo.DefaultResolution,
                             ["height"] = archInfo.DefaultResolution,
                             ["neg"] = sanitized.NegativePrompt ?? string.Empty,
