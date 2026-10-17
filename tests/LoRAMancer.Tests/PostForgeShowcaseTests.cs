@@ -97,20 +97,20 @@ public sealed class PostForgeShowcaseTests {
     }
 
     [Fact]
-    public async Task ExtractAsync_ExtractsModusFlowMultiClipAndTextEditorPrompts() {
+    public async Task ExtractAsync_ExtractsZombiehausMultiClipAndTextEditorPrompts() {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), $"test_modusflow_{Guid.NewGuid():N}.png");
+        string tempFile = Path.Combine(Path.GetTempPath(), $"test_zombiehaus_{Guid.NewGuid():N}.png");
         string companionJson = Path.ChangeExtension(tempFile, ".json");
 
         try {
             await File.WriteAllBytesAsync(tempFile, new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
 
-            // ComfyUI workflow JSON featuring ModusFlow custom nodes
+            // ComfyUI workflow JSON featuring Zombiehaus custom nodes
             string workflowJson = """
             {
                 "prompt": {
                     "10": {
-                        "class_type": "ModusFlowMultiCLIPTextEncode",
+                        "class_type": "ZombiehausMultiCLIPTextEncode",
                         "inputs": {
                             "enable_clip1": true,
                             "text_clip1": "high fantasy ethereal landscape, aurora borealis",
@@ -121,20 +121,20 @@ public sealed class PostForgeShowcaseTests {
                         }
                     },
                     "11": {
-                        "class_type": "ModusFlowTextEditor",
+                        "class_type": "ZombiehausTextEditor",
                         "inputs": {
                             "positive": "8k resolution, crisp intricate details",
                             "negative": "blurry, oversaturated, watermark, bad hands"
                         }
                     },
                     "12": {
-                        "class_type": "ModusFlowFluxLoader",
+                        "class_type": "ZombiehausFluxLoader",
                         "inputs": {
                             "model_name": "flux1-schnell.safetensors"
                         }
                     },
                     "13": {
-                        "class_type": "ModusFlowPowerLoraLoader",
+                        "class_type": "ZombiehausPowerLoraLoader",
                         "inputs": {
                             "lora_1_name": "fantasy_world_v1.safetensors",
                             "lora_1_strength": 0.85
@@ -150,7 +150,7 @@ public sealed class PostForgeShowcaseTests {
 
             // Assert
             Assert.True(item.IsAiGenerated);
-            Assert.Equal("ComfyUI (ModusFlow)", item.AiGenerator);
+            Assert.Equal("ComfyUI (Zombiehaus)", item.AiGenerator);
             Assert.Contains("high fantasy ethereal landscape, aurora borealis", item.Prompt);
             Assert.Contains("detailed oil painting style by studio zombiehaus", item.Prompt);
             Assert.DoesNotContain("disabled prompt fragment", item.Prompt);

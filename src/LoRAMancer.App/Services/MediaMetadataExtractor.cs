@@ -237,18 +237,18 @@ public static class MediaMetadataExtractor {
                     continue;
                 }
 
-                bool isModusFlow = classType.Contains("ModusFlow", StringComparison.OrdinalIgnoreCase) ||
+                bool isZombiehaus = classType.Contains("Zombiehaus", StringComparison.OrdinalIgnoreCase) ||
                                    classType.StartsWith("OllamaPromptRefiner", StringComparison.OrdinalIgnoreCase) ||
                                    classType.StartsWith("OllamaTextRefiner", StringComparison.OrdinalIgnoreCase) ||
                                    classType.StartsWith("AllInOneDetailer", StringComparison.OrdinalIgnoreCase);
 
-                if (isModusFlow) {
+                if (isZombiehaus) {
                     item.IsAiGenerated = true;
-                    item.AiGenerator = "ComfyUI (ModusFlow)";
+                    item.AiGenerator = "ComfyUI (Zombiehaus)";
                 }
 
-                // 1. ModusFlow Multi-CLIP Text Encode (supports up to 4 CLIP inputs)
-                if (classType.Equals("ModusFlowMultiCLIPTextEncode", StringComparison.OrdinalIgnoreCase)) {
+                // 1. Zombiehaus Multi-CLIP Text Encode (supports up to 4 CLIP inputs)
+                if (classType.Equals("ZombiehausMultiCLIPTextEncode", StringComparison.OrdinalIgnoreCase)) {
                     List<string> clipTexts = new();
                     for (int c = 1; c <= 4; c++) {
                         string key = $"text_clip{c}";
@@ -273,18 +273,18 @@ public static class MediaMetadataExtractor {
                         }
                     }
                 }
-                // 2. ModusFlow Text Editor
-                else if (classType.Equals("ModusFlowTextEditor", StringComparison.OrdinalIgnoreCase)) {
-                    ParseModusFlowTextEditor(item, inputs, doc.RootElement);
+                // 2. Zombiehaus Text Editor
+                else if (classType.Equals("ZombiehausTextEditor", StringComparison.OrdinalIgnoreCase)) {
+                    ParseZombiehausTextEditor(item, inputs, doc.RootElement);
                 }
-                // 2b. ModusFlow Prompt Mixer
-                else if (classType.Equals("ModusFlowPromptMixer", StringComparison.OrdinalIgnoreCase)) {
-                    string mixed = EvaluateModusFlowPromptMixer(inputs, doc.RootElement);
+                // 2b. Zombiehaus Prompt Mixer
+                else if (classType.Equals("ZombiehausPromptMixer", StringComparison.OrdinalIgnoreCase)) {
+                    string mixed = EvaluateZombiehausPromptMixer(inputs, doc.RootElement);
                     if (!string.IsNullOrWhiteSpace(mixed) && string.IsNullOrWhiteSpace(item.Prompt)) {
                         item.Prompt = mixed;
                     }
                 }
-                // 3. ModusFlow Ollama Prompt Refiner
+                // 3. Zombiehaus Ollama Prompt Refiner
                 else if (classType.Contains("PromptRefiner", StringComparison.OrdinalIgnoreCase) || classType.Contains("OllamaTextRefiner", StringComparison.OrdinalIgnoreCase)) {
                     if (inputs.TryGetProperty("text_input", out JsonElement inElem) && inElem.ValueKind == JsonValueKind.String) {
                         string txt = inElem.GetString()?.Trim() ?? string.Empty;
@@ -299,8 +299,8 @@ public static class MediaMetadataExtractor {
                         }
                     }
                 }
-                // 4. ModusFlow Show Text
-                else if (classType.Equals("ModusFlowShowText", StringComparison.OrdinalIgnoreCase)) {
+                // 4. Zombiehaus Show Text
+                else if (classType.Equals("ZombiehausShowText", StringComparison.OrdinalIgnoreCase)) {
                     if (inputs.TryGetProperty("text", out JsonElement showElem) && showElem.ValueKind == JsonValueKind.String) {
                         string st = showElem.GetString()?.Trim() ?? string.Empty;
                         if (!string.IsNullOrWhiteSpace(st) && string.IsNullOrWhiteSpace(item.Prompt)) {
@@ -337,7 +337,7 @@ public static class MediaMetadataExtractor {
                     }
                 }
 
-                // KSampler parameters (Standard and ModusFlow KSampler / BatchKSampler)
+                // KSampler parameters (Standard and Zombiehaus KSampler / BatchKSampler)
                 if (classType.Contains("KSampler", StringComparison.OrdinalIgnoreCase)) {
                     if (inputs.TryGetProperty("seed", out JsonElement seedProp) && seedProp.TryGetInt64(out long s)) {
                         item.Seed = s;
@@ -356,7 +356,7 @@ public static class MediaMetadataExtractor {
                     }
                 }
 
-                // Checkpoint loaders (Standard, ModusFlow ModelLoader / FluxLoader)
+                // Checkpoint loaders (Standard, Zombiehaus ModelLoader / FluxLoader)
                 if (classType.Contains("CheckpointLoader", StringComparison.OrdinalIgnoreCase) || classType.Contains("ModelLoader", StringComparison.OrdinalIgnoreCase) || classType.Contains("FluxLoader", StringComparison.OrdinalIgnoreCase)) {
                     if (inputs.TryGetProperty("ckpt_name", out JsonElement ckptProp)) {
                         string ckpt = ckptProp.GetString() ?? string.Empty;
@@ -371,7 +371,7 @@ public static class MediaMetadataExtractor {
                     }
                 }
 
-                // LoRA Loaders (Standard, ModusFlow PowerLoraLoader / LoraLoader)
+                // LoRA Loaders (Standard, Zombiehaus PowerLoraLoader / LoraLoader)
                 if (classType.Contains("Lora", StringComparison.OrdinalIgnoreCase)) {
                     foreach (var prop in inputs.EnumerateObject()) {
                         if (prop.Name.Contains("lora", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String) {
@@ -388,7 +388,7 @@ public static class MediaMetadataExtractor {
         }
     }
 
-    private static void ParseModusFlowTextEditor(ShowcaseMediaItem item, JsonElement inputs, JsonElement rootDoc) {
+    private static void ParseZombiehausTextEditor(ShowcaseMediaItem item, JsonElement inputs, JsonElement rootDoc) {
         string? rawPos = ResolveInputString(inputs, "positive_input", rootDoc);
         if (string.IsNullOrWhiteSpace(rawPos)) {
             rawPos = ResolveInputString(inputs, "positive", rootDoc) ?? string.Empty;
@@ -429,7 +429,7 @@ public static class MediaMetadataExtractor {
             }
         }
 
-        string cleanPos = ProcessModusFlowText(rawPos, weightMode, seed, curator1, curator2, null, posEmbedding, item.UsedLoras);
+        string cleanPos = ProcessZombiehausText(rawPos, weightMode, seed, curator1, curator2, null, posEmbedding, item.UsedLoras);
         if (!string.IsNullOrWhiteSpace(cleanPos)) {
             if (string.IsNullOrWhiteSpace(item.Prompt)) {
                 item.Prompt = cleanPos;
@@ -441,7 +441,7 @@ public static class MediaMetadataExtractor {
         if (muteNegative) {
             item.NegativePrompt = string.Empty;
         } else {
-            string cleanNeg = ProcessModusFlowText(rawNeg, weightMode, seed, null, null, curatorNeg, negEmbedding, item.UsedLoras);
+            string cleanNeg = ProcessZombiehausText(rawNeg, weightMode, seed, null, null, curatorNeg, negEmbedding, item.UsedLoras);
             if (!string.IsNullOrWhiteSpace(cleanNeg)) {
                 if (string.IsNullOrWhiteSpace(item.NegativePrompt)) {
                     item.NegativePrompt = cleanNeg;
@@ -452,7 +452,7 @@ public static class MediaMetadataExtractor {
         }
     }
 
-    private static string ProcessModusFlowText(
+    private static string ProcessZombiehausText(
         string text,
         string weightMode,
         long seed,
@@ -505,7 +505,7 @@ public static class MediaMetadataExtractor {
             }
         }
 
-        text = FilterModusFlowComments(text);
+        text = FilterZombiehausComments(text);
         text = ResolveDynamicPrompts(text, seed);
         text = TranslateWeights(text, weightMode);
 
@@ -522,7 +522,7 @@ public static class MediaMetadataExtractor {
         return text.Trim();
     }
 
-    private static string FilterModusFlowComments(string text) {
+    private static string FilterZombiehausComments(string text) {
         if (string.IsNullOrWhiteSpace(text)) {
             return string.Empty;
         }
@@ -758,13 +758,13 @@ public static class MediaMetadataExtractor {
             return null;
         }
 
-        if (classType.Equals("ModusFlowPromptMixer", StringComparison.OrdinalIgnoreCase)) {
-            return EvaluateModusFlowPromptMixer(inputs, rootDoc);
+        if (classType.Equals("ZombiehausPromptMixer", StringComparison.OrdinalIgnoreCase)) {
+            return EvaluateZombiehausPromptMixer(inputs, rootDoc);
         }
-        if (classType.Equals("ModusFlowListCurator", StringComparison.OrdinalIgnoreCase)) {
-            return EvaluateModusFlowListCurator(inputs);
+        if (classType.Equals("ZombiehausListCurator", StringComparison.OrdinalIgnoreCase)) {
+            return EvaluateZombiehausListCurator(inputs);
         }
-        if (classType.Equals("ModusFlowTextEditor", StringComparison.OrdinalIgnoreCase)) {
+        if (classType.Equals("ZombiehausTextEditor", StringComparison.OrdinalIgnoreCase)) {
             string prop = slot == 1 ? "negative" : "positive";
             string inputProp = slot == 1 ? "negative_input" : "positive_input";
             string? val = ResolveInputString(inputs, inputProp, rootDoc);
@@ -788,7 +788,7 @@ public static class MediaMetadataExtractor {
         return null;
     }
 
-    private static string EvaluateModusFlowPromptMixer(JsonElement inputs, JsonElement rootDoc) {
+    private static string EvaluateZombiehausPromptMixer(JsonElement inputs, JsonElement rootDoc) {
         string delimiter = ", ";
         if (inputs.TryGetProperty("delimiter", out JsonElement dElem) && dElem.ValueKind == JsonValueKind.String) {
             delimiter = dElem.GetString() ?? ", ";
@@ -850,7 +850,7 @@ public static class MediaMetadataExtractor {
         return joined;
     }
 
-    private static string EvaluateModusFlowListCurator(JsonElement inputs) {
+    private static string EvaluateZombiehausListCurator(JsonElement inputs) {
         string custom = string.Empty;
         if (inputs.TryGetProperty("custom_entries", out JsonElement cElem) && cElem.ValueKind == JsonValueKind.String) {
             custom = cElem.GetString()?.Trim() ?? string.Empty;
@@ -915,12 +915,12 @@ public static class MediaMetadataExtractor {
                 }
                 string nodeType = typeElem.GetString() ?? string.Empty;
 
-                if (nodeType.Contains("ModusFlow", StringComparison.OrdinalIgnoreCase)) {
+                if (nodeType.Contains("Zombiehaus", StringComparison.OrdinalIgnoreCase)) {
                     item.IsAiGenerated = true;
-                    item.AiGenerator = "ComfyUI (ModusFlow)";
+                    item.AiGenerator = "ComfyUI (Zombiehaus)";
                 }
 
-                if (nodeType.Equals("ModusFlowTextEditor", StringComparison.OrdinalIgnoreCase)) {
+                if (nodeType.Equals("ZombiehausTextEditor", StringComparison.OrdinalIgnoreCase)) {
                     if (node.TryGetProperty("widgets_values", out JsonElement wvElem) && wvElem.ValueKind == JsonValueKind.Array) {
                         string pos = wvElem.GetArrayLength() > 0 && wvElem[0].ValueKind == JsonValueKind.String ? wvElem[0].GetString() ?? string.Empty : string.Empty;
                         string neg = wvElem.GetArrayLength() > 1 && wvElem[1].ValueKind == JsonValueKind.String ? wvElem[1].GetString() ?? string.Empty : string.Empty;
@@ -934,7 +934,7 @@ public static class MediaMetadataExtractor {
                             item.Seed = seed;
                         }
 
-                        string cleanPos = ProcessModusFlowText(pos, weightMode, seed, null, null, null, null, item.UsedLoras);
+                        string cleanPos = ProcessZombiehausText(pos, weightMode, seed, null, null, null, null, item.UsedLoras);
                         if (!string.IsNullOrWhiteSpace(cleanPos)) {
                             if (string.IsNullOrWhiteSpace(item.Prompt)) {
                                 item.Prompt = cleanPos;
@@ -943,7 +943,7 @@ public static class MediaMetadataExtractor {
                             }
                         }
 
-                        string cleanNeg = ProcessModusFlowText(neg, weightMode, seed, null, null, null, null, item.UsedLoras);
+                        string cleanNeg = ProcessZombiehausText(neg, weightMode, seed, null, null, null, null, item.UsedLoras);
                         if (!string.IsNullOrWhiteSpace(cleanNeg)) {
                             if (string.IsNullOrWhiteSpace(item.NegativePrompt)) {
                                 item.NegativePrompt = cleanNeg;
@@ -960,7 +960,7 @@ public static class MediaMetadataExtractor {
     }
 
     private static async Task ExtractExifAndTextMetadataAsync(ShowcaseMediaItem item, string filePath, CancellationToken cancellationToken) {
-        // Sample first 128KB to search for AI parameters, ModusFlow, or ComfyUI strings embedded in JPEG/WebP
+        // Sample first 128KB to search for AI parameters, Zombiehaus, or ComfyUI strings embedded in JPEG/WebP
         using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         int readSize = (int)Math.Min(fs.Length, 131072);
         byte[] buffer = new byte[readSize];
@@ -971,13 +971,13 @@ public static class MediaMetadataExtractor {
 
         string rawString = Encoding.Latin1.GetString(buffer, 0, read);
 
-        // Check for embedded ComfyUI / ModusFlow workflow JSON in EXIF ImageDescription (JPEG) or XMP (WebP)
-        if (rawString.Contains("ModusFlow", StringComparison.OrdinalIgnoreCase)) {
+        // Check for embedded ComfyUI / Zombiehaus workflow JSON in EXIF ImageDescription (JPEG) or XMP (WebP)
+        if (rawString.Contains("Zombiehaus", StringComparison.OrdinalIgnoreCase)) {
             item.IsAiGenerated = true;
-            item.AiGenerator = "ComfyUI (ModusFlow)";
+            item.AiGenerator = "ComfyUI (Zombiehaus)";
         }
 
-        if (rawString.Contains("\"prompt\":") || rawString.Contains("\"workflow\":") || rawString.Contains("CLIPTextEncode") || rawString.Contains("ModusFlow")) {
+        if (rawString.Contains("\"prompt\":") || rawString.Contains("\"workflow\":") || rawString.Contains("CLIPTextEncode") || rawString.Contains("Zombiehaus")) {
             item.IsAiGenerated = true;
             if (string.IsNullOrWhiteSpace(item.AiGenerator)) {
                 item.AiGenerator = "ComfyUI";
@@ -1052,8 +1052,8 @@ public static class MediaMetadataExtractor {
                     ParseComfyUiPromptJson(item, json);
                 }
 
-                if (json.Contains("ModusFlow", StringComparison.OrdinalIgnoreCase)) {
-                    item.AiGenerator = "ComfyUI (ModusFlow)";
+                if (json.Contains("Zombiehaus", StringComparison.OrdinalIgnoreCase)) {
+                    item.AiGenerator = "ComfyUI (Zombiehaus)";
                 } else if (string.IsNullOrWhiteSpace(item.AiGenerator)) {
                     item.AiGenerator = "AI-Toolkit / Diffusers";
                 }
