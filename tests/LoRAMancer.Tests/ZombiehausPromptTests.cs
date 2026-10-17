@@ -5,12 +5,12 @@ using LoRAMancer.App.Services;
 
 namespace LoRAMancer.Tests;
 
-public class ModusFlowPromptTests : IDisposable {
+public class ZombiehausPromptTests : IDisposable {
     private readonly string _testTempDir;
     private readonly SettingsService _settingsService;
 
-    public ModusFlowPromptTests() {
-        _testTempDir = Path.Combine(Path.GetTempPath(), "LoRAMancer_ModusFlowTests_" + Guid.NewGuid().ToString("N"));
+    public ZombiehausPromptTests() {
+        _testTempDir = Path.Combine(Path.GetTempPath(), "LoRAMancer_ZombiehausTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testTempDir);
 
         _settingsService = new SettingsService();
@@ -28,8 +28,8 @@ public class ModusFlowPromptTests : IDisposable {
     }
 
     [Fact]
-    public async Task GetAllPromptsAsync_EmptyDirectory_SeedsDefaultModusFlowPrompts() {
-        var service = new ModusFlowPromptService(_settingsService);
+    public async Task GetAllPromptsAsync_EmptyDirectory_SeedsDefaultZombiehausPrompts() {
+        var service = new ZombiehausPromptService(_settingsService);
 
         var prompts = await service.GetAllPromptsAsync();
 
@@ -45,8 +45,8 @@ public class ModusFlowPromptTests : IDisposable {
     }
 
     [Fact]
-    public async Task SavePromptAsync_CreatesExactModusFlowJsonSchema() {
-        var service = new ModusFlowPromptService(_settingsService);
+    public async Task SavePromptAsync_CreatesExactZombiehausJsonSchema() {
+        var service = new ZombiehausPromptService(_settingsService);
 
         var saved = await service.SavePromptAsync(
             name: "Cyberpunk Samurai",
@@ -60,7 +60,7 @@ public class ModusFlowPromptTests : IDisposable {
         Assert.Equal("Cyberpunk", saved.Category);
         Assert.True(File.Exists(saved.FilePath));
 
-        // Read raw JSON from disk and verify schema matches ComfyUI-ModusFlow
+        // Read raw JSON from disk and verify schema matches ComfyUI-Zombiehaus
         string rawJson = await File.ReadAllTextAsync(saved.FilePath);
         using var doc = JsonDocument.Parse(rawJson);
         var root = doc.RootElement;
@@ -83,7 +83,7 @@ public class ModusFlowPromptTests : IDisposable {
 
     [Fact]
     public async Task DeletePromptAsync_RemovesFileAndUpdatesList() {
-        var service = new ModusFlowPromptService(_settingsService);
+        var service = new ZombiehausPromptService(_settingsService);
 
         var saved = await service.SavePromptAsync("To Be Deleted", "prompt text", "negative text");
         Assert.True(File.Exists(saved.FilePath));
@@ -95,7 +95,7 @@ public class ModusFlowPromptTests : IDisposable {
 
     [Fact]
     public async Task GetAllPromptsAsync_AutoMigratesLooseFilesAndScansSubdirectories() {
-        var service = new ModusFlowPromptService(_settingsService);
+        var service = new ZombiehausPromptService(_settingsService);
 
         // Create loose files in root directory
         string loosePromptPath = Path.Combine(_testTempDir, "Legacy Loose Prompt.json");

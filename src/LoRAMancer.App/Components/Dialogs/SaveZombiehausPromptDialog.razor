@@ -1,6 +1,6 @@
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
-@inject ModusFlowPromptService PromptService
+@inject ZombiehausPromptService PromptService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -10,7 +10,7 @@
             <div>
                 <MudText Typo="Typo.h6" Style="font-weight: 700;">Save Prompt</MudText>
                 <MudText Typo="Typo.caption" Color="Color.Secondary">
-                    100% compatible with ModusFlow JSON format
+                    100% compatible with Zombiehaus JSON format
                 </MudText>
             </div>
         </div>
@@ -91,7 +91,7 @@
         _isSaving = true;
         try {
             var saved = await PromptService.SavePromptAsync(_name, PositivePrompt, NegativePrompt, _category);
-            Snackbar.Add($"Saved ModusFlow prompt '{saved.Name}.json'", Severity.Success);
+            Snackbar.Add($"Saved Zombiehaus prompt '{saved.Name}.json'", Severity.Success);
             MudDialog?.Close(DialogResult.Ok(saved));
         } catch (Exception ex) {
             Snackbar.Add($"Failed to save prompt: {ex.Message}", Severity.Error);

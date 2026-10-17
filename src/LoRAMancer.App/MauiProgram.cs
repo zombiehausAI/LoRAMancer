@@ -84,7 +84,7 @@ public static class MauiProgram {
         builder.Services.AddSingleton<SystemTrayService>();
         builder.Services.AddSingleton<PostForgeShowcaseService>();
         builder.Services.AddSingleton<ShowcaseThumbnailService>();
-        builder.Services.AddSingleton<ModusFlowPromptService>();
+        builder.Services.AddSingleton<ZombiehausPromptService>();
         builder.Services.AddSingleton<TrainingRecipeService>();
         builder.Services.AddSingleton<ImageHarvesterService>();
 

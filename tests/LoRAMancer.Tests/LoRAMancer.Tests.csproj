@@ -63,7 +63,7 @@
         <Compile Include="..\..\src\LoRAMancer.App\Services\MediaMetadataExtractor.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\PostForgeShowcaseService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\ShowcaseThumbnailService.cs" Link="Services\%(Filename)%(Extension)" />
-        <Compile Include="..\..\src\LoRAMancer.App\Services\ModusFlowPromptService.cs" Link="Services\%(Filename)%(Extension)" />
+        <Compile Include="..\..\src\LoRAMancer.App\Services\ZombiehausPromptService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\TrainingRecipeService.cs" Link="Services\%(Filename)%(Extension)" />
         <Compile Include="..\..\src\LoRAMancer.App\Services\ImageHarvesterService.cs" Link="Services\%(Filename)%(Extension)" />
     </ItemGroup>

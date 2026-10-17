@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 namespace LoRAMancer.App.Models;
 
 /// <summary>
-/// Represents a saved prompt pair fully compatible with ComfyUI-ModusFlow JSON format.
+/// Represents a saved prompt pair fully compatible with ComfyUI-Zombiehaus JSON format.
 /// </summary>
-public sealed class ModusFlowPrompt {
+public sealed class ZombiehausPrompt {
     [JsonPropertyName("category")]
     public string Category { get; set; } = string.Empty;
 

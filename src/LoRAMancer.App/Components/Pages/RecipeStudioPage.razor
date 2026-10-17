@@ -17,7 +17,7 @@
 @inject ISnackbar Snackbar
 @inject ThemeService ThemeManager
 @inject TrainingRecipeService RecipeService
-@inject ModusFlowPromptService PromptService
+@inject ZombiehausPromptService PromptService
 @inject StudioSessionService StudioSession
 @inject TrainingRunnerService TrainingRunner
 @inject LoraLibraryService LibraryService
@@ -486,16 +486,16 @@
                                   Margin="Margin.Dense" 
                                   HelperText="Optional unique token prepended during inference" />
 
-                    <!-- ModusFlow Prompt Preset Integration -->
+                    <!-- Zombiehaus Prompt Preset Integration -->
                     <MudSelect T="string" 
-                               Label="@($"Load ModusFlow Preset into Active Sample ({_activePromptTab + 1})")" 
+                               Label="@($"Load Zombiehaus Preset into Active Sample ({_activePromptTab + 1})")" 
                                Variant="Variant.Outlined" 
                                Margin="Margin.Dense" 
                                ShrinkLabel="true"
                                AnchorOrigin="Origin.BottomCenter"
                                ValueChanged="OnSamplePresetSelected">
-                        <MudSelectItem T="string" Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
-                        @foreach (var prompt in _savedModusPrompts) {
+                        <MudSelectItem T="string" Value="@("")">-- Freeform Prompt (Select to load Zombiehaus preset) --</MudSelectItem>
+                        @foreach (var prompt in _savedZombiehausPrompts) {
                             <MudSelectItem T="string" Value="@prompt.Name">
                                 @prompt.Name (@prompt.Category)
                             </MudSelectItem>
@@ -761,7 +761,7 @@
     // Presets & Inspection
     private string _selectedRecipeId = string.Empty;
     private List<TrainingRecipe> _savedRecipes = new();
-    private List<ModusFlowPrompt> _savedModusPrompts = new();
+    private List<ZombiehausPrompt> _savedZombiehausPrompts = new();
     private LoraMetadata? _donorLora;
     private int _datasetImageCount = 0;
     private int _datasetCaptionCount = 0;
@@ -783,7 +783,7 @@
         StudioSession.SetStage(StudioStage.Recipe);
 
         _savedRecipes = await RecipeService.GetAllRecipesAsync();
-        _savedModusPrompts = (await PromptService.GetAllPromptsAsync()).ToList();
+        _savedZombiehausPrompts = (await PromptService.GetAllPromptsAsync()).ToList();
 
         // Restore from session state if available
         if (!string.IsNullOrWhiteSpace(StudioSession.DatasetFolder) && string.IsNullOrWhiteSpace(_datasetDirectory)) {
@@ -1127,7 +1127,7 @@
 
     private void OnSamplePresetSelected(string name) {
         if (string.IsNullOrWhiteSpace(name)) return;
-        var p = _savedModusPrompts.FirstOrDefault(x => x.Name == name);
+        var p = _savedZombiehausPrompts.FirstOrDefault(x => x.Name == name);
         if (p != null) {
             if (_activePromptTab == 1) {
                 _samplePrompt2 = p.Positive;

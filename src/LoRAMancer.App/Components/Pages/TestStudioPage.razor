@@ -7,7 +7,7 @@
 @inject StudioSessionService StudioSession
 @inject ComfyUiService ComfyUi
 @inject NativeFileDialogService FileDialogService
-@inject ModusFlowPromptService PromptService
+@inject ZombiehausPromptService PromptService
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
@@ -89,9 +89,9 @@
                 </div>
             </div>
             <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
-                       Label="Load ModusFlow Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                       Label="Load Zombiehaus Preset" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
                        ShrinkLabel="true" Class="mb-3" Disabled="_isRendering">
-                <MudSelectItem Value="@("")">-- Freeform Prompt (Select to load ModusFlow preset) --</MudSelectItem>
+                <MudSelectItem Value="@("")">-- Freeform Prompt (Select to load Zombiehaus preset) --</MudSelectItem>
                 @foreach (var p in _savedPrompts) {
                     <MudSelectItem Value="@p.Name">
                         @(!string.IsNullOrWhiteSpace(p.Category) ? $"[{p.Category}] " : "")@p.Name
@@ -354,14 +354,14 @@
         PromptService.OnPromptsUpdated -= OnPromptsUpdatedHandler;
     }
 
-    private IReadOnlyList<ModusFlowPrompt> _savedPrompts = new List<ModusFlowPrompt>();
+    private IReadOnlyList<ZombiehausPrompt> _savedPrompts = new List<ZombiehausPrompt>();
     private string _selectedSavedPromptName = string.Empty;
 
     private async Task LoadSavedPromptsAsync() {
         try {
             _savedPrompts = await PromptService.GetAllPromptsAsync();
         } catch {
-            _savedPrompts = new List<ModusFlowPrompt>();
+            _savedPrompts = new List<ZombiehausPrompt>();
         }
     }
 
@@ -384,15 +384,15 @@
     }
 
     private async Task OpenSavePromptDialogAsync() {
-        var parameters = new DialogParameters<SaveModusFlowPromptDialog> {
+        var parameters = new DialogParameters<SaveZombiehausPromptDialog> {
             { x => x.PositivePrompt, _prompt },
             { x => x.NegativePrompt, _negativePrompt },
             { x => x.InitialName, !string.IsNullOrWhiteSpace(StudioSession.ProjectName) ? $"{StudioSession.ProjectName} Preset" : "Prompt Preset" }
         };
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<SaveModusFlowPromptDialog>("Save Prompt", parameters, options);
+        var dialog = await DialogService.ShowAsync<SaveZombiehausPromptDialog>("Save Prompt", parameters, options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt saved) {
+        if (result != null && !result.Canceled && result.Data is ZombiehausPrompt saved) {
             await LoadSavedPromptsAsync();
             _selectedSavedPromptName = saved.Name;
         }
@@ -400,9 +400,9 @@
 
     private async Task OpenPromptManagerDialogAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<ModusFlowPromptManagerDialog>("Saved Prompts", options);
+        var dialog = await DialogService.ShowAsync<ZombiehausPromptManagerDialog>("Saved Prompts", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt selected) {
+        if (result != null && !result.Canceled && result.Data is ZombiehausPrompt selected) {
             _prompt = selected.Positive;
             _negativePrompt = selected.Negative;
             _selectedSavedPromptName = selected.Name;

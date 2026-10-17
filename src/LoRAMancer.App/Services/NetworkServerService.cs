@@ -195,7 +195,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
     private readonly LoraDiffService? _diffService;
     private readonly LoraBenchmarkService? _benchmarkService;
     private readonly ImageHarvesterService? _harvesterService;
-    private readonly ModusFlowPromptService? _promptService;
+    private readonly ZombiehausPromptService? _promptService;
     private readonly ConcurrentBag<HttpResponse> _sseClients = new();
 
     private WebApplication? _webApp;
@@ -228,7 +228,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
         LoraDiffService? diffService = null,
         LoraBenchmarkService? benchmarkService = null,
         ImageHarvesterService? harvesterService = null,
-        ModusFlowPromptService? promptService = null
+        ZombiehausPromptService? promptService = null
     ) {
         _settingsService = settingsService;
         _trainingRunner = trainingRunner;
@@ -1395,7 +1395,7 @@ public sealed class NetworkServerService : IAsyncDisposable {
             return Results.Json(new { success = true, id = id, configPath = configPath });
         });
 
-        // 27. Saved Prompts (ModusFlow JSON) Endpoints
+        // 27. Saved Prompts (Zombiehaus JSON) Endpoints
         app.MapGet("/api/v1/prompts", async (HttpContext context) => {
             if (!IsAuthorized(context, accessToken)) return Results.Unauthorized();
             if (_promptService == null) return Results.Json(Array.Empty<object>());
@@ -3545,11 +3545,11 @@ self.addEventListener('fetch', (e) => {
                         </div>
                         <div class="input-group" style="margin-bottom:10px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                <label style="margin:0; font-size:0.82rem; font-weight:700;">Preset / Saved Prompt (ModusFlow)</label>
+                                <label style="margin:0; font-size:0.82rem; font-weight:700;">Preset / Saved Prompt (Zombiehaus)</label>
                                 <button class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="saveCurrentComfyPromptPreset()">💾 Save Preset</button>
                             </div>
                             <select id="comfySavedPromptSelect" onchange="onSavedPromptSelected()">
-                                <option value="">-- Load Saved Prompt (ModusFlow JSON) --</option>
+                                <option value="">-- Load Saved Prompt (Zombiehaus JSON) --</option>
                             </select>
                         </div>
                         <div class="input-group">
@@ -6546,7 +6546,7 @@ self.addEventListener('fetch', (e) => {
             }
         }
 
-        // --- SAVED PROMPTS (MODUSFLOW JSON) LOGIC ---
+        // --- SAVED PROMPTS (ZOMBIEHAUS JSON) LOGIC ---
         let savedPromptsList = [];
 
         async function loadSavedPrompts() {
@@ -6557,7 +6557,7 @@ self.addEventListener('fetch', (e) => {
                 if (!res.ok) return;
                 savedPromptsList = await res.json();
 
-                sel.innerHTML = '<option value="">-- Load Saved Prompt (ModusFlow JSON) --</option>';
+                sel.innerHTML = '<option value="">-- Load Saved Prompt (Zombiehaus JSON) --</option>';
                 savedPromptsList.forEach((p, idx) => {
                     const opt = document.createElement('option');
                     opt.value = idx.toString();

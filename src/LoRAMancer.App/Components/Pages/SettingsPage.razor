@@ -718,7 +718,7 @@
                 <MudItem xs="12">
                     <MudText Typo="Typo.subtitle2" Class="mb-1">Saved Prompts Directory</MudText>
                     <div class="d-flex align-center gap-2">
-                        <MudTextField @bind-Value="_settings.SavedPromptsDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Defaults to ~/.loramancer/saved_prompts (compatible with ModusFlow)" FullWidth="true" HelperText="Directory where saved prompt JSON files are stored. Defaults to your user settings directory." />
+                        <MudTextField @bind-Value="_settings.SavedPromptsDirectory" ReadOnly="true" Variant="Variant.Outlined" Placeholder="Defaults to ~/.loramancer/saved_prompts (compatible with Zombiehaus)" FullWidth="true" HelperText="Directory where saved prompt JSON files are stored. Defaults to your user settings directory." />
                         <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="BrowseSavedPromptsFolderAsync">
                             Browse...
                         </MudButton>

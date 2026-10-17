@@ -8,7 +8,7 @@
 @inject ISnackbar Snackbar
 @inject ThemeService ThemeManager
 @inject TrainingRecipeService RecipeService
-@inject ModusFlowPromptService PromptService
+@inject ZombiehausPromptService PromptService
 
 <MudDialog Style="background: linear-gradient(180deg, #181825 0%, #11111b 100%); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6); max-width: 1020px; width: 100%; overflow: hidden;">
     <TitleContent>
@@ -498,7 +498,7 @@
                         <!-- Saved Prompt Selector Row -->
                         <div class="d-flex align-center gap-2 mb-3">
                             <MudSelect T="string" Value="_selectedSavedPromptName" ValueChanged="OnSavedPromptSelected"
-                                       Label="Load from Saved Prompts (ModusFlow Presets)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Label="Load from Saved Prompts (Zombiehaus Presets)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
                                        Class="flex-grow-1">
                                 <MudSelectItem Value="@("")">-- Select a saved prompt to populate samples --</MudSelectItem>
                                 @foreach (var p in _savedPrompts) {
@@ -599,7 +599,7 @@
     private string _newRecipeName = string.Empty;
     private string _newRecipeDesc = string.Empty;
 
-    private IReadOnlyList<ModusFlowPrompt> _savedPrompts = Array.Empty<ModusFlowPrompt>();
+    private IReadOnlyList<ZombiehausPrompt> _savedPrompts = Array.Empty<ZombiehausPrompt>();
     private string _selectedSavedPromptName = string.Empty;
 
     private DatasetHealthReport? _datasetReport;
@@ -794,9 +794,9 @@
 
     private async Task OpenPromptManagerForWizardAsync() {
         var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<ModusFlowPromptManagerDialog>("Saved Prompts", options);
+        var dialog = await DialogService.ShowAsync<ZombiehausPromptManagerDialog>("Saved Prompts", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ModusFlowPrompt selected) {
+        if (result != null && !result.Canceled && result.Data is ZombiehausPrompt selected) {
             ApplySavedPrompt(selected);
         }
         try {
@@ -804,7 +804,7 @@
         } catch { }
     }
 
-    private void ApplySavedPrompt(ModusFlowPrompt prompt) {
+    private void ApplySavedPrompt(ZombiehausPrompt prompt) {
         string trigger = !string.IsNullOrWhiteSpace(_triggerWord) ? _triggerWord : "{trigger}";
         string positive = prompt.Positive;
         if (!positive.Contains("{trigger}") && !string.IsNullOrWhiteSpace(_triggerWord) && !positive.Contains(_triggerWord, StringComparison.OrdinalIgnoreCase)) {

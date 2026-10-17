@@ -4,11 +4,11 @@ using LoRAMancer.App.Models;
 namespace LoRAMancer.App.Services;
 
 /// <summary>
-/// Service managing saved prompts with 100% ModusFlow JSON schema compatibility.
+/// Service managing saved prompts with 100% Zombiehaus JSON schema compatibility.
 /// Allows loading, saving, and categorizing prompt pairs (positive + negative)
-/// seamlessly between LoRAMancer and ComfyUI-ModusFlow.
+/// seamlessly between LoRAMancer and ComfyUI-Zombiehaus.
 /// </summary>
-public sealed class ModusFlowPromptService {
+public sealed class ZombiehausPromptService {
     private readonly SettingsService _settingsService;
     private static readonly JsonSerializerOptions JsonOptions = new() {
         WriteIndented = true,
@@ -17,7 +17,7 @@ public sealed class ModusFlowPromptService {
 
     public event Action? OnPromptsUpdated;
 
-    public ModusFlowPromptService(SettingsService settingsService) {
+    public ZombiehausPromptService(SettingsService settingsService) {
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
     }
 
@@ -50,7 +50,7 @@ public sealed class ModusFlowPromptService {
 
     /// <summary>
     /// Resolves the dedicated prompts subdirectory under saved_prompts (e.g. saved_prompts/prompts/).
-    /// Matches ComfyUI-ModusFlow's organized directory placement.
+    /// Matches ComfyUI-Zombiehaus's organized directory placement.
     /// </summary>
     public string ResolvePromptsSubdirectory() {
         string baseDir = ResolvePromptsDirectory();
@@ -60,7 +60,7 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Ensures ModusFlow subdirectory structure exists and auto-migrates any loose .json files
+    /// Ensures Zombiehaus subdirectory structure exists and auto-migrates any loose .json files
     /// from the root saved_prompts directory into prompts/ or songs/ subdirectories.
     /// </summary>
     public void EnsureDirectoryStructure() {
@@ -101,10 +101,10 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Loads all ModusFlow-compatible prompt JSON files across prompts/, root saved_prompts/, and songs/.
+    /// Loads all Zombiehaus-compatible prompt JSON files across prompts/, root saved_prompts/, and songs/.
     /// If completely empty, seeds default high-quality starter prompts.
     /// </summary>
-    public async Task<IReadOnlyList<ModusFlowPrompt>> GetAllPromptsAsync(CancellationToken cancellationToken = default) {
+    public async Task<IReadOnlyList<ZombiehausPrompt>> GetAllPromptsAsync(CancellationToken cancellationToken = default) {
         string baseDir = ResolvePromptsDirectory();
         EnsureDirectoryStructure();
 
@@ -119,7 +119,7 @@ public sealed class ModusFlowPromptService {
         }
 
         HashSet<string> seenFilenames = new(StringComparer.OrdinalIgnoreCase);
-        List<ModusFlowPrompt> list = new();
+        List<ZombiehausPrompt> list = new();
 
         foreach (string dir in scanDirs) {
             if (!Directory.Exists(dir)) {
@@ -140,7 +140,7 @@ public sealed class ModusFlowPromptService {
 
                     string category = root.TryGetProperty("category", out var catProp) ? catProp.GetString() ?? "" : "";
 
-                    // Support standard positive prompt with ModusFlow fallback for lyrics/tags/text
+                    // Support standard positive prompt with Zombiehaus fallback for lyrics/tags/text
                     string positive = root.TryGetProperty("positive", out var posProp) ? posProp.GetString() ?? "" : "";
                     if (string.IsNullOrWhiteSpace(positive)) {
                         if (root.TryGetProperty("lyrics", out var lyrProp) && root.TryGetProperty("tags", out var tagProp)) {
@@ -152,13 +152,13 @@ public sealed class ModusFlowPromptService {
                         }
                     }
 
-                    // Support standard negative prompt with ModusFlow fallback for negative_style
+                    // Support standard negative prompt with Zombiehaus fallback for negative_style
                     string negative = root.TryGetProperty("negative", out var negProp) ? negProp.GetString() ?? "" : "";
                     if (string.IsNullOrWhiteSpace(negative) && root.TryGetProperty("negative_style", out var nsProp)) {
                         negative = nsProp.GetString() ?? "";
                     }
 
-                    var prompt = new ModusFlowPrompt {
+                    var prompt = new ZombiehausPrompt {
                         Name = Path.GetFileNameWithoutExtension(file),
                         Category = category,
                         Positive = positive,
@@ -180,10 +180,10 @@ public sealed class ModusFlowPromptService {
     }
 
     /// <summary>
-    /// Saves a positive and negative prompt pair to a ModusFlow-compatible JSON file
+    /// Saves a positive and negative prompt pair to a Zombiehaus-compatible JSON file
     /// into the dedicated prompts/ subdirectory.
     /// </summary>
-    public async Task<ModusFlowPrompt> SavePromptAsync(
+    public async Task<ZombiehausPrompt> SavePromptAsync(
         string name,
         string positive,
         string negative,
@@ -204,7 +204,7 @@ public sealed class ModusFlowPromptService {
 
         string filePath = Path.Combine(promptsDir, safeName);
 
-        // ModusFlow 100% compatible schema (including "type": "prompt")
+        // Zombiehaus 100% compatible schema (including "type": "prompt")
         var payload = new Dictionary<string, object> {
             ["type"] = "prompt",
             ["category"] = category.Trim(),
@@ -224,7 +224,7 @@ public sealed class ModusFlowPromptService {
             } catch { }
         }
 
-        var prompt = new ModusFlowPrompt {
+        var prompt = new ZombiehausPrompt {
             Name = Path.GetFileNameWithoutExtension(safeName),
             Category = category.Trim(),
             Positive = positive ?? string.Empty,
@@ -329,4 +329,3 @@ public sealed class ModusFlowPromptService {
         }
     }
 }
-

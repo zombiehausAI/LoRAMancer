@@ -17,16 +17,16 @@ The showcase goes beyond standard static images to cover the full spectrum of ge
 ### 2. Automated AI Detection & Verification Badging
 The media engine automatically scans binary chunks and container metadata to identify AI-generated content:
 - **Automatic1111 / WebUI Forge**: Reads embedded `parameters` text chunks, extracting prompts, negative prompts, seed, steps, sampler, CFG scale, base model, and `<lora:name:strength>` tags.
-- **ComfyUI & ModusFlow**: Parses embedded `prompt` and `workflow` JSON node graphs. Specifically features dedicated support for **[ComfyUI-ModusFlow](https://github.com/zombiehausAI/ComfyUI-ModusFlow)**:
-  - `ModusFlowMultiCLIPTextEncode`: Extracts up to 4 per-CLIP text encodings based on active `enable_clip1..4` toggles.
-  - `ModusFlowTextEditor`: Extracts structured positive and negative prompts.
-  - `OllamaPromptRefinerNode` / `ModusFlowPromptRefiner`: Extracts refined prompts and negative prompts.
-  - `ModusFlowShowText`: Extracts dynamic prompt text streams.
-  - `ModusFlowAceStepAudio`: Extracts audio tags, lyrics, and prompts.
-  - `ModusFlowPowerLoraLoader`: Detects connected multi-LoRA stacks and strengths.
-  - `ModusFlowFluxLoader` / `ModusFlowModelLoader`: Extracts checkpoint and diffusion model references.
-  - **Embedded EXIF & Adobe XMP**: Reads `ImageDescription` EXIF tags in JPEG and `<dc:description>` XMP packets in WebP saved by `ModusFlowSaveImage`.
-  - Badges outputs explicitly as **ComfyUI (ModusFlow)**.
+- **ComfyUI & Zombiehaus**: Parses embedded `prompt` and `workflow` JSON node graphs. Specifically features dedicated support for **[ComfyUI-Zombiehaus](https://github.com/zombiehausAI/ComfyUI-Zombiehaus)**:
+  - `ZombiehausMultiCLIPTextEncode`: Extracts up to 4 per-CLIP text encodings based on active `enable_clip1..4` toggles.
+  - `ZombiehausTextEditor`: Extracts structured positive and negative prompts.
+  - `OllamaPromptRefinerNode` / `ZombiehausPromptRefiner`: Extracts refined prompts and negative prompts.
+  - `ZombiehausShowText`: Extracts dynamic prompt text streams.
+  - `ZombiehausAceStepAudio`: Extracts audio tags, lyrics, and prompts.
+  - `ZombiehausPowerLoraLoader`: Detects connected multi-LoRA stacks and strengths.
+  - `ZombiehausFluxLoader` / `ZombiehausModelLoader`: Extracts checkpoint and diffusion model references.
+  - **Embedded EXIF & Adobe XMP**: Reads `ImageDescription` EXIF tags in JPEG and `<dc:description>` XMP packets in WebP saved by `ZombiehausSaveImage`.
+  - Badges outputs explicitly as **ComfyUI (Zombiehaus)**.
 - **NovelAI**: Identifies proprietary generation software and prompt tags.
 - **Diffusers & AI-Toolkit**: Parses companion `.json` and `.txt` files containing epoch milestone prompts and seeds.
 - **Verification Badge**: Validated AI content is highlighted with a glowing **AI GENERATED** badge on card previews and in the exploded modal inspector.
@@ -39,7 +39,7 @@ Clicking any card in the gallery opens a large, responsive detail modal:
   - **Audio**: Interactive HTML5 audio player with waveform visualizer and duration metrics.
 - **1-Click Actions**:
   - **Assign as LoRA Preview**: Opens the interactive LoRA Preview Connector dialog:
-    - **Detected in Recipe**: Auto-detects LoRAs used in the generation recipe (via `<lora:...>`, `ModusFlowPowerLoraLoader`, or companion JSON) for instant 1-click preview selection.
+    - **Detected in Recipe**: Auto-detects LoRAs used in the generation recipe (via `<lora:...>`, `ZombiehausPowerLoraLoader`, or companion JSON) for instant 1-click preview selection.
     - **Library Browser**: Live search and filter across all installed LoRAs with multi-selection support.
     - **Companion File Sync**: Copies the image as `{lora_name}.preview.png` alongside the `.safetensors` model in the filesystem so ComfyUI, Forge, and A1111 instantly display the preview.
     - **Database Sync**: Updates `ThumbnailPath` in LoRAMancer's SQLite database and broadcasts updates across the UI.

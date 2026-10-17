@@ -1,7 +1,7 @@
 @using System.Diagnostics
 @using LoRAMancer.App.Models
 @using LoRAMancer.App.Services
-@inject ModusFlowPromptService PromptService
+@inject ZombiehausPromptService PromptService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -97,12 +97,12 @@
     private IMudDialogInstance? MudDialog { get; set; }
 
     private string _promptsDir = string.Empty;
-    private List<ModusFlowPrompt> _prompts = new();
+    private List<ZombiehausPrompt> _prompts = new();
     private List<string> _categories = new();
     private string _searchQuery = string.Empty;
     private string _selectedCategory = string.Empty;
 
-    private List<ModusFlowPrompt> _filteredPrompts => _prompts
+    private List<ZombiehausPrompt> _filteredPrompts => _prompts
         .Where(p => string.IsNullOrWhiteSpace(_selectedCategory) || string.Equals(p.Category, _selectedCategory, StringComparison.OrdinalIgnoreCase))
         .Where(p => string.IsNullOrWhiteSpace(_searchQuery) ||
                     p.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
@@ -122,11 +122,11 @@
         _categories = cats.ToList();
     }
 
-    private void SelectPrompt(ModusFlowPrompt prompt) {
+    private void SelectPrompt(ZombiehausPrompt prompt) {
         MudDialog?.Close(DialogResult.Ok(prompt));
     }
 
-    private async Task DeletePromptAsync(ModusFlowPrompt prompt) {
+    private async Task DeletePromptAsync(ZombiehausPrompt prompt) {
         bool deleted = await PromptService.DeletePromptAsync(prompt.FilePath);
         if (deleted) {
             Snackbar.Add($"Deleted '{prompt.Name}.json'", Severity.Info);
@@ -139,17 +139,15 @@
             string dir = PromptService.ResolvePromptsDirectory();
             if (Directory.Exists(dir)) {
                 Process.Start(new ProcessStartInfo {
-                    FileName = "explorer.exe",
-                    Arguments = $"\"{dir}\"",
-                    UseShellExecute = true
+                    FileName = dir,
+                    UseShellExecute = true,
+                    Verb = "open"
                 });
             }
         } catch (Exception ex) {
-            Snackbar.Add($"Failed to open directory: {ex.Message}", Severity.Warning);
+            Snackbar.Add($"Failed to open folder: {ex.Message}", Severity.Warning);
         }
     }
 
-    private void Close() {
-        MudDialog?.Cancel();
-    }
+    private void Close() => MudDialog?.Close();
 }
