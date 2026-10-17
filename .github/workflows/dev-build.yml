@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   build-and-publish-dev:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: windows-latest
 
     steps:
@@ -25,6 +26,50 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-increment Dev Version Counter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          $rawJson = Get-Content version.json -Raw | ConvertFrom-Json
+          $curVersion = $rawJson.version
+          if (-not $curVersion) { $curVersion = "0.1.0-dev.01" }
+
+          Write-Host "Current version from version.json: $curVersion"
+
+          if ($curVersion -match '^(.*?)-dev\.(\d+)$') {
+              $base = $Matches[1]
+              $num = [int]$Matches[2] + 1
+              $nextDevVersion = "{0}-dev.{1:D2}" -f $base, $num
+          } elseif ($curVersion -match '^(.*?)-dev') {
+              $base = $Matches[1]
+              $nextDevVersion = "$base-dev.01"
+          } elseif ($curVersion -match '^(\d+)\.(\d+)\.(\d+)') {
+              $nextDevVersion = "$curVersion-dev.01"
+          } else {
+              $nextDevVersion = "1.0.0-dev.01"
+          }
+
+          Write-Host "New dev version: $nextDevVersion"
+          "DEV_VERSION=$nextDevVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $versionContent = "{`n  `"version`": `"$nextDevVersion`"`n}"
+          Set-Content -Path "version.json" -Value $versionContent
+
+          git add version.json
+          $status = git status --porcelain
+          if ($status) {
+              git commit -m "chore(dev): auto-increment dev version to $nextDevVersion [skip ci]"
+              git push origin dev
+              Write-Host "Successfully committed and pushed $nextDevVersion to dev branch."
+          } else {
+              Write-Host "No version changes detected."
+          }
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -44,9 +89,8 @@ jobs:
       - name: Build, Test & Package Dev Release
         shell: pwsh
         run: |
-          $baseVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
-          if (-not $baseVersion) { $baseVersion = "0.1.0" }
-          $devVersion = if ($baseVersion -match '-(dev|alpha|beta|preview)') { $baseVersion } else { "$baseVersion-dev.$env:GITHUB_RUN_NUMBER" }
+          $devVersion = if ($env:DEV_VERSION) { $env:DEV_VERSION } else { (Get-Content version.json -Raw | ConvertFrom-Json).version }
+          if (-not $devVersion) { $devVersion = "0.1.0-dev.01" }
           Write-Host "Building LoRAMancer Dev Version: $devVersion"
           .\Build-And-Package.ps1 -Version $devVersion -Configuration Release
 
@@ -55,12 +99,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          $baseVersion = (Get-Content version.json -Raw | ConvertFrom-Json).version
-          if (-not $baseVersion) { $baseVersion = "0.1.0" }
-          $devVersion = if ($baseVersion -match '-(dev|alpha|beta|preview)') { $baseVersion } else { "$baseVersion-dev.$env:GITHUB_RUN_NUMBER" }
+          $devVersion = if ($env:DEV_VERSION) { $env:DEV_VERSION } else { (Get-Content version.json -Raw | ConvertFrom-Json).version }
+          if (-not $devVersion) { $devVersion = "0.1.0-dev.01" }
           $tag = "dev-preview"
           $title = "LoRAMancer Dev Preview ($devVersion)"
-          $notes = "Automated experimental build from the `dev` branch.`n`n- **Commit**: $env:GITHUB_SHA`n- **Build Run**: #$env:GITHUB_RUN_NUMBER"
+          $notes = "Automated experimental build from the `dev` branch.`n`n- **Version**: $devVersion`n- **Commit**: $env:GITHUB_SHA`n- **Build Run**: #$env:GITHUB_RUN_NUMBER"
 
           $files = @(Get-ChildItem -Path "artifacts" -File | Where-Object { $_.Extension -in '.exe', '.zip', '.sha256' } | Select-Object -ExpandProperty FullName)
 

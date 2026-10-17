@@ -56,7 +56,10 @@ public sealed class AiToolkitSetupService {
             ["HF_HOME"] = hfCacheDir,
             ["TORCH_HOME"] = torchCacheDir,
             ["PYTHONNOUSERSITE"] = "1",
-            ["PIP_NO_WARN_SCRIPT_LOCATION"] = "0"
+            ["PIP_NO_WARN_SCRIPT_LOCATION"] = "0",
+            ["GIT_TERMINAL_PROMPT"] = "0",
+            ["GIT_PAGER"] = "cat",
+            ["GIT_OPTIONAL_LOCKS"] = "0"
         };
 
         string hfToken = _settingsService.Current.HuggingFaceToken?.Trim() ?? string.Empty;
@@ -98,22 +101,29 @@ public sealed class AiToolkitSetupService {
             return "Not a Git repository";
         }
 
-        string commit = string.Empty;
-        int exit = await _processRunner.RunAsync(
-            "git.exe",
-            "log -1 --format=\"%h (%cd) - %s\" --date=short",
-            installDir,
-            GetIsolatedEnvironmentVariables(),
-            line => {
-                if (string.IsNullOrEmpty(commit)) {
-                    commit = line.Trim();
-                }
-            },
-            _ => { },
-            cancellationToken
-        );
+        try {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
 
-        return exit == 0 && !string.IsNullOrWhiteSpace(commit) ? commit : "Git repository detected";
+            string commit = string.Empty;
+            int exit = await _processRunner.RunAsync(
+                "git.exe",
+                "log -1 --format=\"%h (%cd) - %s\" --date=short",
+                installDir,
+                GetIsolatedEnvironmentVariables(),
+                line => {
+                    if (string.IsNullOrEmpty(commit)) {
+                        commit = line.Trim();
+                    }
+                },
+                _ => { },
+                cts.Token
+            );
+
+            return exit == 0 && !string.IsNullOrWhiteSpace(commit) ? commit : "Git repository detected";
+        } catch {
+            return "Git repository detected";
+        }
     }
 
     public async Task<string> GetCurrentBranchAsync(CancellationToken cancellationToken = default) {
@@ -122,22 +132,29 @@ public sealed class AiToolkitSetupService {
             return string.Empty;
         }
 
-        string branch = string.Empty;
-        int exit = await _processRunner.RunAsync(
-            "git.exe",
-            "branch --show-current",
-            installDir,
-            GetIsolatedEnvironmentVariables(),
-            line => {
-                if (string.IsNullOrEmpty(branch)) {
-                    branch = line.Trim();
-                }
-            },
-            _ => { },
-            cancellationToken
-        );
+        try {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
 
-        return exit == 0 && !string.IsNullOrWhiteSpace(branch) ? branch : "main";
+            string branch = string.Empty;
+            int exit = await _processRunner.RunAsync(
+                "git.exe",
+                "branch --show-current",
+                installDir,
+                GetIsolatedEnvironmentVariables(),
+                line => {
+                    if (string.IsNullOrEmpty(branch)) {
+                        branch = line.Trim();
+                    }
+                },
+                _ => { },
+                cts.Token
+            );
+
+            return exit == 0 && !string.IsNullOrWhiteSpace(branch) ? branch : "main";
+        } catch {
+            return "main";
+        }
     }
 
     public async Task<bool> IsGitInstalledAsync(CancellationToken cancellationToken = default) {
