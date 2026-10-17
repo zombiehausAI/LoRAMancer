@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
+  "version": "1.1.0",
   "releaseDate": "2026-10-17T00:00:00Z",
-  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.0.3/LoRAMancer-Setup-1.0.3.exe",
-  "changelog": "- Ollama vision LoRA auto-tagger dialog with multimodal models and prompt templates\n- AiToolkitConfigBuilder engine for SD1.5, SDXL, Flux, and Chroma training configs\n- Dataset Studio UI improvements with tag bucketing, caption surgery, and multi-provider harvesting\n- Settings page performance optimizations with lazy tabs and ROCm hardware sanitization\n- Automated CI/CD release workflow and dev version bump pipeline",
+  "downloadUrl": "https://github.com/zombiehausAI/LoRAMancer/releases/download/v1.1.0/LoRAMancer-Setup-1.1.0.exe",
+  "changelog": "- Rebranded ComfyUI-Modusflow ecosystem integration to ComfyUI-Zombiehaus\n- Updated Post-Forge Showcase metadata extractor to decode Zombiehaus custom node graphs and apply ComfyUI (Zombiehaus) verification badging\n- Full two-way saved prompt management and preset loading with Zombiehaus JSON schema compatibility\n- Updated documentation and repository links across the application",
   "mandatory": false
 }
